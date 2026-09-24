@@ -201,6 +201,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
       canAddCourse: true,
       onEmptySlotTap: _handleEmptySlotTap,
       onCourseTap: _handleCourseTap,
+      onDayHeaderTap: _handleDayHeaderTap,
     );
   }
 
@@ -429,6 +430,273 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
             });
       }
     }
+    unawaited(
+      widget.widgetService.syncSchedule(
+        schedule: next,
+        weekState: _weekState,
+      ),
+    );
+    unawaited(widget.notificationService.syncScheduleReminders());
+  }
+
+  Future<void> _handleDayHeaderTap(int weekday) async {
+    final schedule = _schedule;
+    final weekState = _weekState;
+    if (schedule == null || weekState == null) {
+      return;
+    }
+    final targetWeek = _displayedWeek;
+    final targetDate = weekState.anchorMonday.add(
+      Duration(days: (targetWeek - weekState.currentWeek) * 7 + weekday - 1),
+    );
+    final action = await showModalBottomSheet<_DayAction>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final colors = context.shuyoColors;
+        final bottomPadding = MediaQuery.of(context).viewPadding.bottom;
+        return SafeArea(
+          top: false,
+          bottom: false,
+          child: Container(
+            width: double.infinity,
+            padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + bottomPadding),
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(8)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '整日编辑',
+                        style: TextStyle(
+                          color: colors.textPrimary,
+                          fontSize: 16.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${targetDate.month}月${targetDate.day}日 · ${_weekdayName(weekday)}',
+                        style: ShuYoTextStyles.meta(color: colors.textMuted),
+                      ),
+                    ],
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.content_copy_outlined),
+                  title: const Text('从其他日期复制课程'),
+                  onTap: () =>
+                      Navigator.of(context).pop(_DayAction.copyFromDate),
+                ),
+                ListTile(
+                  leading:
+                      Icon(Icons.delete_sweep_outlined, color: colors.danger),
+                  title: Text(
+                    '清空这一天',
+                    style: TextStyle(color: colors.danger),
+                  ),
+                  onTap: () => Navigator.of(context).pop(_DayAction.clear),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (!mounted || action == null) {
+      return;
+    }
+    switch (action) {
+      case _DayAction.copyFromDate:
+        await _copyDayFromPicker(
+          schedule: schedule,
+          weekState: weekState,
+          targetWeek: targetWeek,
+          targetWeekday: weekday,
+          targetDate: targetDate,
+        );
+      case _DayAction.clear:
+        if (await _confirmClearDay(weekday) && mounted) {
+          await _clearDay(targetWeek, weekday);
+        }
+    }
+  }
+
+  Future<void> _copyDayFromPicker({
+    required AcademicSchedule schedule,
+    required ScheduleWeekState weekState,
+    required int targetWeek,
+    required int targetWeekday,
+    required DateTime targetDate,
+  }) async {
+    final firstWeekStart = weekState.firstWeekStart;
+    final lastDate = firstWeekStart.add(
+      Duration(days: schedule.maxWeek * 7 - 1),
+    );
+    final initialDate = targetDate.isBefore(firstWeekStart)
+        ? firstWeekStart
+        : (targetDate.isAfter(lastDate) ? lastDate : targetDate);
+    final picked = await showDialog<DateTime>(
+      context: context,
+      builder: (context) => _FirstWeekDatePickerDialog(
+        initialDate: initialDate,
+        title: '选择要复制的日期',
+        mondayOnly: false,
+        firstDate: firstWeekStart,
+        lastDate: lastDate,
+      ),
+    );
+    if (picked == null || !mounted) {
+      return;
+    }
+    final sourceWeek = picked.difference(firstWeekStart).inDays ~/ 7 + 1;
+    await _copyDay(
+      sourceWeek: sourceWeek,
+      sourceWeekday: picked.weekday,
+      targetWeek: targetWeek,
+      targetWeekday: targetWeekday,
+    );
+  }
+
+  Future<bool> _confirmClearDay(int weekday) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        final colors = context.shuyoColors;
+        return AlertDialog(
+          title: const Text('确认清空'),
+          content: Text('清空${_weekdayName(weekday)}这一天的全部课程？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: colors.danger,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('清空'),
+            ),
+          ],
+        );
+      },
+    );
+    return confirmed ?? false;
+  }
+
+  Future<void> _clearDay(int week, int weekday) async {
+    final schedule = _schedule;
+    if (schedule == null) {
+      return;
+    }
+    final nextSessions = <CourseSession>[];
+    var changed = false;
+    for (final session in schedule.sessions) {
+      if (session.weekday != weekday || !session.occursInWeek(week)) {
+        nextSessions.add(session);
+        continue;
+      }
+      changed = true;
+      final weeks = session.weeks.isEmpty
+          ? [
+              for (var w = 1; w <= schedule.maxWeek; w++)
+                if (w != week) w,
+            ]
+          : session.weeks.where((w) => w != week).toList();
+      if (weeks.isEmpty) {
+        continue;
+      }
+      nextSessions.add(_copySessionWithWeeks(session, weeks));
+    }
+    if (!changed) {
+      _showSnack('这一天本来就没有课程');
+      return;
+    }
+    await _persistSessions(schedule.copyWith(sessions: nextSessions));
+    _showSnack('已清空${_weekdayName(weekday)}的课程');
+  }
+
+  Future<void> _copyDay({
+    required int sourceWeek,
+    required int sourceWeekday,
+    required int targetWeek,
+    required int targetWeekday,
+  }) async {
+    final schedule = _schedule;
+    if (schedule == null) {
+      return;
+    }
+    if (sourceWeek < 1 || sourceWeek > schedule.maxWeek) {
+      _showSnack('所选日期不在本学期内');
+      return;
+    }
+    if (sourceWeek == targetWeek && sourceWeekday == targetWeekday) {
+      _showSnack('源日期与目标日期相同');
+      return;
+    }
+    final sourceSessions = schedule.sessions
+        .where((session) =>
+            session.weekday == sourceWeekday &&
+            session.occursInWeek(sourceWeek))
+        .toList();
+    if (sourceSessions.isEmpty) {
+      _showSnack('${_weekdayName(sourceWeekday)}没有课程可复制');
+      return;
+    }
+    final nextSessions = <CourseSession>[];
+    for (final session in schedule.sessions) {
+      if (session.weekday == targetWeekday &&
+          session.occursInWeek(targetWeek)) {
+        final weeks = session.weeks.isEmpty
+            ? [
+                for (var w = 1; w <= schedule.maxWeek; w++)
+                  if (w != targetWeek) w,
+              ]
+            : session.weeks.where((w) => w != targetWeek).toList();
+        if (weeks.isEmpty) {
+          continue;
+        }
+        nextSessions.add(_copySessionWithWeeks(session, weeks));
+        continue;
+      }
+      nextSessions.add(session);
+    }
+    final stamp = DateTime.now().microsecondsSinceEpoch;
+    for (var index = 0; index < sourceSessions.length; index++) {
+      nextSessions.add(
+        _oneOffDayCopy(
+          sourceSessions[index],
+          targetWeek: targetWeek,
+          targetWeekday: targetWeekday,
+          uniqueSuffix: '$stamp-$index',
+        ),
+      );
+    }
+    await _persistSessions(schedule.copyWith(sessions: nextSessions));
+    _showSnack(
+        '已从${_weekdayName(sourceWeekday)}复制 ${sourceSessions.length} 门课');
+  }
+
+  Future<void> _persistSessions(AcademicSchedule next) async {
+    await widget.repository.saveCachedSchedule(next);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _schedule = next;
+      _selectedManualSlot = null;
+    });
     unawaited(
       widget.widgetService.syncSchedule(
         schedule: next,
@@ -1188,6 +1456,11 @@ enum _CourseDeleteScope {
   allCourseSlots,
 }
 
+enum _DayAction {
+  copyFromDate,
+  clear,
+}
+
 int _displayableWeek(int activeWeek, AcademicSchedule schedule) =>
     activeWeek.clamp(1, schedule.maxWeek);
 
@@ -1331,9 +1604,19 @@ class _DisplaySettingTitle extends StatelessWidget {
 }
 
 class _FirstWeekDatePickerDialog extends StatefulWidget {
-  const _FirstWeekDatePickerDialog({required this.initialDate});
+  const _FirstWeekDatePickerDialog({
+    required this.initialDate,
+    this.title = '选择开学日期',
+    this.mondayOnly = true,
+    this.firstDate,
+    this.lastDate,
+  });
 
   final DateTime initialDate;
+  final String title;
+  final bool mondayOnly;
+  final DateTime? firstDate;
+  final DateTime? lastDate;
 
   @override
   State<_FirstWeekDatePickerDialog> createState() =>
@@ -1368,7 +1651,7 @@ class _FirstWeekDatePickerDialogState
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
                 child: Text(
-                  '选择开学日期',
+                  widget.title,
                   style: ShuYoTextStyles.sectionTitle(
                     color: colors.textPrimary,
                   ),
@@ -1376,10 +1659,11 @@ class _FirstWeekDatePickerDialogState
               ),
               CalendarDatePicker(
                 initialDate: widget.initialDate,
-                firstDate: DateTime(2000),
-                lastDate: DateTime(2100, 12, 31),
-                selectableDayPredicate: (date) =>
-                    date.weekday == DateTime.monday,
+                firstDate: widget.firstDate ?? DateTime(2000),
+                lastDate: widget.lastDate ?? DateTime(2100, 12, 31),
+                selectableDayPredicate: widget.mondayOnly
+                    ? (date) => date.weekday == DateTime.monday
+                    : null,
                 onDateChanged: (date) => setState(() => _selectedDate = date),
               ),
               Padding(
@@ -1504,6 +1788,30 @@ CourseSession _copySessionWithWeeks(CourseSession session, List<int> weeks) {
     sections: session.sections,
     weeks: sorted,
     weekText: _formatWeekText(sorted),
+    credit: session.credit,
+    note: session.note,
+  );
+}
+
+CourseSession _oneOffDayCopy(
+  CourseSession session, {
+  required int targetWeek,
+  required int targetWeekday,
+  required String uniqueSuffix,
+}) {
+  return CourseSession(
+    id: '${session.id}#daycopy-$targetWeek-$targetWeekday-$uniqueSuffix',
+    courseName: session.courseName,
+    courseCode: session.courseCode,
+    teacherName: session.teacherName,
+    campus: session.campus,
+    location: session.location,
+    weekday: targetWeekday,
+    startSection: session.startSection,
+    endSection: session.endSection,
+    sections: session.sections,
+    weeks: [targetWeek],
+    weekText: _formatWeekText([targetWeek]),
     credit: session.credit,
     note: session.note,
   );
@@ -2217,6 +2525,7 @@ class _ScheduleBody extends StatelessWidget {
     required this.canAddCourse,
     required this.onEmptySlotTap,
     required this.onCourseTap,
+    required this.onDayHeaderTap,
   });
 
   final AcademicSchedule schedule;
@@ -2231,6 +2540,7 @@ class _ScheduleBody extends StatelessWidget {
   final bool canAddCourse;
   final ValueChanged<_ScheduleSlot> onEmptySlotTap;
   final ValueChanged<CourseSession> onCourseTap;
+  final ValueChanged<int> onDayHeaderTap;
 
   @override
   Widget build(BuildContext context) {
@@ -2279,6 +2589,7 @@ class _ScheduleBody extends StatelessWidget {
                         canAddCourse: canAddCourse,
                         onEmptySlotTap: onEmptySlotTap,
                         onCourseTap: onCourseTap,
+                        onDayHeaderTap: onDayHeaderTap,
                       ),
                     ),
                     if (untimed.isNotEmpty)
@@ -2572,6 +2883,7 @@ class _ScheduleGrid extends StatelessWidget {
     required this.canAddCourse,
     required this.onEmptySlotTap,
     required this.onCourseTap,
+    required this.onDayHeaderTap,
   });
 
   static const leftWidth = 68.0;
@@ -2589,6 +2901,7 @@ class _ScheduleGrid extends StatelessWidget {
   final bool canAddCourse;
   final ValueChanged<_ScheduleSlot> onEmptySlotTap;
   final ValueChanged<CourseSession> onCourseTap;
+  final ValueChanged<int> onDayHeaderTap;
 
   @override
   Widget build(BuildContext context) {
@@ -2613,6 +2926,7 @@ class _ScheduleGrid extends StatelessWidget {
                 selectedManualSlot: selectedManualSlot,
                 canAddCourse: canAddCourse,
                 onEmptySlotTap: onEmptySlotTap,
+                onDayHeaderTap: onDayHeaderTap,
               ),
               for (final session in sessions)
                 if (weekdays.contains(session.weekday))
@@ -2658,6 +2972,7 @@ class _GridBackground extends StatelessWidget {
     required this.selectedManualSlot,
     required this.canAddCourse,
     required this.onEmptySlotTap,
+    required this.onDayHeaderTap,
   });
 
   final List<CourseSession> sessions;
@@ -2672,6 +2987,7 @@ class _GridBackground extends StatelessWidget {
   final _ScheduleSlot? selectedManualSlot;
   final bool canAddCourse;
   final ValueChanged<_ScheduleSlot> onEmptySlotTap;
+  final ValueChanged<int> onDayHeaderTap;
 
   @override
   Widget build(BuildContext context) {
@@ -2692,6 +3008,7 @@ class _GridBackground extends StatelessWidget {
                       1,
                 ),
               ),
+              onTap: () => onDayHeaderTap(weekdays[index]),
             ),
           ),
         for (var section = 1; section <= sectionCount; section++)
@@ -2784,31 +3101,40 @@ class _EmptyScheduleCell extends StatelessWidget {
 }
 
 class _DayHeader extends StatelessWidget {
-  const _DayHeader({required this.weekday, required this.date});
+  const _DayHeader({
+    required this.weekday,
+    required this.date,
+    this.onTap,
+  });
 
   final int weekday;
   final DateTime date;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.shuyoColors;
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(
-          _weekdayName(weekday),
-          style: TextStyle(
-            color: colors.textPrimary,
-            fontWeight: FontWeight.w600,
-            fontSize: 12.5,
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            _weekdayName(weekday),
+            style: TextStyle(
+              color: colors.textPrimary,
+              fontWeight: FontWeight.w600,
+              fontSize: 12.5,
+            ),
           ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          '${date.month}/${date.day}',
-          style: TextStyle(color: colors.textMuted, fontSize: 11.5),
-        ),
-      ],
+          const SizedBox(height: 3),
+          Text(
+            '${date.month}/${date.day}',
+            style: TextStyle(color: colors.textMuted, fontSize: 11.5),
+          ),
+        ],
+      ),
     );
   }
 }
