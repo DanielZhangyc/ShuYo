@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../core/forum_constants.dart';
-import '../../core/forum_url_resolver.dart';
 import '../../core/wecom_constants.dart';
 import '../../data/services/wecom_auth_service.dart';
 
@@ -82,30 +80,10 @@ class _WeComScanPageState extends State<WeComScanPage> {
         Navigator.of(context).pop(webVpnResult);
         return;
       }
-      // 阶段二：SSO 会话 → 目标业务系统授权码回调。
-      //
-      // 需要 state 预热的系统（如论坛）改由 WebView 自行走入口到回调的链路：
-      // 它的 `_forum_session` 保存着 OAuth CSRF state，若经插件拷贝进 WebView
-      // 会被重新编码而损坏，导致 Discourse 返回 csrf_detected。让浏览器自己
-      // 持有该 cookie，等价于全程复用同一个会话。
-      final bootstrapUrl = widget.target.stateBootstrapUrl;
-      final needsBootstrap = bootstrapUrl != null && bootstrapUrl.isNotEmpty;
-      final rawCallbackUri = needsBootstrap
-          ? Uri.parse(bootstrapUrl)
-          : await widget.authService.authorizeTarget(widget.target);
+      final callbackUri =
+          await widget.authService.authorizeTarget(widget.target);
       if (!mounted) return;
-      // 两条分支拿到的都是**直连域名**（目标系统的 redirect_uri 是注册在
-      // SSO 侧的固定值，不能改写）。开启 WebVPN 时必须换成代理域名，
-      // 否则 WebView 会去加载校外不可达的地址。
-      final callbackUri = Uri.parse(
-        ForumUrlResolver.resolve(rawCallbackUri.toString()),
-      );
-      // 自举时论坛会重新下发 _forum_session，无需携带已损坏的副本。
-      final cookies = widget.authService.cookieJar
-          .where((entry) =>
-              !needsBootstrap ||
-              entry.cookie.name != ForumConstants.sessionCookieName)
-          .toList();
+      final cookies = widget.authService.cookieJar;
       Navigator.of(context).pop(
         WeComRedeemResult(
           callbackUri: callbackUri,

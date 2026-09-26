@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../../core/forum_url_resolver.dart';
+import '../../core/webvpn_urls.dart';
 
 class WebVpnSessionStore {
   WebVpnSessionStore({
@@ -44,7 +44,7 @@ class WebVpnSessionStore {
     }
     try {
       final cookies = await _cookieLoader(
-        Uri.parse(ForumUrlResolver.webVpnPortalUrl),
+        Uri.parse(WebVpnUrls.portal),
       );
       return cookies.any(
         (cookie) => cookie.name == 'webvpn-token' && cookie.value.isNotEmpty,
@@ -60,13 +60,12 @@ class WebVpnSessionStore {
     await clearCachedCookiesForReauthentication();
 
     final domains = <Uri>[
-      Uri.parse(ForumUrlResolver.webVpnPortalUrl),
+      Uri.parse(WebVpnUrls.portal),
       Uri.parse('https://https-oauth-shu-edu-cn-443.webvpn.shu.edu.cn'),
       Uri.parse('https://https-newsso-shu-edu-cn-443.webvpn.shu.edu.cn'),
     ];
     for (final domain in domains) {
-      final isPortalHost =
-          domain.host == Uri.parse(ForumUrlResolver.webVpnPortalUrl).host;
+      final isPortalHost = domain.host == Uri.parse(WebVpnUrls.portal).host;
       final isProxiedIdentityHost = domain.host.contains('oauth-shu-edu-cn') ||
           domain.host.contains('newsso-shu-edu-cn');
       List<WebViewCookie> cookies;

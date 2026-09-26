@@ -132,14 +132,14 @@ class WeComAuthException implements Exception {
 ///    → 302 + `SHU_OAUTH2` 会话 Cookie。
 ///
 /// **阶段二：用 SSO 会话换目标业务系统的授权码**
-/// 4. 按目标系统准备 `state`（bbs 预热 / jwxt 随机）；
+/// 4. 按目标系统准备 `state`；
 /// 5. `GET /oauth/authorize?response_type=code&client_id&redirect_uri&scope&state`
 ///    → 302 到业务系统的 callback 地址（带 `code`）。
 /// 6. WebVPN 作为例外，还会用 code 调用 `auth/finish` 并通过
 ///    `user/info` 验证会话。
 ///
 /// 整个流程共享同一个 Cookie 容器，否则第 5 步会因缺少 `SHU_OAUTH2`
-/// 而被判定为未登录。需要 state 预热的系统（如论坛）在 [WeComScanPage]
+/// 而被判定为未登录。需要 state 预热的系统在 [WeComScanPage]
 /// 里改为让 WebView 自行走完整链路。
 class WeComAuthService {
   WeComAuthService({
@@ -162,51 +162,15 @@ class WeComAuthService {
 
   void dispose() => _client.close(force: true);
 
-  /// 本次流程收集到的全部 Cookie。
-  ///
-  /// 必须在阶段二结束后取出并写入 WebView，否则回调会因缺少会话而失败
-  /// （论坛更会因缺少 `_forum_session` 返回 `csrf_detected`）。
-  ///
-  /// `SHU_OAUTH2` 会额外镜像到论坛直连与 WebVPN 代理使用的
-  /// SSO 域，因为该 cookie 按 host 隔离。
-  List<WeComStoredCookie> get cookieJar {
-    final collected = <WeComStoredCookie>[
-      for (final entry in _cookies.entries)
-        WeComStoredCookie(
-          cookie: entry.cookie,
-          domain: entry.domain,
-          path: entry.path,
-        ),
-    ];
-    return mirrorForumSsoCookies(collected);
-  }
-
-  @visibleForTesting
-  static List<WeComStoredCookie> mirrorForumSsoCookies(
-    Iterable<WeComStoredCookie> cookies,
-  ) {
-    final collected = cookies.toList();
-    final jar = [...collected];
-    final ssoHost = Uri.parse(WeComConstants.ssoBase).host;
-    final mirrors = <String>{
-      WeComConstants.forumSsoHost,
-      WeComConstants.forumWebVpnSsoHost,
-    };
-    for (final entry in collected) {
-      if (entry.cookie.name != WeComConstants.sessionCookieName) continue;
-      if (entry.domain != ssoHost) continue;
-      for (final domain in mirrors) {
-        jar.add(
+  /// Cookies collected for the campus or WebVPN login callback.
+  List<WeComStoredCookie> get cookieJar => [
+        for (final entry in _cookies.entries)
           WeComStoredCookie(
             cookie: entry.cookie,
-            domain: domain,
+            domain: entry.domain,
             path: entry.path,
           ),
-        );
-      }
-    }
-    return jar;
-  }
+      ];
 
   static void _debug(String message) {
     if (kDebugMode) debugPrint('[SHU_WECOM] $message');
@@ -223,7 +187,7 @@ class WeComAuthService {
   /// 企微扫码换取 SSO 会话时固定使用的 `state`。
   ///
   /// `state` 固定编码教务系统参数——企微自建应用只绑定教务系统，
-  /// `/oauth/wecom/qrcode` 用它校验请求合法性；换成论坛参数会返回
+  /// `/oauth/wecom/qrcode` 用它校验请求合法性；换成其他参数会返回
   /// `{"message":"badRequestParams"}`。目标系统的差异在阶段二处理。
   static String get weComRedeemState =>
       encodeOAuthParams(WeComOAuthTarget.academic.toParams());
@@ -612,10 +576,6 @@ class WeComAuthService {
 
   /// 按目标系统准备 `state`。
   Future<String> _prepareState(WeComOAuthTarget target) async {
-    final bootstrapUrl = target.stateBootstrapUrl;
-    if (bootstrapUrl != null && bootstrapUrl.isNotEmpty) {
-      return _bootstrapState(Uri.parse(bootstrapUrl));
-    }
     if (target.generateState) {
       // jwxt 的授权请求不带 state，本地生成随机值防 CSRF。
       return List.generate(
@@ -624,25 +584,6 @@ class WeComAuthService {
       ).join();
     }
     return '';
-  }
-
-  /// 向业务系统入口要一个 `state`。
-  ///
-  /// 入口通常不是 SSO 站点（如论坛的 `bbs.shu.edu.cn`），
-  /// 因此 Referer/Origin 要覆盖为该入口自身的 origin，而非固定的 SSO 域，
-  /// 否则可能被目标系统拒绝或行为不一致。
-  Future<String> _bootstrapState(Uri uri) async {
-    final origin = uri.replace(path: '', query: null, fragment: null);
-    final response = await _get(
-      uri,
-      host: _RequestHost.sso,
-      referer: origin.toString(),
-      origin: origin.toString(),
-    );
-    final location = response.headers.value(HttpHeaders.locationHeader);
-    await response.drain<void>();
-    if (location == null || location.isEmpty) return '';
-    return uri.resolve(location).queryParameters['state'] ?? '';
   }
 
   Future<Map<String, dynamic>> _webVpnJsonRequest(

@@ -7,7 +7,6 @@ environment:
   sdk: ">=3.3.0 <4.0.0"
 
 dependencies:
-  crop_your_image: ^2.0.0
   flutter:
     sdk: flutter
   flutter_localizations:
@@ -35,20 +34,9 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - THIRD_PARTY_NOTICES.md
     - assets/images/
-    - assets/fixtures/api/site.json
-    - assets/fixtures/api/latest/latest.json
-    - assets/fixtures/api/hot/hot.json
-    - assets/fixtures/api/topic/topic-normal.json
-    - assets/fixtures/api/topic/topic-image.json
-    - assets/fixtures/api/topic/topic-long.json
-    - assets/fixtures/api/user/user-profile.json
-    - assets/fixtures/api/user/user-summary.json
-    - assets/fixtures/network/
     - assets/demo/README.md
     - assets/demo/academic/
     - assets/demo/announcements/
     - assets/demo/classroom/
     - assets/demo/course_ratings/
-    - assets/demo/forum/

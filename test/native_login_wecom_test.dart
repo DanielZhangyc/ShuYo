@@ -14,16 +14,6 @@ void main() {
     expect(find.text('使用企业微信登录'), findsOneWidget);
   });
 
-  testWidgets('forum login shows the WeCom login entry button', (tester) async {
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: NativeLoginPage.forum(),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('使用企业微信登录'), findsOneWidget);
-  });
-
   testWidgets('WebVPN login shows the WeCom login entry button',
       (tester) async {
     await tester.pumpWidget(

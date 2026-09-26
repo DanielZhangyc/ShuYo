@@ -1,19 +1,15 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:home_widget/home_widget.dart';
 
 import '../core/client_app_info.dart';
 import '../core/classroom_url_resolver.dart';
-import '../core/forum_url_resolver.dart';
 import '../data/demo/demo_data_bundle.dart';
-import '../data/demo/demo_forum_repository.dart';
 import '../data/demo/demo_repositories.dart';
 import '../data/demo/demo_session.dart';
 import '../data/repositories/academic_schedule_repository.dart';
-import '../data/repositories/forum_repository.dart';
 import '../data/services/academic_account_store.dart';
 import '../data/services/academic_auth_service.dart';
 import '../data/services/academic_schedule_display_settings_service.dart';
@@ -47,9 +43,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
   bool _followSystemTheme = false;
   bool _demoMode = false;
   DemoDataBundle? _demoData;
-  ForumRepository? _demoRepository;
   int _academicLoginSignal = 0;
-  int _forumLoginSignal = 0;
   late final Future<bool> _initialScheduleWidgetLaunch;
   bool _initialWidgetLaunchConsumed = false;
   Brightness _systemBrightness =
@@ -110,36 +104,23 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
             return ShuYoLaunchSurface(theme: theme);
           }
           final data = snapshot.data!;
-          final demo =
-              _demoMode && _demoData != null && _demoRepository != null;
-          final repository = demo ? _demoRepository! : data.repository;
+          final demo = _demoMode && _demoData != null;
           return StartupOnboarding(
             initiallyCompleted: demo || data.onboardingCompleted,
             initialAcademicLoggedIn: demo || data.hasAcademicSession,
-            initialForumStatus: demo
-                ? ForumAccountStatus.loggedIn
-                : _forumAccountStatus(repository),
             onAcademicLoginCompleted: () {
               setState(() => _academicLoginSignal++);
-            },
-            onForumLoginCompleted: () {
-              setState(() => _forumLoginSignal++);
             },
             onDemoLogin: _activateDemoMode,
             controller: _onboardingController,
             child: AppShell(
-              repository: repository,
               key: ValueKey('app-shell-${demo ? 'demo' : 'normal'}'),
-              reloadRepository: demo
-                  ? () async => repository
-                  : ForumRepositoryFactory.loadOnline,
               initialWebVpnEnabled: demo ? false : data.webVpnEnabled,
               selectedThemeId: theme.id,
               followSystemTheme: _followSystemTheme,
               onThemeChanged: _changeTheme,
               onFollowSystemThemeChanged: _changeFollowSystemTheme,
               academicLoginSignal: _academicLoginSignal,
-              forumLoginSignal: _forumLoginSignal,
               initialHasAcademicSession: demo || data.hasAcademicSession,
               initialAcademicStudentId: demo
                   ? data.initialScheduleState?.schedule?.term.studentId
@@ -184,13 +165,9 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
     }
     await ClientAppInfo.load();
     final networkSettings = await _settingsService.loadNetworkSettings();
-    ForumUrlResolver.configure(
-      useWebVpn: networkSettings.webVpnEnabled,
-    );
     ClassroomUrlResolver.configure(
       useWebVpn: networkSettings.webVpnEnabled,
     );
-    final repository = await ForumRepositoryFactory.loadLocal();
     final academicAccountStore = AcademicAccountStore();
     if (await academicAccountStore.hasLegacyExpiredAccount()) {
       await AcademicAuthService().clearAccount();
@@ -202,7 +179,6 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
         ? await _loadInitialScheduleState(AcademicScheduleRepository())
         : const _InitialScheduleLoad();
     return _StartupData(
-      repository: repository,
       webVpnEnabled: networkSettings.webVpnEnabled,
       hasAcademicSession: academicStudentId != null,
       academicStudentId: academicStudentId,
@@ -219,17 +195,14 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
     bool openScheduleFromWidget = false,
   }) async {
     final demoData = await DemoDataBundle.load();
-    final demoRepository = await DemoForumRepository.load();
     _demoMode = true;
     _demoData = demoData;
-    _demoRepository = demoRepository;
     final initialScheduleLoad = openScheduleFromWidget
         ? await _loadInitialScheduleState(
             DemoAcademicScheduleRepository(demoData.schedule),
           )
         : const _InitialScheduleLoad();
     return _StartupData(
-      repository: demoRepository,
       webVpnEnabled: false,
       hasAcademicSession: true,
       academicStudentId: initialScheduleLoad.state?.schedule?.term.studentId,
@@ -276,12 +249,10 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
 
   Future<void> _activateDemoMode() async {
     final demoData = await DemoDataBundle.load();
-    final demoRepository = await DemoForumRepository.load();
     if (!mounted) return;
     setState(() {
       _demoMode = true;
       _demoData = demoData;
-      _demoRepository = demoRepository;
     });
   }
 
@@ -292,10 +263,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
     setState(() {
       _demoMode = false;
       _demoData = null;
-      _demoRepository = null;
-      // A demo-started app's original startup snapshot contains the demo
-      // repository. Reload it after disabling demo so the normal chain gets a
-      // real repository and fresh authentication state.
+      // Reload the normal startup state after leaving the bundled demo.
       _startupFuture = _loadStartup();
     });
   }
@@ -353,25 +321,8 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
   }
 }
 
-ForumAccountStatus _forumAccountStatus(ForumRepository repository) {
-  if (defaultTargetPlatform == TargetPlatform.iOS &&
-      !ForumUrlResolver.usesWebVpn &&
-      !repository.hasLocalAccount) {
-    return ForumAccountStatus.directLoginUnavailable;
-  }
-  return switch (repository.connectionState) {
-    ForumConnectionState.firstUse => ForumAccountStatus.signedOut,
-    ForumConnectionState.cachedOffline =>
-      ForumAccountStatus.connectionUnavailable,
-    ForumConnectionState.reauthenticationRequired =>
-      ForumAccountStatus.reauthenticationRequired,
-    ForumConnectionState.online => ForumAccountStatus.loggedIn,
-  };
-}
-
 class _StartupData {
   const _StartupData({
-    required this.repository,
     required this.webVpnEnabled,
     required this.hasAcademicSession,
     required this.academicStudentId,
@@ -383,7 +334,6 @@ class _StartupData {
     this.initialScheduleLoadError,
   });
 
-  final ForumRepository repository;
   final bool webVpnEnabled;
   final bool hasAcademicSession;
   final String? academicStudentId;

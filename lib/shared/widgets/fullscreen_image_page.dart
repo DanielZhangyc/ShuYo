@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'dart:io';
-
-import '../../data/services/forum_image_cache.dart';
 import '../../data/services/image_saver.dart';
 
 class FullscreenImagePage extends StatefulWidget {
@@ -11,14 +8,10 @@ class FullscreenImagePage extends StatefulWidget {
     String? url,
     List<String>? urls,
     this.initialIndex = 0,
-    this.privateImage = false,
-    this.networkOnly = false,
   }) : urls = urls ?? (url == null ? const <String>[] : <String>[url]);
 
   final List<String> urls;
   final int initialIndex;
-  final bool privateImage;
-  final bool networkOnly;
 
   @override
   State<FullscreenImagePage> createState() => _FullscreenImagePageState();
@@ -77,8 +70,6 @@ class _FullscreenImagePageState extends State<FullscreenImagePage> {
                         return _ZoomableNetworkImage(
                           key: ValueKey(urls[index]),
                           url: urls[index],
-                          privateImage: widget.privateImage,
-                          networkOnly: widget.networkOnly,
                           onSwipePrevious: _previousPage,
                           onSwipeNext: _nextPage,
                           onZoomChanged: (zoomed) {
@@ -316,16 +307,12 @@ class _ZoomableNetworkImage extends StatefulWidget {
     required this.onZoomChanged,
     required this.onSwipePrevious,
     required this.onSwipeNext,
-    required this.privateImage,
-    required this.networkOnly,
   });
 
   final String url;
   final ValueChanged<bool> onZoomChanged;
   final VoidCallback onSwipePrevious;
   final VoidCallback onSwipeNext;
-  final bool privateImage;
-  final bool networkOnly;
 
   @override
   State<_ZoomableNetworkImage> createState() => _ZoomableNetworkImageState();
@@ -339,7 +326,6 @@ class _ZoomableNetworkImageState extends State<_ZoomableNetworkImage> {
   final _controller = TransformationController();
   late final ImageStreamListener _imageListener;
   ImageStream? _imageStream;
-  File? _cachedFile;
   Size? _imageSize;
   Size? _viewportSize;
   int _reloadToken = 0;
@@ -386,7 +372,6 @@ class _ZoomableNetworkImageState extends State<_ZoomableNetworkImage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.url != widget.url) {
       _imageSize = null;
-      _cachedFile = null;
       _headersLoaded = false;
       _imageLoadFailed = false;
       _controller.value = Matrix4.identity();
@@ -466,31 +451,14 @@ class _ZoomableNetworkImageState extends State<_ZoomableNetworkImage> {
     required double height,
     required BoxFit fit,
   }) {
-    final file = _cachedFile;
-    if (file == null) {
-      if (widget.networkOnly) {
-        return Image.network(
-          widget.url,
-          key: ValueKey('${widget.url}:$_reloadToken'),
-          width: width,
-          height: height,
-          fit: fit,
-          errorBuilder: (context, error, stackTrace) {
-            return _ImageLoadError(onRetry: _retry);
-          },
-        );
-      }
-      return const SizedBox.expand();
-    }
-    return Image.file(
-      file,
+    return Image.network(
+      widget.url,
       key: ValueKey('${widget.url}:$_reloadToken'),
       width: width,
       height: height,
       fit: fit,
-      errorBuilder: (context, error, stackTrace) {
-        return _ImageLoadError(onRetry: _retry);
-      },
+      errorBuilder: (context, error, stackTrace) =>
+          _ImageLoadError(onRetry: _retry),
     );
   }
 
@@ -499,14 +467,7 @@ class _ZoomableNetworkImageState extends State<_ZoomableNetworkImage> {
       return;
     }
     final oldStream = _imageStream;
-    final ImageProvider<Object>? provider = _cachedFile == null
-        ? (widget.networkOnly
-            ? NetworkImage(widget.url) as ImageProvider<Object>
-            : null)
-        : FileImage(_cachedFile!);
-    if (provider == null) {
-      return;
-    }
+    final provider = NetworkImage(widget.url);
     final newStream = provider.resolve(
       createLocalImageConfiguration(context),
     );
@@ -518,46 +479,15 @@ class _ZoomableNetworkImageState extends State<_ZoomableNetworkImage> {
   }
 
   Future<void> _loadCachedFile() async {
-    if (widget.networkOnly) {
-      if (!mounted) {
-        return;
-      }
-      setState(() => _headersLoaded = true);
-      _resolveImage();
-      return;
-    }
-    File? file;
-    try {
-      final cache = await ForumImageCache.shared();
-      file = await cache.getImage(
-        widget.url,
-        variant: 'original',
-        namespace: widget.privateImage
-            ? ForumImageCache.currentPrivateNamespace()
-            : 'public',
-      );
-    } on Object {
-      file = null;
-    }
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
     setState(() {
-      _cachedFile = file;
       _headersLoaded = true;
     });
     _resolveImage();
   }
 
   Future<void> _retry() async {
-    final ImageProvider<Object>? provider = _cachedFile == null
-        ? (widget.networkOnly
-            ? NetworkImage(widget.url) as ImageProvider<Object>
-            : null)
-        : FileImage(_cachedFile!);
-    if (provider == null) {
-      return;
-    }
+    final provider = NetworkImage(widget.url);
     await provider.evict();
     if (!mounted) {
       return;
@@ -565,7 +495,6 @@ class _ZoomableNetworkImageState extends State<_ZoomableNetworkImage> {
     _imageStream?.removeListener(_imageListener);
     _imageStream = null;
     _imageSize = null;
-    _cachedFile = null;
     _headersLoaded = false;
     _imageLoadFailed = false;
     _zoomed = false;

@@ -42,7 +42,6 @@ void main() {
       ),
     );
 
-    expect(find.text('退出乐乎论坛账户'), findsNothing);
     expect(find.text('退出上大校园账户'), findsNothing);
     expect(find.text('问题与反馈'), findsNothing);
     expect(find.text('检查更新'), findsNothing);
@@ -142,80 +141,6 @@ void main() {
     expect(find.text('检查更新'), findsNothing);
   });
 
-  testWidgets('logout entry reuses the supplied account logout handlers',
-      (tester) async {
-    var academicLogoutCalls = 0;
-    var forumLogoutCalls = 0;
-    var webVpnLogoutCalls = 0;
-    await _pumpSettings(
-      tester,
-      hasAcademicAccount: true,
-      hasForumAccount: true,
-      hasWebVpnSession: true,
-      onAcademicLogout: () async {
-        academicLogoutCalls++;
-        return true;
-      },
-      onForumLogout: () async {
-        forumLogoutCalls++;
-        return true;
-      },
-      onWebVpnLogout: () async {
-        webVpnLogoutCalls++;
-        return true;
-      },
-    );
-
-    final clearCache = find.text('清除缓存');
-    final logout = find.text('退出登录');
-    expect(logout, findsOneWidget);
-    expect(tester.getTopLeft(logout).dy,
-        greaterThan(tester.getTopLeft(clearCache).dy));
-
-    await tester.tap(logout);
-    await tester.pumpAndSettle();
-    expect(find.text('选择要退出的账户'), findsOneWidget);
-    expect(find.text('上大校园账户'), findsOneWidget);
-    expect(find.text('乐乎账户'), findsOneWidget);
-    expect(find.text('WebVPN'), findsOneWidget);
-    expect(
-      tester.getTopLeft(find.text('WebVPN')).dy,
-      greaterThan(tester.getTopLeft(find.text('乐乎账户')).dy),
-    );
-
-    await tester.tap(find.text('上大校园账户'));
-    await tester.pumpAndSettle();
-    expect(find.text('退出校园账户'), findsOneWidget);
-    expect(academicLogoutCalls, 0);
-    await tester.tap(find.widgetWithText(FilledButton, '退出'));
-    await tester.pumpAndSettle();
-    expect(academicLogoutCalls, 1);
-    expect(forumLogoutCalls, 0);
-    expect(find.text('已退出上大校园账户'), findsOneWidget);
-
-    await tester.tap(logout);
-    await tester.pumpAndSettle();
-    final academicTile = tester.widget<ListTile>(
-      find.widgetWithText(ListTile, '上大校园账户'),
-    );
-    expect(academicTile.enabled, isFalse);
-    await tester.tap(find.text('乐乎账户'));
-    await tester.pumpAndSettle();
-    expect(find.text('退出乐乎论坛账户'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, '退出'));
-    await tester.pumpAndSettle();
-    expect(forumLogoutCalls, 1);
-
-    await tester.tap(logout);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('WebVPN'));
-    await tester.pumpAndSettle();
-    expect(find.text('退出WebVPN'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, '退出'));
-    await tester.pumpAndSettle();
-    expect(webVpnLogoutCalls, 1);
-  });
-
   testWidgets('WebVPN session alone exposes the logout entry', (tester) async {
     await _pumpSettings(
       tester,
@@ -234,10 +159,8 @@ Future<void> _pumpSettings(
   WidgetTester tester, {
   bool isDemo = false,
   bool hasAcademicAccount = false,
-  bool hasForumAccount = false,
   bool hasWebVpnSession = false,
   Future<bool> Function()? onAcademicLogout,
-  Future<bool> Function()? onForumLogout,
   Future<bool> Function()? onWebVpnLogout,
 }) async {
   await tester.pumpWidget(
@@ -258,10 +181,8 @@ Future<void> _pumpSettings(
         onThemeChanged: (_) async {},
         onFollowSystemThemeChanged: (_) async {},
         hasAcademicAccount: hasAcademicAccount,
-        hasForumAccount: hasForumAccount,
         hasWebVpnSession: hasWebVpnSession,
         onAcademicLogout: onAcademicLogout,
-        onForumLogout: onForumLogout,
         onWebVpnLogout: onWebVpnLogout,
         isDemo: isDemo,
       ),

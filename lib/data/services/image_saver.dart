@@ -4,7 +4,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 
-import 'forum_image_headers.dart';
 import 'http_timeout.dart';
 
 class ImageSaver {
@@ -45,8 +44,6 @@ class ImageSaver {
     Uri uri,
   ) async {
     final request = await client.getUrl(uri).timeout(HttpTimeout.connect);
-    final headers = await ForumImageHeaders.forUrl(uri.toString());
-    headers?.forEach(request.headers.set);
     final response = await request.close().timeout(HttpTimeout.normal);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception('图片下载失败 (${response.statusCode})');

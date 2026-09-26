@@ -26,14 +26,9 @@ class ClientSettingsPage extends StatelessWidget {
     required this.followSystemTheme,
     required this.onThemeChanged,
     required this.onFollowSystemThemeChanged,
-    this.isOnline = false,
-    this.loadForumCacheSize,
-    this.onClearForumCache,
     this.hasAcademicAccount = false,
-    this.hasForumAccount = false,
     this.hasWebVpnSession = false,
     this.onAcademicLogout,
-    this.onForumLogout,
     this.onWebVpnLogout,
     this.isDemo = false,
     this.onExitDemo,
@@ -46,14 +41,9 @@ class ClientSettingsPage extends StatelessWidget {
   final bool followSystemTheme;
   final Future<void> Function(String themeId) onThemeChanged;
   final Future<void> Function(bool enabled) onFollowSystemThemeChanged;
-  final bool isOnline;
-  final Future<int> Function()? loadForumCacheSize;
-  final Future<int> Function()? onClearForumCache;
   final bool hasAcademicAccount;
-  final bool hasForumAccount;
   final bool hasWebVpnSession;
   final Future<bool> Function()? onAcademicLogout;
-  final Future<bool> Function()? onForumLogout;
   final Future<bool> Function()? onWebVpnLogout;
   final bool isDemo;
   final Future<void> Function()? onExitDemo;
@@ -93,18 +83,11 @@ class ClientSettingsPage extends StatelessWidget {
               title: '退出演示',
               onTap: () => _exitDemo(context),
             ),
-          _ForumCacheRow(
-            loadSize: loadForumCacheSize,
-            onClear: onClearForumCache,
-          ),
-          if (!isDemo &&
-              (hasAcademicAccount || hasForumAccount || hasWebVpnSession))
+          if (!isDemo && (hasAcademicAccount || hasWebVpnSession))
             _AccountLogoutRow(
               hasAcademicAccount: hasAcademicAccount,
-              hasForumAccount: hasForumAccount,
               hasWebVpnSession: hasWebVpnSession,
               onAcademicLogout: onAcademicLogout,
-              onForumLogout: onForumLogout,
               onWebVpnLogout: onWebVpnLogout,
             ),
         ],
@@ -138,110 +121,17 @@ class ClientSettingsPage extends StatelessWidget {
   }
 }
 
-class _ForumCacheRow extends StatefulWidget {
-  const _ForumCacheRow({required this.loadSize, required this.onClear});
-
-  final Future<int> Function()? loadSize;
-  final Future<int> Function()? onClear;
-
-  @override
-  State<_ForumCacheRow> createState() => _ForumCacheRowState();
-}
-
-class _ForumCacheRowState extends State<_ForumCacheRow> {
-  late Future<int> _sizeFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _sizeFuture = _loadSize();
-  }
-
-  @override
-  void didUpdateWidget(covariant _ForumCacheRow oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.loadSize != widget.loadSize) {
-      _sizeFuture = _loadSize();
-    }
-  }
-
-  Future<int> _loadSize() => widget.loadSize?.call() ?? Future<int>.value(0);
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<int>(
-      future: _sizeFuture,
-      builder: (context, snapshot) {
-        return _SettingsRow(
-          title: '清除缓存',
-          onTap: widget.onClear == null ? null : () => _confirm(context),
-        );
-      },
-    );
-  }
-
-  Future<void> _confirm(BuildContext context) async {
-    final size = await _sizeFuture;
-    if (!context.mounted) {
-      return;
-    }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('清除缓存'),
-        content: Text(
-          '当前占用 ${_formatBytes(size)}。清除后将删除已缓存的帖子、私信、个人资料数据和图片，但不会退出登录。',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('清除'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !context.mounted) {
-      return;
-    }
-    final released = await widget.onClear?.call() ?? 0;
-    if (context.mounted) {
-      setState(() => _sizeFuture = _loadSize());
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已释放 ${_formatBytes(released)}')),
-      );
-    }
-  }
-
-  static String _formatBytes(int bytes) {
-    if (bytes < 1024) {
-      return '$bytes B';
-    }
-    if (bytes < 1024 * 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    }
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-  }
-}
-
 class _AccountLogoutRow extends StatefulWidget {
   const _AccountLogoutRow({
     required this.hasAcademicAccount,
-    required this.hasForumAccount,
     required this.hasWebVpnSession,
     required this.onAcademicLogout,
-    required this.onForumLogout,
     required this.onWebVpnLogout,
   });
 
   final bool hasAcademicAccount;
-  final bool hasForumAccount;
   final bool hasWebVpnSession;
   final Future<bool> Function()? onAcademicLogout;
-  final Future<bool> Function()? onForumLogout;
   final Future<bool> Function()? onWebVpnLogout;
 
   @override
@@ -250,7 +140,6 @@ class _AccountLogoutRow extends StatefulWidget {
 
 class _AccountLogoutRowState extends State<_AccountLogoutRow> {
   late bool _hasAcademicAccount;
-  late bool _hasForumAccount;
   late bool _hasWebVpnSession;
   bool _loggingOut = false;
 
@@ -258,7 +147,6 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
   void initState() {
     super.initState();
     _hasAcademicAccount = widget.hasAcademicAccount;
-    _hasForumAccount = widget.hasForumAccount;
     _hasWebVpnSession = widget.hasWebVpnSession;
   }
 
@@ -267,9 +155,6 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.hasAcademicAccount != widget.hasAcademicAccount) {
       _hasAcademicAccount = widget.hasAcademicAccount;
-    }
-    if (oldWidget.hasForumAccount != widget.hasForumAccount) {
-      _hasForumAccount = widget.hasForumAccount;
     }
     if (oldWidget.hasWebVpnSession != widget.hasWebVpnSession) {
       _hasWebVpnSession = widget.hasWebVpnSession;
@@ -281,7 +166,6 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
     final colors = context.shuyoColors;
     final enabled = !_loggingOut &&
         ((_hasAcademicAccount && widget.onAcademicLogout != null) ||
-            (_hasForumAccount && widget.onForumLogout != null) ||
             (_hasWebVpnSession && widget.onWebVpnLogout != null));
     return ListTile(
       title: Text('退出登录', style: TextStyle(color: colors.danger)),
@@ -346,17 +230,6 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
                         : null,
                   ),
                   ListTile(
-                    leading: const Icon(Icons.forum_outlined),
-                    title: const Text('乐乎账户'),
-                    subtitle: Text(
-                      _hasForumAccount ? '退出论坛' : '未登录',
-                    ),
-                    enabled: _hasForumAccount && widget.onForumLogout != null,
-                    onTap: _hasForumAccount && widget.onForumLogout != null
-                        ? () => Navigator.of(context).pop(_LogoutTarget.forum)
-                        : null,
-                  ),
-                  ListTile(
                     leading: const Icon(Icons.vpn_key_off_outlined),
                     title: const Text('WebVPN'),
                     subtitle: Text(
@@ -380,23 +253,16 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
 
   Future<void> _confirmAndLogout(_LogoutTarget target) async {
     final academic = target == _LogoutTarget.academic;
-    final forum = target == _LogoutTarget.forum;
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
             title: Text(
-              academic
-                  ? '退出校园账户'
-                  : forum
-                      ? '退出乐乎论坛账户'
-                      : '退出WebVPN',
+              academic ? '退出校园账户' : '退出WebVPN',
             ),
             content: Text(
               academic
                   ? '退出后校园服务需重新登录\n\n已保存的课表信息不会被清除'
-                  : forum
-                      ? '退出后将清除论坛会话\n\n这不会影响校园账户'
-                      : '退出后将关闭WebVPN并清除登录状态',
+                  : '退出后将关闭WebVPN并清除登录状态',
             ),
             actions: [
               TextButton(
@@ -416,14 +282,12 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
     setState(() => _loggingOut = true);
     final loggedOut = switch (target) {
       _LogoutTarget.academic => await widget.onAcademicLogout?.call() ?? false,
-      _LogoutTarget.forum => await widget.onForumLogout?.call() ?? false,
       _LogoutTarget.webVpn => await widget.onWebVpnLogout?.call() ?? false,
     };
     if (!mounted) return;
     setState(() {
       _loggingOut = false;
       if (loggedOut && academic) _hasAcademicAccount = false;
-      if (loggedOut && forum) _hasForumAccount = false;
       if (loggedOut && target == _LogoutTarget.webVpn) {
         _hasWebVpnSession = false;
       }
@@ -431,17 +295,13 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
     if (loggedOut) {
       _showSnack(
         context,
-        academic
-            ? '已退出上大校园账户'
-            : forum
-                ? '已退出乐乎论坛账户'
-                : '已退出WebVPN',
+        academic ? '已退出上大校园账户' : '已退出WebVPN',
       );
     }
   }
 }
 
-enum _LogoutTarget { academic, forum, webVpn }
+enum _LogoutTarget { academic, webVpn }
 
 class _AboutClientPage extends StatefulWidget {
   const _AboutClientPage({
@@ -595,7 +455,7 @@ class _AboutClientPageState extends State<_AboutClientPage> {
             child: Divider(),
           ),
           Text(
-            '本应用是由学生开发的非官方开源工具，与上海大学、上海大学信息办无关，不属于官方软件。\n\n本应用仅作信息聚合展示。论坛相关功能遵守校内论坛的管理规则，用户在客户端产生的内容受论坛原有审核与管理制度约束。\n\n如果在客户端使用过程中出现问题，或是你希望有些新的功能，请通过“问题与反馈”联系开发者。\n～(∠・ω< )⌒☆',
+            '本应用是由学生开发的非官方开源工具，与上海大学、上海大学信息办无关，不属于官方软件。\n\n本应用仅作信息聚合展示。如果在客户端使用过程中出现问题，或是你希望有些新的功能，请通过“问题与反馈”联系开发者。\n～(∠・ω< )⌒☆',
             style: ShuYoTextStyles.bodyCompact(
               color: colors.textMuted,
               height: 1.55,

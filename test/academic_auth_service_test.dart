@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuyo/core/academic_constants.dart';
 import 'package:shuyo/core/academic_url_resolver.dart';
-import 'package:shuyo/core/forum_url_resolver.dart';
+import 'package:shuyo/core/webvpn_urls.dart';
 import 'package:shuyo/data/services/academic_account_store.dart';
 import 'package:shuyo/data/services/academic_auth_service.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -10,7 +10,38 @@ import 'package:webview_flutter/webview_flutter.dart';
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
-    ForumUrlResolver.configure(useWebVpn: false);
+  });
+
+  test('WebVPN user info distinguishes a session from an outage', () {
+    expect(
+      AcademicAuthService.classifyWebVpnUserInfo(
+        200,
+        '{"code":0,"data":{"userId":123}}',
+      ),
+      WebVpnSessionStatus.valid,
+    );
+    expect(
+      AcademicAuthService.classifyWebVpnUserInfo(401, ''),
+      WebVpnSessionStatus.loginRequired,
+    );
+    expect(
+      AcademicAuthService.classifyWebVpnUserInfo(
+        200,
+        '{"code":401,"data":null}',
+      ),
+      WebVpnSessionStatus.loginRequired,
+    );
+    expect(
+      AcademicAuthService.classifyWebVpnUserInfo(503, ''),
+      WebVpnSessionStatus.unavailable,
+    );
+    expect(
+      AcademicAuthService.classifyWebVpnUserInfo(
+        200,
+        '{"code":500,"message":"服务暂不可用"}',
+      ),
+      WebVpnSessionStatus.unavailable,
+    );
   });
 
   test(
@@ -137,7 +168,7 @@ void main() {
 
   test('does not treat a stale portal token as an authenticated session',
       () async {
-    final portal = Uri.parse(ForumUrlResolver.webVpnPortalUrl);
+    final portal = Uri.parse(WebVpnUrls.portal);
     final service = AcademicAuthService(
       cookieLoader: (domain) async => domain.host == portal.host
           ? [
@@ -157,7 +188,7 @@ void main() {
 
   test('keeps a cached account when WebVPN validation is temporarily offline',
       () async {
-    final portal = Uri.parse(ForumUrlResolver.webVpnPortalUrl);
+    final portal = Uri.parse(WebVpnUrls.portal);
     final service = AcademicAuthService(
       cookieLoader: (domain) async => domain.host == portal.host
           ? [
@@ -176,7 +207,6 @@ void main() {
   });
 
   test('restores and validates a cached direct campus session', () async {
-    ForumUrlResolver.configure(useWebVpn: false);
     final academic = Uri.parse(AcademicConstants.baseUrl);
     final restored = <WebViewCookie>[];
     final service = AcademicAuthService(

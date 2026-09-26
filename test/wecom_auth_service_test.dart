@@ -47,7 +47,7 @@ void main() {
     });
 
     test('weComRedeemState always encodes the academic client', () {
-      // state 固定编码 jwxt 参数：企微自建应用只绑定教务系统，用论坛参数
+      // state 固定编码 jwxt 参数：企微自建应用只绑定教务系统，其他参数
       // 会被 /oauth/wecom/qrcode 判为 badRequestParams。目标系统的差异在
       // authorizeTarget 阶段处理。
       final decoded = jsonDecode(
@@ -70,39 +70,6 @@ void main() {
       );
       expect(result.sessionCookies.single.name, 'SHU_OAUTH2');
       expect(result.cookieSourceUri.host, 'newsso.shu.edu.cn');
-    });
-
-    test('mirrors SSO session to direct and WebVPN forum OAuth hosts', () {
-      final sourceCookie = Cookie('SHU_OAUTH2', 'session')..path = '/';
-      final jar = WeComAuthService.mirrorForumSsoCookies([
-        WeComStoredCookie(
-          cookie: sourceCookie,
-          domain: 'newsso.shu.edu.cn',
-          path: '/',
-        ),
-        WeComStoredCookie(
-          cookie: Cookie('unrelated', 'value'),
-          domain: 'newsso.shu.edu.cn',
-          path: '/',
-        ),
-      ]);
-
-      final sessionDomains = jar
-          .where((entry) => entry.cookie.name == 'SHU_OAUTH2')
-          .map((entry) => entry.domain)
-          .toSet();
-      expect(
-        sessionDomains,
-        {
-          'newsso.shu.edu.cn',
-          WeComConstants.forumSsoHost,
-          WeComConstants.forumWebVpnSsoHost,
-        },
-      );
-      expect(
-        jar.where((entry) => entry.cookie.name == 'unrelated'),
-        hasLength(1),
-      );
     });
 
     test('WebVPN state uses standard padded base64', () {
@@ -159,20 +126,6 @@ void main() {
       expect(decoded['state'], '');
     });
 
-    test('forum target encodes the bbs client', () {
-      final decoded = jsonDecode(
-        utf8.decode(base64Url.decode(base64Url.normalize(
-          WeComAuthService.encodeOAuthParams(WeComOAuthTarget.forum.toParams()),
-        ))),
-      );
-      expect(decoded['clientId'], 'vp8G2H42GGE86LP822LHF6Hs7f46483H');
-      expect(decoded['scope'], '');
-      expect(
-        decoded['redirectUri'],
-        'https://bbs.shu.edu.cn/auth/oauth2_basic/callback',
-      );
-    });
-
     test('WebVPN target uses its dedicated OAuth client', () {
       expect(WeComOAuthTarget.webVpn.kind, WeComOAuthTargetKind.webVpn);
       expect(
@@ -185,15 +138,8 @@ void main() {
       );
     });
 
-    test('state strategies match the target system config', () {
-      // jwxt 自生成随机 state；bbs 需先访问自身入口预取 state。
+    test('academic state is generated locally', () {
       expect(WeComOAuthTarget.academic.generateState, isTrue);
-      expect(WeComOAuthTarget.academic.stateBootstrapUrl, isNull);
-      expect(WeComOAuthTarget.forum.generateState, isFalse);
-      expect(
-        WeComOAuthTarget.forum.stateBootstrapUrl,
-        'https://bbs.shu.edu.cn/auth/oauth2_basic',
-      );
     });
   });
 }

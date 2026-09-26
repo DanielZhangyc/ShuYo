@@ -8,7 +8,7 @@ class AcademicUrlResolver {
   static const homePath = '/jwglxt/xtgl/index_initMenu.html';
 
   // The academic system is publicly reachable. WebVPN is deliberately kept
-  // out of the academic route so forum/classroom transport changes cannot
+  // out of the academic route so classroom transport changes cannot
   // invalidate the timetable session.
   static bool get usesWebVpn => false;
 

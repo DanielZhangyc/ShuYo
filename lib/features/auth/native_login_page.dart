@@ -3,20 +3,17 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../../core/forum_url_resolver.dart';
 import '../../core/wecom_constants.dart';
 import '../../data/services/academic_native_auth_service.dart';
 import '../../data/services/academic_account_store.dart';
 import '../../data/services/academic_auth_service.dart';
-import '../../data/services/campus_reachability_service.dart';
 import '../../data/services/verification_delivery_service.dart';
 import '../../data/services/wecom_auth_service.dart';
 import '../../data/demo/demo_session.dart';
-import 'forum_oauth_completion_page.dart';
 import 'webvpn_oauth_completion_page.dart';
 import 'wecom_scan_page.dart';
 
-enum NativeLoginDestination { academic, forum, webVpn }
+enum NativeLoginDestination { academic, webVpn }
 
 enum NativeLoginResult { authenticated, demo }
 
@@ -24,24 +21,13 @@ class NativeLoginPage extends StatefulWidget {
   const NativeLoginPage({
     super.key,
     this.destination = NativeLoginDestination.academic,
-    this.reachabilityService,
   });
-
-  const NativeLoginPage.forum({
-    super.key,
-    this.reachabilityService,
-  }) : destination = NativeLoginDestination.forum;
 
   const NativeLoginPage.webVpn({
     super.key,
-    this.reachabilityService,
   }) : destination = NativeLoginDestination.webVpn;
 
   final NativeLoginDestination destination;
-
-  /// 校园网可达性探测器，仅用于测试注入。
-  @visibleForTesting
-  final CampusReachabilityService? reachabilityService;
 
   @override
   State<NativeLoginPage> createState() => _NativeLoginPageState();
@@ -51,14 +37,11 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
   AcademicNativeAuthService? _authServiceInstance;
   AcademicNativeAuthService get _authService =>
       _authServiceInstance ??= switch (widget.destination) {
-        NativeLoginDestination.forum => AcademicNativeAuthService.forForum(),
         NativeLoginDestination.webVpn => AcademicNativeAuthService.forWebVpn(),
         NativeLoginDestination.academic => AcademicNativeAuthService(),
       };
   final _verificationDeliveryService = VerificationDeliveryService();
   final _weComAuthService = WeComAuthService();
-  late final CampusReachabilityService _reachabilityService =
-      widget.reachabilityService ?? const CampusReachabilityService();
   final _studentId = TextEditingController();
   final _password = TextEditingController();
   final _code = TextEditingController();
@@ -67,7 +50,6 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
 
   int _step = 0;
   bool _busy = false;
-  bool _preflighting = false;
   bool _passwordVisible = false;
   AcademicLoginChallenge? _challenge;
   AcademicVerificationMethod _method = AcademicVerificationMethod.wecom;
@@ -96,7 +78,6 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
         appBar: AppBar(
           title: Text(switch (_step) {
             0 => switch (widget.destination) {
-                NativeLoginDestination.forum => '乐乎论坛账户',
                 NativeLoginDestination.webVpn => '登录WebVPN服务',
                 NativeLoginDestination.academic => '上大校园账户',
               },
@@ -124,7 +105,6 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
           children: [
             Text(
               switch (widget.destination) {
-                NativeLoginDestination.forum => '登录论坛账户',
                 NativeLoginDestination.webVpn => '登录WebVPN服务',
                 NativeLoginDestination.academic => '登录校园账户',
               },
@@ -175,14 +155,14 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
             ),
             const SizedBox(height: 28),
             FilledButton(
-              onPressed: (_busy || _preflighting) ? null : _submitCredentials,
+              onPressed: (_busy) ? null : _submitCredentials,
               style: FilledButton.styleFrom(
                   minimumSize: const Size.fromHeight(50)),
               child: _buttonContent('继续'),
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
-              onPressed: (_busy || _preflighting) ? null : _startWeComLogin,
+              onPressed: (_busy) ? null : _startWeComLogin,
               icon: const Icon(Icons.qr_code_scanner_outlined),
               label: const Text('使用企业微信登录'),
               style: OutlinedButton.styleFrom(
@@ -266,25 +246,21 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
   }
 
   Widget _buttonContent(String label) {
-    // 预检同样要给出反馈：探测最长会占住按钮数秒，
-    // 静默禁用看起来像「点了没反应」。
-    if (!_busy && !_preflighting) return Text(label);
+    // 登录请求期间显示进度，避免按钮看起来没有响应。
+    if (!_busy) return Text(label);
     return const SizedBox.square(
         dimension: 20, child: CircularProgressIndicator(strokeWidth: 2));
   }
 
   Future<void> _submitCredentials() async {
-    if (_busy ||
-        _preflighting ||
-        _credentialsKey.currentState?.validate() != true) {
+    if (_busy || _credentialsKey.currentState?.validate() != true) {
       return;
     }
-    // 演示模式完全离线，且网络预检会弹出对话框，必须在 busy 之前处理。
+    // 演示模式完全离线，在发起网络请求之前处理。
     if (DemoSession.matchesCredentials(_studentId.text, _password.text)) {
       await _submitDemoLogin();
       return;
     }
-    if (!await _ensureDirectForumAccess()) return;
     if (!mounted) return;
     setState(() => _busy = true);
     try {
@@ -321,7 +297,7 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
 
   /// 进入本地演示模式并返回结果。
   ///
-  /// 全程离线，必须早于网络预检，否则校外评审会被预检拦住。
+  /// 全程离线，在任何网络请求之前处理。
   Future<void> _submitDemoLogin() async {
     setState(() => _busy = true);
     try {
@@ -340,9 +316,7 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
   }
 
   Future<void> _startWeComLogin() async {
-    if (_busy || _preflighting) return;
-    // 预检可能弹出对话框，放在 busy 之外以免按钮一直停留在加载动画。
-    if (!await _ensureDirectForumAccess()) return;
+    if (_busy) return;
     if (!mounted) return;
     setState(() => _busy = true);
     try {
@@ -380,60 +354,9 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
   /// 企微扫码登录的目标系统参数，必须与用户正在登录的入口一致，
   /// 否则 SSO 会把授权码下发给错误的业务系统。
   WeComOAuthTarget get _weComTarget => switch (widget.destination) {
-        NativeLoginDestination.forum => WeComOAuthTarget.forum,
         NativeLoginDestination.webVpn => WeComOAuthTarget.webVpn,
         NativeLoginDestination.academic => WeComOAuthTarget.academic,
       };
-
-  /// 仅当目标业务系统是乐乎论坛且当前为直连时才拦截。
-  bool get _requiresDirectForumAccess =>
-      widget.destination == NativeLoginDestination.forum &&
-      !ForumUrlResolver.usesWebVpn;
-
-  /// 在向学校认证服务提交凭据/发起授权之前，确认论坛直连可用。
-  ///
-  /// 非校园网下论坛完全不可达，而 SSO 会话与二步验证在校外仍能成功，
-  /// 结果就是用户完整走完登录，最后卡在业务系统回调上直到超时。
-  /// 这里提前拦住，避免无谓的凭据提交与等待。
-  ///
-  /// 返回 false 表示应当中止本次登录（已向用户说明原因）。
-  Future<bool> _ensureDirectForumAccess() async {
-    if (!_requiresDirectForumAccess) return true;
-    // 探测有耗时窗口，按钮需要禁用并显示加载，避免连点弹出多个提示框。
-    setState(() => _preflighting = true);
-    final result = await _reachabilityService.checkDirectForum();
-    if (!mounted) return false;
-    // 必须在弹出对话框前复位：对话框本身是模态的，已足以阻止连点，
-    // 若保持 true 按钮会一直停在加载动画上。
-    setState(() => _preflighting = false);
-    if (!result.isUnreachable) return true;
-    return _showCampusNetworkRequired();
-  }
-
-  /// 告知用户当前不在校园网，并允许仍要继续尝试。
-  ///
-  /// 返回 true 表示用户选择继续（网络探测偶有误报，不应硬阻断登录）。
-  Future<bool> _showCampusNetworkRequired() async {
-    final proceed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('无法连接乐乎论坛'),
-        // 与论坛会话页共用同一份文案，避免两处提示漂移。
-        content: const Text(campusNetworkRequiredMessage),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('仍然尝试'),
-          ),
-        ],
-      ),
-    );
-    return proceed ?? false;
-  }
 
   Future<void> _sendCode() async {
     if (_busy || _countdown > 0) return;
@@ -484,15 +407,6 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
     Uri callbackUri, {
     WeComRedeemResult? weComRedeem,
   }) async {
-    if (kDebugMode && widget.destination == NativeLoginDestination.forum) {
-      debugPrint(
-        '[FORUM_AUTH_CALLBACK] native redirect '
-        '${callbackUri.host}${callbackUri.path} '
-        'queryKeys=${callbackUri.queryParameters.keys.toList()..sort()} '
-        'redirectUri=${_describeRedirectUri(callbackUri.queryParameters['redirect_uri'])} '
-        'stateLength=${callbackUri.queryParameters['state']?.length ?? 0}',
-      );
-    }
     if (weComRedeem != null) {
       _authService.adoptSessionCookies(
         weComRedeem.sessionCookies.map(
@@ -506,19 +420,6 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
     }
     await _authService.installCookiesInWebView();
     if (!mounted) return;
-    if (widget.destination == NativeLoginDestination.forum) {
-      final result =
-          await Navigator.of(context).push<ForumOAuthCompletionResult>(
-        MaterialPageRoute(
-          builder: (_) => ForumOAuthCompletionPage(callbackUri: callbackUri),
-        ),
-      );
-      if (!mounted) return;
-      if (result == ForumOAuthCompletionResult.loggedIn) {
-        Navigator.of(context).pop(NativeLoginResult.authenticated);
-      }
-      return;
-    }
     final completed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => WebVpnOAuthCompletionPage(
@@ -562,13 +463,6 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
       await AcademicAccountStore().saveStudentId(_studentId.text);
     }
     if (mounted) Navigator.of(context).pop(NativeLoginResult.authenticated);
-  }
-
-  String _describeRedirectUri(String? value) {
-    if (value == null || value.isEmpty) return '-';
-    final uri = Uri.tryParse(value);
-    if (uri == null) return '<invalid>';
-    return '${uri.host}${uri.path}';
   }
 
   String _methodHint(Map<AcademicVerificationMethod, String> methods) {

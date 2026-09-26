@@ -6,7 +6,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test('clears a rejected WebVPN session without touching forum cookies',
+  test('clears a rejected WebVPN session without touching unrelated cookies',
       () async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
@@ -19,11 +19,6 @@ void main() {
         WebViewCookie(
           name: 'webvpn-token',
           value: 'stale',
-          domain: domain.host,
-        ),
-        WebViewCookie(
-          name: '_forum_session',
-          value: 'forum-session',
           domain: domain.host,
         ),
         WebViewCookie(
@@ -42,7 +37,6 @@ void main() {
       cleared.where((cookie) => cookie.name == 'webvpn-token'),
       isNotEmpty,
     );
-    expect(cleared.any((cookie) => cookie.name == '_forum_session'), isFalse);
     expect(
       cleared.where((cookie) => cookie.name == 'SHU_OAUTH2').every(
             (cookie) =>

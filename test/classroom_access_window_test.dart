@@ -1,15 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuyo/core/classroom_url_resolver.dart';
-import 'package:shuyo/core/forum_url_resolver.dart';
 
 void main() {
   tearDown(() {
-    ForumUrlResolver.configure(useWebVpn: false);
     ClassroomUrlResolver.configure(useWebVpn: false);
   });
 
-  test('classroom routing is independent from the forum resolver', () {
-    ForumUrlResolver.configure(useWebVpn: true);
+  test('classroom routing switches with WebVPN setting', () {
     ClassroomUrlResolver.configure(useWebVpn: false);
     expect(ClassroomUrlResolver.baseUri.host, ClassroomUrlResolver.directHost);
 

@@ -1,8 +1,6 @@
 import Flutter
 import Photos
-import PhotosUI
 import UIKit
-import UniformTypeIdentifiers
 import UserNotifications
 
 #if canImport(AlarmKit) && !targetEnvironment(macCatalyst)
@@ -13,7 +11,6 @@ import UserNotifications
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var pendingImageSaveResult: FlutterResult?
-  private var pendingImagePickerResult: FlutterResult?
   private var earlyClassAlarmSyncTask: Task<Void, Never>?
 
   private static let earlyClassAlarmIdsKey = "early_class_alarm_ids"
@@ -23,6 +20,7 @@ import UserNotifications
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     UNUserNotificationCenter.current().delegate = self as UNUserNotificationCenterDelegate
+    UserDefaults.standard.removeObject(forKey: "emoji_recents")
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -34,32 +32,6 @@ import UserNotifications
     ).setMethodCallHandler { [weak self] call, result in
       if call.method == "saveImage" {
         self?.saveImage(call: call, result: result)
-      } else {
-        result(FlutterMethodNotImplemented)
-      }
-    }
-    FlutterMethodChannel(
-      name: "work.shuyo.app/emoji_recents",
-      binaryMessenger: engineBridge.applicationRegistrar.messenger()
-    ).setMethodCallHandler { call, result in
-      switch call.method {
-      case "getEmojiRecents":
-        result(UserDefaults.standard.stringArray(forKey: "emoji_recents") ?? [])
-      case "setEmojiRecents":
-        let args = call.arguments as? [String: Any]
-        let shortcodes = args?["shortcodes"] as? [String] ?? []
-        UserDefaults.standard.set(shortcodes, forKey: "emoji_recents")
-        result(nil)
-      default:
-        result(FlutterMethodNotImplemented)
-      }
-    }
-    FlutterMethodChannel(
-      name: "work.shuyo.app/image_picker",
-      binaryMessenger: engineBridge.applicationRegistrar.messenger()
-    ).setMethodCallHandler { [weak self] call, result in
-      if call.method == "pickImage" {
-        self?.pickImage(result: result)
       } else {
         result(FlutterMethodNotImplemented)
       }
@@ -237,49 +209,6 @@ import UserNotifications
     private struct ShuYoAlarmMetadata: AlarmMetadata {}
   #endif
 
-  private func pickImage(result: @escaping FlutterResult) {
-    guard pendingImagePickerResult == nil else {
-      result(
-        FlutterError(
-          code: "busy",
-          message: "Image picker is already open",
-          details: nil
-        )
-      )
-      return
-    }
-    guard let presenter = topViewController() else {
-      result(
-        FlutterError(
-          code: "picker_unavailable",
-          message: "Cannot find a view controller to present the image picker",
-          details: nil
-        )
-      )
-      return
-    }
-
-    var configuration = PHPickerConfiguration(photoLibrary: .shared())
-    configuration.filter = .images
-    configuration.selectionLimit = 1
-    let picker = PHPickerViewController(configuration: configuration)
-    picker.delegate = self
-    pendingImagePickerResult = result
-    presenter.present(picker, animated: true)
-  }
-
-  private func topViewController() -> UIViewController? {
-    let windows = UIApplication.shared.connectedScenes
-      .compactMap { $0 as? UIWindowScene }
-      .flatMap { $0.windows }
-    let window = windows.first(where: { $0.isKeyWindow }) ?? windows.first
-    var controller = window?.rootViewController
-    while let presented = controller?.presentedViewController {
-      controller = presented
-    }
-    return controller
-  }
-
   private func saveImage(call: FlutterMethodCall, result: @escaping FlutterResult) {
     guard pendingImageSaveResult == nil else {
       result(
@@ -334,53 +263,5 @@ import UserNotifications
       return
     }
     result(true)
-  }
-}
-
-extension AppDelegate: PHPickerViewControllerDelegate {
-  func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-    guard let result = pendingImagePickerResult else {
-      picker.dismiss(animated: true)
-      return
-    }
-    pendingImagePickerResult = nil
-    picker.dismiss(animated: true)
-
-    guard let provider = results.first?.itemProvider else {
-      result(nil)
-      return
-    }
-    let imageTypes = provider.registeredTypeIdentifiers.compactMap { identifier in
-      UTType(identifier)?.conforms(to: .image) == true ? UTType(identifier) : nil
-    }
-    let selectedType = imageTypes.first { $0.preferredFilenameExtension != nil }
-      ?? imageTypes.first
-      ?? UTType.image
-    let typeIdentifier = selectedType.identifier
-    provider.loadDataRepresentation(forTypeIdentifier: typeIdentifier) { data, error in
-      DispatchQueue.main.async {
-        if let error {
-          result(
-            FlutterError(
-              code: "read_failed",
-              message: error.localizedDescription,
-              details: nil
-            )
-          )
-          return
-        }
-        guard let data, !data.isEmpty else {
-          result(nil)
-          return
-        }
-        let mimeType = selectedType.preferredMIMEType ?? "image/jpeg"
-        let extensionName = selectedType.preferredFilenameExtension ?? "jpg"
-        result([
-          "bytes": FlutterStandardTypedData(bytes: data),
-          "filename": "shuyo_\(Int(Date().timeIntervalSince1970)).\(extensionName)",
-          "mimeType": mimeType
-        ])
-      }
-    }
   }
 }

@@ -9,7 +9,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/academic_constants.dart';
 import '../../core/academic_url_resolver.dart';
 import '../../core/client_user_agent.dart';
-import '../../core/forum_url_resolver.dart';
+import '../../core/webvpn_urls.dart';
 import 'academic_account_store.dart';
 import 'http_timeout.dart';
 
@@ -61,7 +61,7 @@ class AcademicAuthService {
       _directSessionValidator;
 
   /// Clears every piece of state that makes the campus account appear signed
-  /// in. Schedule data, forum cookies, and WebVPN cookies are intentionally
+  /// in. Schedule data and WebVPN cookies are intentionally
   /// outside this account boundary.
   Future<void> clearAccount() async {
     try {
@@ -74,19 +74,17 @@ class AcademicAuthService {
   }
 
   Future<Set<String>> clearCookies() async {
-    // Academic logout only owns the direct jwxt session. WebVPN and forum
-    // sessions are independent and must survive this operation.
-    final clearedSharedNames = <String>{};
-    final domains = <(Uri, bool)>[
-      (Uri.parse(AcademicConstants.baseUrl), false),
-      (Uri.parse('${AcademicConstants.baseUrl}/jwglxt/'), false),
+    // Academic logout owns only the direct jwxt session.
+    final domains = <Uri>[
+      Uri.parse(AcademicConstants.baseUrl),
+      Uri.parse('${AcademicConstants.baseUrl}/jwglxt/'),
     ];
     final prefs = await _preferencesLoader();
     // Record the user's intent before touching the WebView. Cookie deletion
     // can fail on a transient WebVPN/WebView error, but must not resurrect the
     // account on the next app launch.
     await prefs.setBool(_explicitlySignedOutKey, true);
-    for (final (domain, sharedWithForum) in domains) {
+    for (final domain in domains) {
       List<WebViewCookie> cookies;
       try {
         cookies = await _cookieLoader(domain);
@@ -94,7 +92,6 @@ class AcademicAuthService {
         continue;
       }
       for (final cookie in cookies) {
-        if (sharedWithForum) clearedSharedNames.add(cookie.name);
         try {
           await _cookieSetter(
             WebViewCookie(
@@ -114,7 +111,7 @@ class AcademicAuthService {
       prefs.remove(_cachedDirectCookiesKey),
       prefs.setBool(_explicitlySignedOutKey, true),
     ]);
-    return clearedSharedNames;
+    return const {};
   }
 
   /// Clears the persistent logout marker after a user completes login.
@@ -131,8 +128,7 @@ class AcademicAuthService {
   Future<bool> hasWebVpnSession() async {
     final status = await validateWebVpnSession();
     // A transport failure does not prove that the user was logged out. Keep
-    // the cached account available and retry validation with the next forum
-    // recovery instead of destroying a potentially valid session.
+    // the cached account available and retry validation on the next attempt instead of destroying a potentially valid session.
     return status != WebVpnSessionStatus.loginRequired;
   }
 
@@ -293,41 +289,27 @@ class AcademicAuthService {
       HttpTimeout.normal,
       () => client.close(force: true),
     );
-    var current = Uri.parse('${ForumUrlResolver.webVpnBaseUrl}/latest');
+    final current = Uri.parse(WebVpnUrls.userInfo);
     try {
-      for (var redirectCount = 0; redirectCount < 10; redirectCount++) {
-        final request = await client.getUrl(current).timeout(
-              HttpTimeout.connect,
-            );
-        request.followRedirects = false;
-        request.headers
-          ..set(HttpHeaders.acceptHeader, 'text/html,application/xhtml+xml')
-          ..set(HttpHeaders.userAgentHeader, ClientUserAgent.mobileBrowser)
-          ..set(HttpHeaders.cookieHeader, cookieHeader);
-        final response = await request.close().timeout(HttpTimeout.normal);
-        final location = response.headers.value(HttpHeaders.locationHeader);
-        final statusCode = response.statusCode;
-        await response.drain<void>().timeout(HttpTimeout.normal);
-        _debug(
-          'webvpn validation hop=$redirectCount status=$statusCode '
-          'uri=${_describeUri(current)} '
-          'location=${_describeLocation(current, location)}',
-        );
-        if (statusCode >= 300 && statusCode < 400 && location != null) {
-          current = current.resolve(location);
-          continue;
-        }
-        if (current.host == ForumUrlResolver.webVpnHost) {
-          return WebVpnSessionStatus.valid;
-        }
-        if (_isWebVpnLoginUri(current) ||
-            statusCode == 401 ||
-            statusCode == 403) {
-          return WebVpnSessionStatus.loginRequired;
-        }
-        return WebVpnSessionStatus.unavailable;
+      final request = await client.getUrl(current).timeout(HttpTimeout.connect);
+      request.followRedirects = false;
+      request.headers
+        ..set(HttpHeaders.acceptHeader, 'application/json, text/plain, */*')
+        ..set(HttpHeaders.userAgentHeader, ClientUserAgent.mobileBrowser)
+        ..set(HttpHeaders.refererHeader, '${WebVpnUrls.portal}/site-nav/')
+        ..set(HttpHeaders.cookieHeader, cookieHeader);
+      final response = await request.close().timeout(HttpTimeout.normal);
+      final statusCode = response.statusCode;
+      final location = response.headers.value(HttpHeaders.locationHeader);
+      final body =
+          await utf8.decodeStream(response).timeout(HttpTimeout.normal);
+      if (statusCode >= 300 &&
+          statusCode < 400 &&
+          location != null &&
+          _isWebVpnLoginUri(current.resolve(location))) {
+        return WebVpnSessionStatus.loginRequired;
       }
-      return WebVpnSessionStatus.unavailable;
+      return classifyWebVpnUserInfo(statusCode, body);
     } on TimeoutException catch (error) {
       _debug('webvpn validation failed: $error');
       return WebVpnSessionStatus.unavailable;
@@ -351,11 +333,46 @@ class AcademicAuthService {
 
   bool _isWebVpnLoginUri(Uri uri) {
     final host = uri.host.toLowerCase();
-    if (host == Uri.parse(ForumUrlResolver.webVpnPortalUrl).host) return true;
+    if (host == Uri.parse(WebVpnUrls.portal).host) return true;
     return host == 'oauth.shu.edu.cn' ||
         host.endsWith('.oauth.shu.edu.cn') ||
         host.contains('oauth-shu-edu-cn') ||
         host.contains('newsso-shu-edu-cn');
+  }
+
+  @visibleForTesting
+  static WebVpnSessionStatus classifyWebVpnUserInfo(
+    int statusCode,
+    String body,
+  ) {
+    if (statusCode == 401 || statusCode == 403) {
+      return WebVpnSessionStatus.loginRequired;
+    }
+    if (statusCode != 200) return WebVpnSessionStatus.unavailable;
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(body);
+    } on FormatException {
+      return WebVpnSessionStatus.unavailable;
+    }
+    if (decoded is! Map) return WebVpnSessionStatus.unavailable;
+    final data = decoded['data'];
+    final userId = data is Map ? data['userId']?.toString() : null;
+    if (decoded['code'] == 0 &&
+        userId != null &&
+        userId.isNotEmpty &&
+        userId != '0') {
+      return WebVpnSessionStatus.valid;
+    }
+    final code = decoded['code']?.toString();
+    final message = decoded['message']?.toString() ?? '';
+    if (code == '401' ||
+        code == '403' ||
+        message.contains('未登录') ||
+        message.contains('登录失效')) {
+      return WebVpnSessionStatus.loginRequired;
+    }
+    return WebVpnSessionStatus.unavailable;
   }
 
   /// Returns cookies suitable for the current service.
@@ -422,7 +439,7 @@ class AcademicAuthService {
     final groups = <String, List<WebViewCookie>>{};
     if (webVpn) {
       groups[_portalGroup] = await _cookiesFor(
-        Uri.parse(ForumUrlResolver.webVpnPortalUrl),
+        Uri.parse(WebVpnUrls.portal),
       );
     }
     final academicDomains = webVpn

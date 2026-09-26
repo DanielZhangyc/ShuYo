@@ -2,11 +2,9 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:home_widget/home_widget.dart';
 
 import 'app/shuyo_app.dart';
-import 'core/shuyo_http_overrides.dart';
 import 'data/services/app_data_migration_service.dart';
 import 'data/services/academic_schedule_widget_service.dart';
 import 'data/services/client_settings_service.dart';
@@ -23,8 +21,6 @@ Future<void> main() async {
       // Widget setup must not prevent the main application from starting.
     }
   }
-  _registerAdditionalLicenses();
-  HttpOverrides.global = ShuYoHttpOverrides();
   final initialThemeSettings = await _loadInitialThemeSettings();
   runApp(
     ShuYoApp(
@@ -32,13 +28,6 @@ Future<void> main() async {
       initialFollowSystemTheme: initialThemeSettings.followSystemTheme,
     ),
   );
-}
-
-void _registerAdditionalLicenses() {
-  LicenseRegistry.addLicense(() async* {
-    final notice = await rootBundle.loadString('THIRD_PARTY_NOTICES.md');
-    yield LicenseEntryWithLineBreaks(const ['GitHub gemoji'], notice);
-  });
 }
 
 Future<_InitialThemeSettings> _loadInitialThemeSettings() async {

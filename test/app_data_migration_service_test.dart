@@ -3,53 +3,72 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuyo/data/services/app_data_migration_service.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 void main() {
-  test('clears legacy preferences and image cache once', () async {
+  test('removes forum drafts and cookies but preserves campus and WebVPN state',
+      () async {
     final root = await Directory.systemTemp.createTemp('shuyo-migration-');
     addTearDown(() => root.delete(recursive: true));
-    final imageDir = Directory('${root.path}/forum-images')
+    final images = Directory('${root.path}/forum-images')
       ..createSync(recursive: true);
-    File('${imageDir.path}/old.bin').writeAsBytesSync([1, 2, 3]);
-
+    File('${images.path}/old.bin').writeAsBytesSync([1, 2, 3]);
     SharedPreferences.setMockInitialValues({
-      'academic.auth.cached_cookies.webvpn': 'legacy',
-      'forum.account.snapshot.v1.webvpn': 'legacy',
-      'client.onboarding.startup.completed': true,
-      'client.network.webvpn.auto_proxy': false,
+      'forum.composerDraft.v2.alice.draft': 'old draft',
+      'forum.account.snapshot.v1.webvpn': 'old account',
+      'client.backend.presence.day.42': '2026-09-26',
+      'academic.schedule.cache': 'saved schedule',
+      'academic.account.student_id': '25120000',
+      'academic.auth.cached_cookies.webvpn': 'saved session',
+      'client.network.webvpn.enabled': true,
+      'client.theme.id': 'dark',
     });
-    var cookieClearCount = 0;
+    final cleared = <WebViewCookie>[];
+    var loads = 0;
     final service = AppDataMigrationService(
-      webViewCookieClearer: () async => cookieClearCount++,
       cacheDirectoryLoader: () async => root,
-      platformStateClearer: () async {},
+      cookieLoader: (domain) async {
+        loads++;
+        return [
+          WebViewCookie(
+              name: '_forum_session', value: 'old', domain: domain.host),
+          WebViewCookie(
+              name: 'webvpn-token', value: 'keep', domain: domain.host),
+        ];
+      },
+      cookieSetter: (cookie) async => cleared.add(cookie),
     );
-
     await service.migrateIfNeeded();
     final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getString('academic.auth.cached_cookies.webvpn'), isNull);
+    expect(prefs.getString('forum.composerDraft.v2.alice.draft'), isNull);
     expect(prefs.getString('forum.account.snapshot.v1.webvpn'), isNull);
-    expect(prefs.getBool('client.onboarding.startup.completed'), isFalse);
-    expect(prefs.getBool('client.network.webvpn.auto_proxy'), isNull);
-    expect(prefs.getBool('client.network.webvpn.enabled'), isFalse);
-    expect(prefs.getInt(AppDataMigrationService.schemaVersionKey),
-        AppDataMigrationService.currentSchemaVersion);
-    expect(await imageDir.exists(), isFalse);
-    expect(cookieClearCount, 1);
-
+    expect(prefs.getString('client.backend.presence.day.42'), isNull);
+    expect(prefs.getString('academic.schedule.cache'), 'saved schedule');
+    expect(prefs.getString('academic.account.student_id'), '25120000');
+    expect(prefs.getString('academic.auth.cached_cookies.webvpn'),
+        'saved session');
+    expect(prefs.getBool('client.network.webvpn.enabled'), isTrue);
+    expect(prefs.getString('client.theme.id'), 'dark');
+    expect(await images.exists(), isFalse);
+    expect(cleared, hasLength(2));
+    expect(
+        cleared.every((cookie) =>
+            cookie.name == '_forum_session' && cookie.value.isEmpty),
+        isTrue);
+    expect(prefs.getInt(AppDataMigrationService.schemaVersionKey), 4);
     await service.migrateIfNeeded();
-    expect(cookieClearCount, 1);
+    expect(loads, 2);
   });
 
-  test('does not write marker when cleanup fails', () async {
-    SharedPreferences.setMockInitialValues({'legacy': true});
+  test('retries when cookie cleanup fails', () async {
+    SharedPreferences.setMockInitialValues(
+        {'forum.composerDraft.v2.a.b': 'draft'});
     final service = AppDataMigrationService(
-      webViewCookieClearer: () async => throw StateError('cookie failure'),
       cacheDirectoryLoader: () async => Directory.systemTemp,
-      platformStateClearer: () async {},
+      cookieLoader: (_) async => throw StateError('cookie failure'),
+      cookieSetter: (_) async {},
     );
-
-    await expectLater(service.migrateIfNeeded(), throwsStateError);
+    await service.migrateIfNeeded();
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getInt(AppDataMigrationService.schemaVersionKey), isNull);
   });

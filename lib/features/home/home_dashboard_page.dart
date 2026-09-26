@@ -3,25 +3,16 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:lunar/calendar/Lunar.dart';
 
-import '../../data/models/user_profile.dart';
 import '../../shared/shuyo_text_styles.dart';
 import '../../shared/theme/shuyo_theme.dart';
 
 class HomeDashboardPage extends StatelessWidget {
   const HomeDashboardPage({
     super.key,
-    required this.profile,
-    required this.isOnline,
-    required this.hasLocalAccount,
-    required this.forumRequiresReauthentication,
     required this.hasAcademicAccount,
     this.academicStudentId,
     required this.isAcademicLoginCompleting,
-    required this.isCheckingConnection,
-    required this.isInitialConnectionCheck,
-    required this.isBusy,
     required this.onLogin,
-    required this.onRelogin,
     required this.onOpenAcademicSystem,
     required this.onOpenAnnouncements,
     required this.onOpenEmptyClassroom,
@@ -31,18 +22,10 @@ class HomeDashboardPage extends StatelessWidget {
     this.isDemo = false,
   });
 
-  final UserProfile profile;
-  final bool isOnline;
-  final bool hasLocalAccount;
-  final bool forumRequiresReauthentication;
   final bool hasAcademicAccount;
   final String? academicStudentId;
   final bool isAcademicLoginCompleting;
-  final bool isCheckingConnection;
-  final bool isInitialConnectionCheck;
-  final bool isBusy;
   final VoidCallback onLogin;
-  final VoidCallback onRelogin;
   final VoidCallback onOpenAcademicSystem;
   final VoidCallback onOpenAnnouncements;
   final VoidCallback onOpenEmptyClassroom;
@@ -77,49 +60,25 @@ class HomeDashboardPage extends StatelessWidget {
           const SizedBox(height: 10),
         ],
         _HomeRow(
-          title: hasLocalAccount
-              ? '欢迎回来，${profile.username}'
-              : isAcademicLoginCompleting
-                  ? '正在完成校园登录'
-                  : hasAcademicAccount
-                      ? academicStudentId?.isNotEmpty == true
-                          ? '你好，$academicStudentId！'
-                          : '你好！'
-                      : '立即登录',
-          content: !hasLocalAccount
-              ? isAcademicLoginCompleting
-                  ? '正在获取课表...'
-                  : hasAcademicAccount
-                      ? '点此登录乐乎论坛'
-                      : '登录后同步个人数据'
-              : isCheckingConnection && !isInitialConnectionCheck
-                  ? '正在连接论坛...'
-                  : isOnline
-                      ? _greeting()
-                      : isInitialConnectionCheck
-                          ? _greeting()
-                          : forumRequiresReauthentication
-                              ? '论坛登录已失效，请重新登录'
-                              : '无法连接乐乎论坛，请稍后重试',
-          trailing: isAcademicLoginCompleting && !hasLocalAccount
+          title: isAcademicLoginCompleting
+              ? '正在完成校园登录'
+              : hasAcademicAccount
+                  ? academicStudentId?.isNotEmpty == true
+                      ? '你好，$academicStudentId！'
+                      : '你好！'
+                  : '立即登录',
+          content: isAcademicLoginCompleting
+              ? '正在获取课表...'
+              : hasAcademicAccount
+                  ? _greeting()
+                  : '登录后同步个人数据',
+          trailing: isAcademicLoginCompleting
               ? const SizedBox(
                   width: 20,
                   height: 20,
                   child: CircularProgressIndicator(strokeWidth: 3),
                 )
-              : hasLocalAccount
-                  ? IconButton(
-                      tooltip: '刷新论坛连接',
-                      onPressed: isBusy ? null : onRelogin,
-                      icon: isBusy && !isInitialConnectionCheck
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 3),
-                            )
-                          : const Icon(Icons.refresh),
-                    )
-                  : const Icon(Icons.login),
+              : const Icon(Icons.account_circle_outlined),
           onTap: isAcademicLoginCompleting ? null : onLogin,
         ),
         _HomeRow(

@@ -41,16 +41,6 @@ class WeComConstants {
   /// 统一身份认证（SSO）站点，`authorize` 与业务系统回调都在这里。
   static const ssoBase = 'https://newsso.shu.edu.cn';
 
-  /// 论坛走的是这个 SSO 域名（与 [ssoBase] 同源后端，但 cookie 按 host 隔离）。
-  static const forumSsoHost = 'oauth.shu.edu.cn';
-
-  /// WebVPN 模式下论坛 OAuth 经过的代理 SSO 域名。
-  ///
-  /// Android WebView 不会把 [ssoBase] 的 host-only Cookie 发送给该域名，
-  /// 因此企微换取的 `SHU_OAUTH2` 需要另外写入这个 host。
-  static const forumWebVpnSsoHost =
-      'https-oauth-shu-edu-cn-443.webvpn.shu.edu.cn';
-
   /// WebVPN OAuth 握手使用的固定端点。
   static const webVpnBase = 'https://webvpn.shu.edu.cn';
   static const webVpnCallback = '$webVpnBase/callback/oauth2';
@@ -81,7 +71,6 @@ class WeComOAuthTarget {
     required this.clientName,
     required this.scope,
     required this.redirectUri,
-    this.stateBootstrapUrl,
     this.generateState = false,
   });
 
@@ -93,16 +82,6 @@ class WeComOAuthTarget {
     scope: 'jw',
     redirectUri: 'https://jwxt.shu.edu.cn/sso/shulogin',
     generateState: true,
-  );
-
-  /// 上大论坛（乐乎社区，bbs）：必须先向它自己要一个 state，再改走 SSO 授权。
-  static const forum = WeComOAuthTarget(
-    kind: WeComOAuthTargetKind.forum,
-    clientId: 'vp8G2H42GGE86LP822LHF6Hs7f46483H',
-    clientName: '上大bbs (乐乎社区)',
-    scope: '',
-    redirectUri: 'https://bbs.shu.edu.cn/auth/oauth2_basic/callback',
-    stateBootstrapUrl: 'https://bbs.shu.edu.cn/auth/oauth2_basic',
   );
 
   /// WebVPN 需要在 OAuth 授权后调用 `auth/finish`，不能按通用
@@ -122,10 +101,6 @@ class WeComOAuthTarget {
   final String scope;
   final String redirectUri;
 
-  /// 需要先访问该地址，从它的 302 Location 里取出 `state`。
-  /// 为空表示不需要预热。
-  final String? stateBootstrapUrl;
-
   /// 为 true 时由本地生成随机 state。
   final bool generateState;
 
@@ -140,4 +115,4 @@ class WeComOAuthTarget {
       };
 }
 
-enum WeComOAuthTargetKind { academic, forum, webVpn }
+enum WeComOAuthTargetKind { academic, webVpn }

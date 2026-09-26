@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -10,24 +9,10 @@ import '../../data/models/client_backend.dart';
 import '../../data/services/client_settings_service.dart';
 import '../auth/native_login_page.dart';
 
-enum ForumAccountStatus {
-  signedOut,
-  connecting,
-  loggedIn,
-  connectionUnavailable,
-  webVpnLoginRequired,
-  waitingForAcademicLogin,
-  reauthenticationRequired,
-  directLoginUnavailable,
-}
-
 class StartupOnboardingController extends ChangeNotifier {
   bool _academicLoggedIn = false;
-  ForumAccountStatus _forumStatus = ForumAccountStatus.signedOut;
-  VoidCallback? _onForumReconnect;
   VoidCallback? _onDismissAccountManager;
   Future<bool> Function()? _onAcademicLogout;
-  Future<bool> Function()? _onForumLogout;
   Future<bool> Function(bool enabled)? _onWebVpnChanged;
   bool _webVpnEnabled = false;
   WebVpnServiceStatus _webVpnServiceStatus =
@@ -38,7 +23,6 @@ class StartupOnboardingController extends ChangeNotifier {
   bool _disposed = false;
 
   bool get academicLoggedIn => _academicLoggedIn;
-  ForumAccountStatus get forumStatus => _forumStatus;
   int get openRequest => _openRequest;
   bool get accountManagerOpen => _accountManagerOpen;
   bool get webVpnEnabled => _webVpnEnabled;
@@ -46,13 +30,11 @@ class StartupOnboardingController extends ChangeNotifier {
 
   void openAccountManager({
     required bool academicLoggedIn,
-    required ForumAccountStatus forumStatus,
     bool webVpnEnabled = false,
     WebVpnServiceStatus webVpnServiceStatus =
         const WebVpnServiceStatus.unknown(),
   }) {
     _academicLoggedIn = academicLoggedIn;
-    _forumStatus = forumStatus;
     _webVpnEnabled = webVpnEnabled;
     _webVpnServiceStatus = webVpnServiceStatus;
     _openRequest++;
@@ -72,32 +54,23 @@ class StartupOnboardingController extends ChangeNotifier {
 
   void markAccountManagerClosed() => _accountManagerOpen = false;
 
-  void setForumReconnectHandler(VoidCallback? handler) {
-    _onForumReconnect = handler;
-  }
-
   void updateAccountStatus({
     required bool academicLoggedIn,
-    required ForumAccountStatus forumStatus,
     bool? webVpnEnabled,
     WebVpnServiceStatus? webVpnServiceStatus,
   }) {
     final nextEnabled = webVpnEnabled ?? _webVpnEnabled;
     final nextStatus = webVpnServiceStatus ?? _webVpnServiceStatus;
     if (_academicLoggedIn == academicLoggedIn &&
-        _forumStatus == forumStatus &&
         _webVpnEnabled == nextEnabled &&
         identical(_webVpnServiceStatus, nextStatus)) {
       return;
     }
     _academicLoggedIn = academicLoggedIn;
-    _forumStatus = forumStatus;
     _webVpnEnabled = nextEnabled;
     _webVpnServiceStatus = nextStatus;
     _notifyListenersSafely();
   }
-
-  void reconnectForum() => _onForumReconnect?.call();
 
   void setWebVpnChangeHandler(
     Future<bool> Function(bool enabled)? handler,
@@ -110,19 +83,14 @@ class StartupOnboardingController extends ChangeNotifier {
 
   void setAccountLogoutHandlers({
     Future<bool> Function()? onAcademicLogout,
-    Future<bool> Function()? onForumLogout,
   }) {
     _onAcademicLogout = onAcademicLogout;
-    _onForumLogout = onForumLogout;
   }
 
   Future<bool> logoutAcademic() async =>
       await _onAcademicLogout?.call() ?? false;
 
-  Future<bool> logoutForum() async => await _onForumLogout?.call() ?? false;
-
   bool get canLogoutAcademic => _onAcademicLogout != null;
-  bool get canLogoutForum => _onForumLogout != null;
 
   void _notifyListenersSafely() {
     if (_disposed) return;
@@ -142,9 +110,7 @@ class StartupOnboardingController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    _onForumReconnect = null;
     _onAcademicLogout = null;
-    _onForumLogout = null;
     _onWebVpnChanged = null;
     super.dispose();
   }
@@ -156,12 +122,9 @@ class StartupOnboarding extends StatefulWidget {
     required this.child,
     required this.initiallyCompleted,
     required this.initialAcademicLoggedIn,
-    required this.initialForumStatus,
     required this.onAcademicLoginCompleted,
-    required this.onForumLoginCompleted,
     this.onDemoLogin,
     this.onAcademicLogout,
-    this.onForumLogout,
     required this.controller,
     this.settingsService,
     this.notificationPermissionRequester,
@@ -170,12 +133,9 @@ class StartupOnboarding extends StatefulWidget {
   final Widget child;
   final bool initiallyCompleted;
   final bool initialAcademicLoggedIn;
-  final ForumAccountStatus initialForumStatus;
   final VoidCallback onAcademicLoginCompleted;
-  final VoidCallback onForumLoginCompleted;
   final Future<void> Function()? onDemoLogin;
   final Future<bool> Function()? onAcademicLogout;
-  final Future<bool> Function()? onForumLogout;
   final StartupOnboardingController controller;
   final ClientSettingsService? settingsService;
   final Future<bool?> Function()? notificationPermissionRequester;
@@ -195,12 +155,9 @@ class _StartupOnboardingState extends State<StartupOnboarding>
   int _page = 0;
   late bool _visible = !widget.initiallyCompleted;
   bool _accountManagerMode = false;
-  bool _showForumCampusAccountHint = false;
-  bool _showForumDirectUnavailableHint = false;
   bool _webVpnExpanded = false;
   bool _changingWebVpn = false;
   late bool _academicLoggedIn = widget.initialAcademicLoggedIn;
-  late ForumAccountStatus _forumStatus = widget.initialForumStatus;
   late bool _webVpnEnabled = widget.controller.webVpnEnabled;
   late WebVpnServiceStatus _webVpnServiceStatus =
       widget.controller.webVpnServiceStatus;
@@ -250,10 +207,6 @@ class _StartupOnboardingState extends State<StartupOnboarding>
     }
     if (widget.initialAcademicLoggedIn != oldWidget.initialAcademicLoggedIn) {
       _academicLoggedIn = widget.initialAcademicLoggedIn;
-      if (_academicLoggedIn) _showForumCampusAccountHint = false;
-    }
-    if (widget.initialForumStatus != oldWidget.initialForumStatus) {
-      _forumStatus = widget.initialForumStatus;
     }
   }
 
@@ -263,13 +216,8 @@ class _StartupOnboardingState extends State<StartupOnboarding>
     if (!shouldOpen) {
       setState(() {
         _academicLoggedIn = widget.controller.academicLoggedIn;
-        _forumStatus = widget.controller.forumStatus;
         _webVpnEnabled = widget.controller.webVpnEnabled;
         _webVpnServiceStatus = widget.controller.webVpnServiceStatus;
-        if (_academicLoggedIn) _showForumCampusAccountHint = false;
-        if (_forumStatus != ForumAccountStatus.directLoginUnavailable) {
-          _showForumDirectUnavailableHint = false;
-        }
       });
       return;
     }
@@ -279,11 +227,8 @@ class _StartupOnboardingState extends State<StartupOnboarding>
       _accountManagerMode = true;
       _page = 2;
       _academicLoggedIn = widget.controller.academicLoggedIn;
-      _forumStatus = widget.controller.forumStatus;
       _webVpnEnabled = widget.controller.webVpnEnabled;
       _webVpnServiceStatus = widget.controller.webVpnServiceStatus;
-      _showForumCampusAccountHint = false;
-      _showForumDirectUnavailableHint = false;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _pageController.hasClients) {
@@ -317,7 +262,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
       await _complete();
       return;
     }
-    if (_academicLoggedIn && _forumStatus == ForumAccountStatus.loggedIn) {
+    if (_academicLoggedIn) {
       await _complete();
     }
   }
@@ -369,7 +314,6 @@ class _StartupOnboardingState extends State<StartupOnboarding>
     if (result != NativeLoginResult.authenticated || !mounted) return;
     setState(() {
       _academicLoggedIn = true;
-      _showForumCampusAccountHint = false;
     });
     widget.onAcademicLoginCompleted();
     if (!_accountManagerMode && mounted) {
@@ -382,7 +326,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
         widget.onAcademicLogout ?? widget.controller.logoutAcademic;
     final confirmed = await _confirmLogout(
       title: '退出上大校园账户？',
-      message: '退出后课表需要重新登录教务系统，论坛账户不会受影响。',
+      message: '退出后课表需要重新登录教务系统。',
     );
     if (!confirmed || !mounted) return;
     final loggedOut = await callback();
@@ -391,49 +335,14 @@ class _StartupOnboardingState extends State<StartupOnboarding>
     }
   }
 
-  Future<void> _openForumLogin() async {
-    if (defaultTargetPlatform == TargetPlatform.iOS && !_webVpnEnabled) {
-      _showPanelNotice('iOS暂时仅支持开启webvpn访问');
-      return;
-    }
-    if (_showForumCampusAccountHint) {
-      setState(() => _showForumCampusAccountHint = false);
-    }
-    final result = await Navigator.of(context).push<NativeLoginResult>(
-      MaterialPageRoute(builder: (_) => const NativeLoginPage.forum()),
-    );
-    if (result == NativeLoginResult.demo) {
-      await _enterDemoMode();
-      return;
-    }
-    if (result != NativeLoginResult.authenticated || !mounted) return;
-    setState(() => _forumStatus = ForumAccountStatus.connecting);
-    widget.onForumLoginCompleted();
-  }
-
   Future<void> _enterDemoMode() async {
     if (!mounted) return;
     setState(() {
       _academicLoggedIn = true;
-      _forumStatus = ForumAccountStatus.loggedIn;
-      _showForumCampusAccountHint = false;
     });
     await widget.onDemoLogin?.call();
     if (!mounted) return;
     await _complete();
-  }
-
-  Future<void> _logoutForum() async {
-    final callback = widget.onForumLogout ?? widget.controller.logoutForum;
-    final confirmed = await _confirmLogout(
-      title: '退出乐乎论坛账户？',
-      message: '退出后将清除论坛会话和本地账户数据，校园账户不会受影响。',
-    );
-    if (!confirmed || !mounted) return;
-    final loggedOut = await callback();
-    if (loggedOut && mounted) {
-      _showPanelNotice('已退出乐乎论坛账户');
-    }
   }
 
   Future<bool> _confirmLogout({
@@ -458,25 +367,6 @@ class _StartupOnboardingState extends State<StartupOnboarding>
           ),
         ) ??
         false;
-  }
-
-  void _reconnectForum() {
-    if (_showForumCampusAccountHint) {
-      setState(() => _showForumCampusAccountHint = false);
-    }
-    widget.controller.reconnectForum();
-  }
-
-  Future<void> _restoreForumAfterAcademicLogin() async {
-    await _openAcademicLogin();
-    if (!mounted || !_academicLoggedIn) return;
-    setState(() => _forumStatus = ForumAccountStatus.connecting);
-    widget.controller.reconnectForum();
-  }
-
-  void _showDirectForumUnavailableHint() {
-    if (_showForumDirectUnavailableHint) return;
-    setState(() => _showForumDirectUnavailableHint = true);
   }
 
   void _showPanelNotice(String message) {
@@ -743,7 +633,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
         null,
         [
           _feature(Icons.calendar_month, '课表与空教室', '快速查看课程安排和可用教室'),
-          _feature(Icons.forum_outlined, '乐乎论坛', '浏览校园动态，参与讨论'),
+          _feature(Icons.map_outlined, '校园服务', '探索更多校园生活功能'),
           _feature(Icons.notifications_none, '重要提醒', '不错过课程和校园公告'),
         ],
         pageFooter: _terms(context),
@@ -775,9 +665,8 @@ class _StartupOnboardingState extends State<StartupOnboarding>
         header: _pageHeader(
           context,
           title: '账号管理',
-          subtitle: _accountManagerMode
-              ? '管理校园服务、乐乎论坛和WebVPN连接。'
-              : '登录教务系统后，ShuYo将为你同步课表',
+          subtitle:
+              _accountManagerMode ? '管理校园账户和WebVPN连接。' : '登录教务系统后，ShuYo将为你同步课表',
           subtitlePadding: const EdgeInsets.symmetric(horizontal: 18),
         ),
         headerSpacing: 22,
@@ -796,9 +685,6 @@ class _StartupOnboardingState extends State<StartupOnboarding>
                 : _openAcademicLogin,
           ),
           if (_accountManagerMode) ...[
-            _forumAccountTile(context),
-            _forumCampusAccountHint(context),
-            _forumDirectUnavailableHint(context),
             _webVpnSection(context),
           ],
         ],
@@ -914,49 +800,6 @@ class _StartupOnboardingState extends State<StartupOnboarding>
 
   Future<void> _changeWebVpn(bool enabled) async {
     if (_changingWebVpn) return;
-    if (enabled &&
-        !_webVpnEnabled &&
-        _forumStatus == ForumAccountStatus.loggedIn) {
-      final confirmed = await showDialog<bool>(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: const Text('开启WebVPN连接'),
-              content: const Text('开启后可能需要重新登录论坛'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('继续'),
-                ),
-              ],
-            ),
-          ) ??
-          false;
-      if (!confirmed || !mounted) return;
-    } else if (!enabled) {
-      final confirmed = await showDialog<bool>(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: const Text('关闭WebVPN连接'),
-              content: const Text('关闭后可能需要重新登录论坛'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('关闭'),
-                ),
-              ],
-            ),
-          ) ??
-          false;
-      if (!confirmed || !mounted) return;
-    }
     setState(() => _changingWebVpn = true);
     final changed = await widget.controller.setWebVpnEnabled(enabled);
     if (!mounted) return;
@@ -964,150 +807,6 @@ class _StartupOnboardingState extends State<StartupOnboarding>
       _changingWebVpn = false;
       if (changed) _webVpnEnabled = enabled;
     });
-  }
-
-  Widget _forumCampusAccountHint(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 220),
-      reverseDuration: const Duration(milliseconds: 160),
-      switchInCurve: Curves.easeOutCubic,
-      switchOutCurve: Curves.easeInCubic,
-      transitionBuilder: (child, animation) => SizeTransition(
-        sizeFactor: animation,
-        alignment: Alignment.topCenter,
-        child: FadeTransition(opacity: animation, child: child),
-      ),
-      child: _showForumCampusAccountHint
-          ? Padding(
-              key: const ValueKey('forum-campus-account-hint'),
-              padding: const EdgeInsets.fromLTRB(56, 0, 4, 12),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline, size: 16, color: colors.error),
-                  const SizedBox(width: 7),
-                  Expanded(
-                    child: Text(
-                      '请先登录上大校园账户',
-                      style: TextStyle(
-                        color: colors.error,
-                        fontSize: 13,
-                        height: 1.35,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            )
-          : const SizedBox(
-              key: ValueKey('forum-campus-account-hint-hidden'),
-            ),
-    );
-  }
-
-  Widget _forumDirectUnavailableHint(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 220),
-      transitionBuilder: (child, animation) => SizeTransition(
-        sizeFactor: animation,
-        alignment: Alignment.topCenter,
-        child: FadeTransition(opacity: animation, child: child),
-      ),
-      child: _showForumDirectUnavailableHint
-          ? Padding(
-              key: const ValueKey('forum-direct-unavailable-hint'),
-              padding: const EdgeInsets.fromLTRB(56, 0, 4, 12),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline, size: 16, color: colors.error),
-                  const SizedBox(width: 7),
-                  Expanded(
-                    child: Text(
-                      'iOS暂时仅支持开启webvpn访问',
-                      style: TextStyle(
-                        color: colors.error,
-                        fontSize: 13,
-                        height: 1.35,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            )
-          : const SizedBox(key: ValueKey('forum-direct-unavailable-hidden')),
-    );
-  }
-
-  Widget _forumAccountTile(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final (label, color, busy, onTap) = switch (_forumStatus) {
-      ForumAccountStatus.signedOut => (
-          null,
-          null,
-          false,
-          _openForumLogin as VoidCallback
-        ),
-      ForumAccountStatus.connecting => (
-          '正在连接',
-          colors.onSurfaceVariant,
-          true,
-          null
-        ),
-      ForumAccountStatus.loggedIn => (
-          '已登录',
-          colors.primary,
-          false,
-          widget.onForumLogout == null && !widget.controller.canLogoutForum
-              ? null
-              : _logoutForum,
-        ),
-      ForumAccountStatus.connectionUnavailable => (
-          '连接异常',
-          colors.error,
-          false,
-          _reconnectForum,
-        ),
-      ForumAccountStatus.webVpnLoginRequired => (
-          'WebVPN已失效',
-          colors.error,
-          false,
-          _showWebVpnLoginRequired,
-        ),
-      ForumAccountStatus.waitingForAcademicLogin => (
-          '等待校园账户登录',
-          colors.error,
-          false,
-          _restoreForumAfterAcademicLogin as VoidCallback,
-        ),
-      ForumAccountStatus.reauthenticationRequired => (
-          '登录已失效',
-          colors.error,
-          false,
-          _openForumLogin as VoidCallback,
-        ),
-      ForumAccountStatus.directLoginUnavailable => (
-          '暂不可登录',
-          colors.error,
-          false,
-          _showDirectForumUnavailableHint,
-        ),
-    };
-    return _accountTile(
-      context,
-      icon: Icons.forum_outlined,
-      title: '乐乎账户',
-      description: '用于访问上海大学校内论坛',
-      statusLabel: label,
-      statusColor: color,
-      busy: busy,
-      onTap: onTap,
-    );
-  }
-
-  void _showWebVpnLoginRequired() {
-    setState(() => _webVpnExpanded = true);
-    _showPanelNotice('WebVPN已失效，需要重新登录');
   }
 
   Widget _accountTile(

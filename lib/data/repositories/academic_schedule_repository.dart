@@ -38,14 +38,16 @@ class AcademicScheduleRepository {
   AcademicScheduleRepository({
     AcademicScheduleApiClient? apiClient,
     Future<SharedPreferences> Function()? preferencesLoader,
-  })  : _apiClient = apiClient ?? AcademicScheduleApiClient(),
+  })  : _apiClient = apiClient,
         _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance;
 
   static const _scheduleKey = 'academic.schedule.cache';
   static const _anchorWeekKey = 'academic.schedule.anchorWeek';
   static const _anchorMondayKey = 'academic.schedule.anchorMonday';
 
-  final AcademicScheduleApiClient _apiClient;
+  AcademicScheduleApiClient? _apiClient;
+  AcademicScheduleApiClient get _client =>
+      _apiClient ??= AcademicScheduleApiClient();
   final Future<SharedPreferences> Function() _preferencesLoader;
 
   Future<AcademicSchedule?> loadCachedSchedule() async {
@@ -72,7 +74,7 @@ class AcademicScheduleRepository {
 
   Future<AcademicSchedule> refreshSchedule() async {
     final hadCachedSchedule = await loadCachedSchedule() != null;
-    final schedule = await _apiClient.fetchCurrentSchedule();
+    final schedule = await _client.fetchCurrentSchedule();
     await saveCachedSchedule(schedule);
     if (!hadCachedSchedule) {
       await setCurrentWeek(1);

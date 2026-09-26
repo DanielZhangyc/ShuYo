@@ -1,9 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuyo/data/demo/demo_data_bundle.dart';
-import 'package:shuyo/data/demo/demo_forum_repository.dart';
 import 'package:shuyo/data/demo/demo_session.dart';
-import 'package:shuyo/data/models/composer.dart';
-import 'package:shuyo/data/services/payload_factory.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -26,28 +23,6 @@ void main() {
       isTrue,
     );
     expect(data.classroomSchedule.building.name, 'GA楼');
-  });
-
-  test('demo forum supports local topic and reply mutations', () async {
-    final repository = await DemoForumRepository.load();
-    expect(repository.profile.username, 'admin');
-    expect(repository.isOnline, isTrue);
-    final before = (await repository.fetchLatestTopics()).length;
-    final post = await repository.createTopic(const CreateTopicDraft(
-      title: '本地演示主题',
-      raw: '只保存在本机',
-      categoryId: 1,
-      draftKey: 'demo-test',
-    ));
-    expect((await repository.fetchLatestTopics()).length, before + 1);
-    await repository.createReply(ReplyDraft(
-      topicId: post.topicId,
-      categoryId: 1,
-      raw: '本地回复',
-    ));
-    expect(
-        (await repository.fetchTopicDetail(post.topicId))!.posts, hasLength(2));
-    await repository.deleteTopic((await repository.fetchLatestTopics()).first);
   });
 
   test('demo session credentials are exact', () {
