@@ -34,11 +34,9 @@ import '../features/home/home_dashboard_page.dart';
 import '../features/onboarding/startup_onboarding.dart';
 import '../features/settings/client_settings_page.dart';
 import '../shared/navigation/shuyo_route.dart';
-import '../shared/theme/shuyo_theme.dart';
 import '../shared/widgets/app_header.dart';
 import '../shared/widgets/client_update_prompt.dart';
 import '../shared/widgets/info_confirm_dialog.dart';
-import '../shared/widgets/shuyo_launch_surface.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({
@@ -87,6 +85,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   static const _webVpnStatusRefreshInterval = Duration(minutes: 5);
 
   int _tabIndex = 0;
+  bool _scheduleTabInitialized = false;
+  int _scheduleDataRevision = 0;
   late bool _webVpnEnabled = widget.initialWebVpnEnabled;
   late bool _hasAcademicSession = widget.initialHasAcademicSession;
   late String? _academicStudentId = widget.initialAcademicStudentId;
@@ -95,8 +95,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _loadingAnnouncementSummary = false;
   bool _checkingClientBackendPrompts = false;
   bool _refreshingWebVpnStatus = false;
-  bool _openingScheduleFromWidget = false;
-  bool _hideShellForInitialWidgetLaunch = false;
   String _scheduleSummaryText = '正在读取课表...';
   String _announcementSummaryText = '正在读取通知公告...';
   DateTime? _lastWebVpnStatusFetchAttempt;
@@ -120,7 +118,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _hideShellForInitialWidgetLaunch = widget.initialOpenSchedule;
+    if (widget.initialOpenSchedule) {
+      _tabIndex = 3;
+      _scheduleTabInitialized = true;
+    }
     final demo = widget.demoData;
     _scheduleRepository = widget.isDemo && demo != null
         ? DemoAcademicScheduleRepository(demo.schedule)
@@ -155,14 +156,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (Platform.isAndroid || Platform.isIOS) {
       _widgetClickSubscription = HomeWidget.widgetClicked.listen((uri) {
         if (uri?.scheme == 'shuyo' && uri?.host == 'schedule') {
-          unawaited(_openScheduleFromWidget());
+          _openScheduleFromWidget();
         }
       });
-      if (widget.initialOpenSchedule) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) unawaited(_openScheduleFromWidget(initialLaunch: true));
-        });
-      }
     }
     if (!widget.isDemo) {
       _scheduleSummaryTimer = Timer.periodic(
@@ -216,11 +212,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    if (_hideShellForInitialWidgetLaunch) {
-      return ShuYoLaunchSurface(
-        theme: ShuYoThemes.byId(widget.selectedThemeId),
-      );
-    }
     const titles = ['首页', '评教', '地图', '日程'];
     return PopScope(
       canPop: false,
@@ -231,12 +222,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         body: SafeArea(
           child: Column(
             children: [
-              AppHeader(
-                title: titles[_tabIndex],
-                showSettings: true,
-                onSettings: _openClientSettings,
-                onNotification: _openNotifications,
-              ),
+              if (_tabIndex != 3)
+                AppHeader(
+                  title: titles[_tabIndex],
+                  showSettings: true,
+                  onSettings: _openClientSettings,
+                  onNotification: _openNotifications,
+                ),
               Expanded(
                 child: IndexedStack(
                   index: _tabIndex,
@@ -244,7 +236,27 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     _homeBody(),
                     const SizedBox.expand(),
                     const SizedBox.expand(),
-                    const SizedBox.expand(),
+                    _scheduleTabInitialized
+                        ? AcademicSchedulePage(
+                            key: ValueKey(_scheduleDataRevision),
+                            repository: _scheduleRepository,
+                            notificationService: _scheduleNotificationService,
+                            widgetService: _scheduleWidgetService,
+                            onLoginRequired: _handleInvalidAcademicSession,
+                            initialState: widget.initialOpenSchedule &&
+                                    _scheduleDataRevision == 0
+                                ? widget.initialScheduleState
+                                : null,
+                            initialDisplayState: widget.initialOpenSchedule &&
+                                    _scheduleDataRevision == 0
+                                ? widget.initialScheduleDisplayState
+                                : null,
+                            initialLoadError: widget.initialOpenSchedule &&
+                                    _scheduleDataRevision == 0
+                                ? widget.initialScheduleLoadError
+                                : null,
+                          )
+                        : const SizedBox.expand(),
                   ],
                 ),
               ),
@@ -254,13 +266,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         bottomNavigationBar: BottomNavigationBar(
           currentIndex: _tabIndex,
           type: BottomNavigationBarType.fixed,
-          onTap: (index) {
-            setState(() => _tabIndex = index);
-            if (index == 0) {
-              unawaited(_refreshScheduleSummaryQuietly());
-              unawaited(_refreshAnnouncementSummaryQuietly());
-            }
-          },
+          onTap: _selectTab,
           items: const [
             BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: '首页'),
             BottomNavigationBarItem(
@@ -287,6 +293,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _showSnack('再按一次退出 ShuYo');
   }
 
+  void _selectTab(int index) {
+    setState(() {
+      _tabIndex = index;
+      if (index == 3) _scheduleTabInitialized = true;
+    });
+    if (index == 0) {
+      unawaited(_refreshScheduleSummaryQuietly());
+      unawaited(_refreshAnnouncementSummaryQuietly());
+    }
+  }
+
   Widget _homeBody() => HomeDashboardPage(
         hasAcademicAccount: _hasAcademicSession,
         academicStudentId: _academicStudentId,
@@ -294,7 +311,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         onLogin: _openAccountManager,
         onOpenAcademicSystem: _syncingAcademicSchedule
             ? () => _showSnack('正在获取课表，请稍后')
-            : () => unawaited(_openAcademicSystem()),
+            : () => _selectTab(3),
         onOpenAnnouncements: () => unawaited(_openAnnouncements()),
         onOpenEmptyClassroom: () => unawaited(_openEmptyClassroom()),
         onOpenCourseRatings: () => unawaited(_openCourseRatings()),
@@ -376,7 +393,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       unawaited(_scheduleWidgetService.syncFromCache());
       await _scheduleNotificationService.syncScheduleReminders();
       if (mounted) {
-        setState(() => _scheduleSummaryText = summary.text);
+        setState(() {
+          _scheduleSummaryText = summary.text;
+          _scheduleDataRevision++;
+        });
         _showSnack('校园账户已登录，课表已同步');
       }
       return true;
@@ -441,50 +461,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _openScheduleFromWidget({bool initialLaunch = false}) async {
-    if (_openingScheduleFromWidget || !mounted) return;
-    _openingScheduleFromWidget = true;
-    if (initialLaunch) {
-      setState(() => _hideShellForInitialWidgetLaunch = false);
-    }
-    try {
-      await _openAcademicSystem(
-        animatePush: !initialLaunch,
-        initialState: initialLaunch ? widget.initialScheduleState : null,
-        initialDisplayState:
-            initialLaunch ? widget.initialScheduleDisplayState : null,
-        initialLoadError:
-            initialLaunch ? widget.initialScheduleLoadError : null,
-      );
-    } finally {
-      _openingScheduleFromWidget = false;
-    }
-  }
-
-  Future<void> _openAcademicSystem({
-    bool animatePush = true,
-    AcademicScheduleCacheState? initialState,
-    AcademicScheduleDisplayState? initialDisplayState,
-    String? initialLoadError,
-  }) async {
-    await Navigator.of(context).push<void>(
-      shuyoRoute(
-        animatePush: animatePush,
-        builder: (_) => AcademicSchedulePage(
-          repository: _scheduleRepository,
-          notificationService: _scheduleNotificationService,
-          widgetService: _scheduleWidgetService,
-          onLoginRequired: _handleInvalidAcademicSession,
-          initialState: initialState,
-          initialDisplayState: initialDisplayState,
-          initialLoadError: initialLoadError,
-        ),
-      ),
-    );
-    if (mounted) {
-      unawaited(_refreshScheduleSummaryQuietly());
-      unawaited(_scheduleNotificationService.syncScheduleReminders());
-    }
+  void _openScheduleFromWidget() {
+    if (!mounted) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    _selectTab(3);
   }
 
   Future<void> _handleInvalidAcademicSession() async {
