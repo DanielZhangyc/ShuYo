@@ -166,6 +166,7 @@ class _TopicPageState extends State<TopicPage> with WidgetsBindingObserver {
   bool _showTargetPostLoading = false;
   bool _showReadPositionToast = false;
   bool _readingTimingActive = true;
+  bool _reverseChronological = false;
 
   String get _readPositionKey {
     return ForumReadPositionStore.topicKey(
@@ -204,6 +205,7 @@ class _TopicPageState extends State<TopicPage> with WidgetsBindingObserver {
     final nextTopicId = widget.detail?.id ?? widget.item.id;
     if (oldTopicId != nextTopicId ||
         oldWidget.currentUsername != widget.currentUsername) {
+      _reverseChronological = false;
       _readPositionSaveTimer?.cancel();
       _restoredReadPositionKey = null;
       _targetPostScrollKey = null;
@@ -253,9 +255,10 @@ class _TopicPageState extends State<TopicPage> with WidgetsBindingObserver {
       );
     }
 
-    final threads = buildThreadedPosts(
-      detail.posts.where((post) => !post.isDeleted).toList(growable: false),
-    );
+    final posts =
+        detail.posts.where((post) => !post.isDeleted).toList(growable: false);
+    final threads = buildThreadedPosts(posts);
+    final reversePosts = buildReverseChronologicalPosts(posts);
     _pruneReadPositionKeys(detail.posts);
     _scheduleInitialPosition();
 
@@ -275,40 +278,82 @@ class _TopicPageState extends State<TopicPage> with WidgetsBindingObserver {
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
                     children: [
-                      _TopicHeader(detail: detail, category: widget.category),
-                      for (final thread in threads)
-                        _ThreadedPostView(
-                          thread: thread,
-                          canReply: detail.canCreatePost,
-                          isSubmittingReply: widget.isSubmittingReply,
-                          busyLikePostIds: widget.busyLikePostIds,
-                          busyPollKeys: widget.busyPollKeys,
-                          busyDeletePostIds: widget.busyDeletePostIds,
-                          busyReportPostIds: widget.busyReportPostIds,
-                          reportedPostIds: widget.reportedPostIds,
-                          expanded: _expandedReplyParents.contains(
-                            thread.post.postNumber,
+                      _TopicHeader(
+                        detail: detail,
+                        category: widget.category,
+                        reverseChronological: _reverseChronological,
+                        onToggleOrder: () {
+                          setState(() {
+                            _reverseChronological = !_reverseChronological;
+                          });
+                        },
+                      ),
+                      if (_reverseChronological)
+                        for (final post in reversePosts)
+                          _PostView(
+                            key: _postKeyFor(post.postNumber),
+                            post: post,
+                            replyContext: post.replyToPostNumber == null
+                                ? null
+                                : '回复 #${post.replyToPostNumber}',
+                            canLike: true,
+                            canReply: detail.canCreatePost &&
+                                !widget.isSubmittingReply,
+                            canDelete: post.postNumber != 1 &&
+                                post.yours &&
+                                post.canDelete,
+                            reported: post.reported ||
+                                widget.reportedPostIds.contains(post.id),
+                            isLiking: widget.busyLikePostIds.contains(post.id),
+                            busyPollKeys: widget.busyPollKeys,
+                            isDeleting:
+                                widget.busyDeletePostIds.contains(post.id),
+                            isReporting:
+                                widget.busyReportPostIds.contains(post.id),
+                            onReply: () => _replyTo(post),
+                            onLike: () => _like(post),
+                            onVotePoll: widget.onVotePoll,
+                            onTogglePollStatus: widget.onTogglePollStatus,
+                            onDelete: () => _confirmDelete(post),
+                            onReport: () => widget.onReportPost(post),
+                            onOpenUser: widget.onOpenUser,
+                            onOpenImage: _openImagePreview,
+                            onOpenInternalTopic: widget.onOpenInternalTopic,
                           ),
-                          collapsedReplyCount: _collapsedReplyCount,
-                          onToggleExpanded: () {
-                            setState(() {
-                              final parent = thread.post.postNumber;
-                              if (!_expandedReplyParents.add(parent)) {
-                                _expandedReplyParents.remove(parent);
-                              }
-                            });
-                          },
-                          onReply: _replyTo,
-                          onLike: _like,
-                          onVotePoll: widget.onVotePoll,
-                          onTogglePollStatus: widget.onTogglePollStatus,
-                          onDelete: _confirmDelete,
-                          onReport: widget.onReportPost,
-                          onOpenUser: widget.onOpenUser,
-                          onOpenImage: _openImagePreview,
-                          onOpenInternalTopic: widget.onOpenInternalTopic,
-                          postKeyFor: _postKeyFor,
-                        ),
+                      if (!_reverseChronological)
+                        for (final thread in threads)
+                          _ThreadedPostView(
+                            thread: thread,
+                            canReply: detail.canCreatePost,
+                            isSubmittingReply: widget.isSubmittingReply,
+                            busyLikePostIds: widget.busyLikePostIds,
+                            busyPollKeys: widget.busyPollKeys,
+                            busyDeletePostIds: widget.busyDeletePostIds,
+                            busyReportPostIds: widget.busyReportPostIds,
+                            reportedPostIds: widget.reportedPostIds,
+                            expanded: _expandedReplyParents.contains(
+                              thread.post.postNumber,
+                            ),
+                            collapsedReplyCount: _collapsedReplyCount,
+                            onToggleExpanded: () {
+                              setState(() {
+                                final parent = thread.post.postNumber;
+                                if (!_expandedReplyParents.add(parent)) {
+                                  _expandedReplyParents.remove(parent);
+                                }
+                              });
+                            },
+                            onReply: _replyTo,
+                            onLike: _like,
+                            onVotePoll: widget.onVotePoll,
+                            onTogglePollStatus: widget.onTogglePollStatus,
+                            onDelete: _confirmDelete,
+                            onReport: widget.onReportPost,
+                            onOpenUser: widget.onOpenUser,
+                            onOpenImage: _openImagePreview,
+                            onOpenInternalTopic: widget.onOpenInternalTopic,
+                            postKeyFor: _postKeyFor,
+                          ),
                       if (_activeTargetPostNumber != null)
                         SizedBox(height: _targetPostBottomPadding(context)),
                     ],
@@ -394,35 +439,57 @@ class _TopicPageState extends State<TopicPage> with WidgetsBindingObserver {
     _restoringReadPosition = false;
     _cancelTargetPostScrollCorrection = false;
     _startTargetPostScroll(postNumber);
-    _expandParentForPost(postNumber);
-    var scrolled = false;
     try {
-      for (var attempt = 0; attempt < _targetPostScrollAttempts; attempt++) {
-        if (_cancelTargetPostScrollCorrection) {
-          return;
-        }
-        await (attempt == 0
-            ? WidgetsBinding.instance.endOfFrame
-            : Future<void>.delayed(_targetPostScrollStep));
-        if (!mounted || !_scrollController.hasClients) {
-          return;
-        }
-        if (await _ensurePostVisible(postNumber)) {
-          scrolled = true;
-          continue;
-        }
-        await _preScrollTargetIntoBuildRange(postNumber, attempt);
-      }
-      if (!scrolled && await _ensurePostVisible(postNumber)) {
-        scrolled = true;
-      }
+      final scrolled = await _locatePost(
+        postNumber,
+        isCancelled: () => _cancelTargetPostScrollCorrection,
+      );
       if (scrolled) {
         unawaited(_saveReadPositionNow());
-        return;
       }
     } finally {
       _finishTargetPostScroll(postNumber);
     }
+  }
+
+  Future<bool> _locatePost(
+    int postNumber, {
+    double? anchorDelta,
+    required bool Function() isCancelled,
+  }) async {
+    _expandParentForPost(postNumber);
+    var located = false;
+    for (var attempt = 0; attempt < _targetPostScrollAttempts; attempt++) {
+      if (isCancelled()) {
+        return false;
+      }
+      await (attempt == 0
+          ? WidgetsBinding.instance.endOfFrame
+          : Future<void>.delayed(_targetPostScrollStep));
+      if (!mounted || !_scrollController.hasClients || isCancelled()) {
+        return false;
+      }
+      final positioned = anchorDelta == null
+          ? await _ensurePostVisible(postNumber)
+          : _jumpToPostAnchor(postNumber, anchorDelta);
+      if (positioned) {
+        located = true;
+        continue;
+      }
+      await _preScrollTargetIntoBuildRange(postNumber, attempt);
+    }
+    if (located || isCancelled()) {
+      return located;
+    }
+    if (anchorDelta == null) {
+      return _ensurePostVisible(postNumber);
+    }
+    return _jumpToPostAnchor(postNumber, anchorDelta);
+  }
+
+  bool _jumpToPostAnchor(int postNumber, double anchorDelta) {
+    final target = _targetOffsetForPostAnchor(postNumber, anchorDelta);
+    return target != null && _jumpToReadOffset(target);
   }
 
   Future<bool> _ensurePostVisible(int postNumber) async {
@@ -801,22 +868,66 @@ class _TopicPageState extends State<TopicPage> with WidgetsBindingObserver {
         !_scrollController.hasClients) {
       return;
     }
-    final maxScrollExtent = _scrollController.position.maxScrollExtent;
-    if (!_hasRestorableReadPosition(position, maxScrollExtent)) {
-      return;
-    }
     _cancelReadPositionCorrection = false;
     _restoringReadPosition = true;
-    final restored = _applyRestoredReadPosition(
-      position,
-      allowOffsetFallback: true,
-    );
+    final savedAnchorPostNumber = position.anchorPostNumber;
+    final anchorPostNumber =
+        !_isBottomReadPosition(position) && savedAnchorPostNumber != null
+            ? _nearestRestorablePostNumber(savedAnchorPostNumber)
+            : null;
+    final bool restored;
+    if (anchorPostNumber != null) {
+      restored = await _locatePost(
+        anchorPostNumber,
+        anchorDelta: position.anchorDelta,
+        isCancelled: () => _cancelReadPositionCorrection,
+      );
+    } else {
+      final maxScrollExtent = _scrollController.position.maxScrollExtent;
+      if (!_hasRestorableReadPosition(position, maxScrollExtent)) {
+        _restoringReadPosition = false;
+        return;
+      }
+      restored = _applyRestoredReadPosition(
+        position,
+        allowOffsetFallback: savedAnchorPostNumber == null,
+      );
+    }
     if (!restored) {
       _restoringReadPosition = false;
       return;
     }
     _showRestoredReadPositionToast();
-    unawaited(_stabilizeReadPositionRestore(key, position));
+    unawaited(
+      _stabilizeReadPositionRestore(
+        key,
+        position,
+        anchorPostNumber: anchorPostNumber,
+      ),
+    );
+  }
+
+  int? _nearestRestorablePostNumber(int requestedPostNumber) {
+    final posts = widget.detail?.posts
+        .where((post) => !post.isDeleted)
+        .toList(growable: false);
+    if (posts == null || posts.isEmpty) {
+      return null;
+    }
+    if (posts.any((post) => post.postNumber == requestedPostNumber)) {
+      return requestedPostNumber;
+    }
+    return posts.reduce((closest, candidate) {
+      final closestDistance = (closest.postNumber - requestedPostNumber).abs();
+      final candidateDistance =
+          (candidate.postNumber - requestedPostNumber).abs();
+      if (candidateDistance < closestDistance ||
+          (candidateDistance == closestDistance &&
+              candidate.postNumber > closest.postNumber)) {
+        return candidate;
+      }
+      return closest;
+    }).postNumber;
   }
 
   bool _hasRestorableReadPosition(
@@ -826,6 +937,9 @@ class _TopicPageState extends State<TopicPage> with WidgetsBindingObserver {
     if (maxScrollExtent <= _minimumSavedReadOffset) {
       return false;
     }
+    if (position.anchorPostNumber != null) {
+      return true;
+    }
     if (_isBottomReadPosition(position)) {
       return true;
     }
@@ -834,8 +948,9 @@ class _TopicPageState extends State<TopicPage> with WidgetsBindingObserver {
 
   Future<void> _stabilizeReadPositionRestore(
     String key,
-    ForumReadPosition position,
-  ) async {
+    ForumReadPosition position, {
+    int? anchorPostNumber,
+  }) async {
     try {
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted ||
@@ -847,14 +962,22 @@ class _TopicPageState extends State<TopicPage> with WidgetsBindingObserver {
         await _keepRestoredReadPositionAtBottom(key);
         return;
       }
-      _applyRestoredReadPosition(position, allowOffsetFallback: false);
+      _applyRestoredReadPosition(
+        position,
+        allowOffsetFallback: false,
+        anchorPostNumber: anchorPostNumber,
+      );
       await Future<void>.delayed(_readPositionLateCorrectionDelay);
       if (!mounted ||
           key != _readPositionKey ||
           _cancelReadPositionCorrection) {
         return;
       }
-      _applyRestoredReadPosition(position, allowOffsetFallback: false);
+      _applyRestoredReadPosition(
+        position,
+        allowOffsetFallback: false,
+        anchorPostNumber: anchorPostNumber,
+      );
     } finally {
       if (mounted && key == _readPositionKey) {
         _restoringReadPosition = false;
@@ -886,6 +1009,7 @@ class _TopicPageState extends State<TopicPage> with WidgetsBindingObserver {
   bool _applyRestoredReadPosition(
     ForumReadPosition position, {
     required bool allowOffsetFallback,
+    int? anchorPostNumber,
   }) {
     if (!mounted || !_scrollController.hasClients) {
       return false;
@@ -893,10 +1017,10 @@ class _TopicPageState extends State<TopicPage> with WidgetsBindingObserver {
     if (_isBottomReadPosition(position)) {
       return _jumpToReadOffset(_scrollController.position.maxScrollExtent);
     }
-    final anchorPostNumber = position.anchorPostNumber;
-    if (anchorPostNumber != null) {
+    final targetPostNumber = anchorPostNumber ?? position.anchorPostNumber;
+    if (targetPostNumber != null) {
       final anchorTarget = _targetOffsetForPostAnchor(
-        anchorPostNumber,
+        targetPostNumber,
         position.anchorDelta,
       );
       if (anchorTarget != null) {
@@ -973,7 +1097,7 @@ class _TopicPageState extends State<TopicPage> with WidgetsBindingObserver {
       return;
     }
     final offset = _scrollController.offset;
-    if (offset < _minimumSavedReadOffset) {
+    if (!_reverseChronological && offset < _minimumSavedReadOffset) {
       await ForumReadPositionStore.remove(_readPositionKey);
       return;
     }
@@ -986,7 +1110,7 @@ class _TopicPageState extends State<TopicPage> with WidgetsBindingObserver {
       offset,
       anchorPostNumber: anchor?.postNumber,
       anchorDelta: anchor?.delta ?? 0,
-      bottomDistance: bottomDistance,
+      bottomDistance: _reverseChronological ? null : bottomDistance,
     );
   }
 
@@ -1111,32 +1235,76 @@ class _ReadPositionAnchor {
 }
 
 class _TopicHeader extends StatelessWidget {
-  const _TopicHeader({required this.detail, required this.category});
+  const _TopicHeader({
+    required this.detail,
+    required this.category,
+    required this.reverseChronological,
+    required this.onToggleOrder,
+  });
 
   final TopicDetail detail;
   final ForumCategory? category;
+  final bool reverseChronological;
+  final VoidCallback onToggleOrder;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.shuyoColors;
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text(
-            detail.title,
-            style: ShuYoTextStyles.title(
-              color: colors.textPrimary,
-              size: 20.5,
-              height: 1.2,
-              weight: FontWeight.w500,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  detail.title,
+                  style: ShuYoTextStyles.title(
+                    color: colors.textPrimary,
+                    size: 20.5,
+                    height: 1.2,
+                    weight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '${category?.name ?? '未知分区'} · ${detail.postsCount} 楼',
+                  style: TextStyle(color: colors.textSecondary),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 10),
-          Text(
-            '${category?.name ?? '未知分区'} · ${detail.postsCount} 楼',
-            style: TextStyle(color: colors.textSecondary),
+          const SizedBox(width: 8),
+          Padding(
+            padding: const EdgeInsets.only(right: 2),
+            child: SizedBox(
+              width: 48,
+              height: 48,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: IconButton(
+                  key: const ValueKey('topic-order-toggle'),
+                  tooltip: reverseChronological ? '恢复楼中楼排序' : '按最新楼层倒序',
+                  onPressed: onToggleOrder,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 35,
+                    height: 35,
+                  ),
+                  style: IconButton.styleFrom(
+                    shape: const CircleBorder(),
+                  ),
+                  icon: Icon(
+                    Icons.swap_vert,
+                    color: reverseChronological
+                        ? Theme.of(context).colorScheme.primary
+                        : colors.textMuted,
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),

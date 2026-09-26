@@ -357,6 +357,10 @@ extension ForumAuthCookieMaintenance on ForumAuthService {
     try {
       final cookies = await _cookieLoader(domain);
       for (final cookie in cookies) {
+        // The WebVPN gateway session is independent from the forum account.
+        // Clearing an inherited token on the proxy host creates an empty
+        // host-only cookie that shadows the valid parent-domain token.
+        if (cookie.name == 'webvpn-token') continue;
         await _cookieSetter(
           WebViewCookie(
             name: cookie.name,

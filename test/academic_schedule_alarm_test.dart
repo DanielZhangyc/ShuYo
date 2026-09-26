@@ -6,12 +6,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuyo/data/models/academic_schedule.dart';
 import 'package:shuyo/data/repositories/academic_schedule_repository.dart';
-import 'package:shuyo/data/repositories/client_backend_repository.dart';
 import 'package:shuyo/data/services/academic_auth_service.dart';
 import 'package:shuyo/data/services/academic_schedule_api_client.dart';
 import 'package:shuyo/data/services/academic_schedule_notification_service.dart';
-import 'package:shuyo/data/services/client_settings_service.dart';
-import 'package:shuyo/features/settings/client_settings_page.dart';
+import 'package:shuyo/data/services/academic_schedule_widget_service.dart';
+import 'package:shuyo/features/home/academic_schedule_page.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -68,11 +67,20 @@ void main() {
       await service.loadAlarmSettings(),
       isA<AcademicScheduleAlarmSettings>()
           .having((settings) => settings.enabled, 'enabled', isFalse)
-          .having((settings) => settings.leadMinutes, 'leadMinutes', 20),
+          .having((settings) => settings.leadMinutes, 'leadMinutes', 20)
+          .having(
+            (settings) => settings.vibrationEnabled,
+            'vibrationEnabled',
+            isFalse,
+          ),
     );
 
     await service.saveAlarmSettings(
-      const AcademicScheduleAlarmSettings(enabled: true, leadMinutes: 20),
+      const AcademicScheduleAlarmSettings(
+        enabled: true,
+        leadMinutes: 20,
+        vibrationEnabled: true,
+      ),
     );
     final count = await service.syncEarlyClassAlarms(
       now: DateTime.utc(2026, 8, 30, 21),
@@ -80,6 +88,10 @@ void main() {
 
     expect(count, 2);
     expect(syncedAlarms.map((alarm) => alarm['title']), ['高等数学', '大学英语']);
+    expect(
+      syncedAlarms.map((alarm) => alarm['vibrationEnabled']),
+      everyElement(isTrue),
+    );
     expect(
       syncedAlarms.map(
         (alarm) => DateTime.fromMillisecondsSinceEpoch(
@@ -112,8 +124,9 @@ void main() {
     expect(saved.leadMinutes, 30);
   });
 
-  testWidgets('iOS 26 settings request AlarmKit permission when enabled',
+  testWidgets('iOS 26 schedule settings request AlarmKit permission when saved',
       (tester) async {
+    final restoreFlutterError = _ignoreListTileBackgroundWarning();
     try {
       final repository = AcademicScheduleRepository(
         apiClient: _UnusedAcademicScheduleApiClient(),
@@ -122,47 +135,54 @@ void main() {
         repository: repository,
         alarmChannel: channel,
       );
+      await repository.saveCachedSchedule(_schedule);
+      final initialState = await repository.loadCachedState(
+        now: DateTime(2026, 8, 31),
+      );
 
       await tester.pumpWidget(
         MaterialApp(
-          home: ClientSettingsPage(
-            settingsService: ClientSettingsService(),
-            scheduleNotificationService: alarmService,
-            backendRepository: ClientBackendRepository(),
-            selectedThemeId: 'default',
-            followSystemTheme: false,
-            onThemeChanged: (_) async {},
-            onFollowSystemThemeChanged: (_) async {},
+          home: AcademicSchedulePage(
+            repository: repository,
+            notificationService: alarmService,
+            widgetService: AcademicScheduleWidgetService(
+              repository: repository,
+            ),
+            onLoginRequired: () async {},
+            initialState: initialState,
           ),
         ),
       );
+      await tester.tap(find.byTooltip('更多'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('通知设置'));
       await tester.pumpAndSettle();
 
       expect(find.text('早课闹钟'), findsOneWidget);
-      expect(find.text('闹钟提前时间'), findsNothing);
+      expect(find.text('提前时间'), findsNothing);
 
       await tester.tap(find.text('早课闹钟'));
       await tester.pumpAndSettle();
 
-      expect(methodCalls, contains('requestAuthorization'));
-      expect(find.text('闹钟提前时间'), findsOneWidget);
+      expect(find.text('提前时间'), findsOneWidget);
       expect(find.text('20 分钟'), findsOneWidget);
+      expect(find.text('开启震动'), findsOneWidget);
 
-      await tester.tap(find.text('闹钟提前时间'));
+      await tester.tap(find.text('开启震动'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('取消'));
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
 
-      await tester.tap(find.text('闹钟提前时间'));
+      await tester.tap(find.text('20 分钟'));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextFormField), '30');
+      await tester.tap(find.text('30 分钟').last);
+      await tester.pumpAndSettle();
       await tester.tap(find.text('保存'));
       await tester.pumpAndSettle();
+
       expect(tester.takeException(), isNull);
-      expect(find.text('30 分钟'), findsOneWidget);
+      expect(methodCalls, contains('requestAuthorization'));
+      expect(find.textContaining('早课闹钟已开启，提前 30 分钟响铃'), findsOneWidget);
     } finally {
+      restoreFlutterError();
       debugDefaultTargetPlatformOverride = null;
     }
   });
@@ -175,7 +195,7 @@ class _UnusedAcademicScheduleApiClient extends AcademicScheduleApiClient {
 
 class _FakeAcademicAuthService implements AcademicAuthService {
   @override
-  Future<void> clearCachedCookiesForReauthentication() async {}
+  Future<void> clearAccount() async {}
 
   @override
   Future<Set<String>> clearCookies() async => {};
@@ -244,4 +264,22 @@ final _schedule = AcademicSchedule(
   fetchedAt: DateTime(2026, 8, 31),
 );
 
-class _StubNotificationsPlatform extends FlutterLocalNotificationsPlatform {}
+class _StubNotificationsPlatform extends FlutterLocalNotificationsPlatform {
+  @override
+  Future<List<PendingNotificationRequest>> pendingNotificationRequests() async {
+    return const [];
+  }
+}
+
+void Function() _ignoreListTileBackgroundWarning() {
+  final previous = FlutterError.onError;
+  FlutterError.onError = (details) {
+    if (details.exception.toString().startsWith(
+          'ListTile background color or ink splashes may be invisible.',
+        )) {
+      return;
+    }
+    previous?.call(details);
+  };
+  return () => FlutterError.onError = previous;
+}

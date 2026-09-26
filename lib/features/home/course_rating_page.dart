@@ -205,7 +205,7 @@ class _CourseRatingPageState extends State<CourseRatingPage> {
       context,
       title: '课程评价说明',
       message:
-          '该功能由 https://course-rate.icu/ 提供。感谢学盟的付出！\n\n当前客户端仅支持浏览课程与教师评价，暂不能发表评价。\n\n如需评价课程，请访问网站注册登录后进行。\n\n再次感谢学盟的付出！',
+          '该功能由 https://course-rate.icu/ 提供。感谢学盟的付出！\n\n当前客户端仅支持浏览课程与教师评价，暂不能发表评价。\n\n如需评价课程，请访问网站注册登录后进行。',
     );
   }
 }

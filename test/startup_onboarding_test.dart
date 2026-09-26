@@ -11,7 +11,6 @@ void main() {
   Widget app({
     required bool completed,
     bool academicLoggedIn = false,
-    bool academicExpired = false,
     ForumAccountStatus forumStatus = ForumAccountStatus.signedOut,
     StartupOnboardingController? controller,
     Future<bool> Function()? onAcademicLogout,
@@ -22,7 +21,6 @@ void main() {
       home: StartupOnboarding(
         initiallyCompleted: completed,
         initialAcademicLoggedIn: academicLoggedIn,
-        initialAcademicExpired: academicExpired,
         initialForumStatus: forumStatus,
         onAcademicLoginCompleted: () {},
         onForumLoginCompleted: () {},
@@ -237,27 +235,6 @@ void main() {
     expect(find.text('登录'), findsNothing);
   });
 
-  testWidgets('account manager distinguishes an expired academic session',
-      (tester) async {
-    final controller = StartupOnboardingController();
-    await tester.pumpWidget(app(
-      completed: true,
-      academicLoggedIn: true,
-      academicExpired: true,
-      controller: controller,
-    ));
-    controller.openAccountManager(
-      academicLoggedIn: true,
-      academicExpired: true,
-      forumStatus: ForumAccountStatus.signedOut,
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('上大校园账户'), findsOneWidget);
-    expect(find.text('已过期'), findsOneWidget);
-    expect(find.text('已登录'), findsNothing);
-  });
-
   testWidgets('account manager shows persistent WebVPN controls and status',
       (tester) async {
     final controller = StartupOnboardingController();
@@ -292,7 +269,7 @@ void main() {
     await tester.ensureVisible(find.byType(Switch));
     await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();
-    expect(find.text('关闭后需重新登录论坛账户'), findsOneWidget);
+    expect(find.text('关闭后可能需要重新登录论坛'), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, '取消'));
     await tester.pumpAndSettle();
     expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
@@ -326,7 +303,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('开启WebVPN连接'), findsOneWidget);
-    expect(find.text('开启后需要重新登录论坛账户'), findsOneWidget);
+    expect(find.text('开启后可能需要重新登录论坛'), findsOneWidget);
     expect(changeRequested, isFalse);
 
     await tester.tap(find.widgetWithText(TextButton, '取消'));

@@ -108,6 +108,8 @@ class _MessagesPageState extends State<MessagesPage> {
     super.initState();
     widget.controller?._attach(this);
     _showArchived = widget.showArchived;
+    _topics = widget.repository.cachedPrivateMessages;
+    _loading = _topics == null;
     unawaited(_loadInitial());
   }
 
@@ -124,14 +126,25 @@ class _MessagesPageState extends State<MessagesPage> {
         _refreshing = false;
         widget.onRefreshStateChanged?.call(false);
       }
+      final sameAccount = oldWidget.repository.hasLocalAccount &&
+          widget.repository.hasLocalAccount &&
+          oldWidget.repository.profile.username.toLowerCase() ==
+              widget.repository.profile.username.toLowerCase();
+      if (sameAccount) {
+        _error = null;
+        _loading = _topics == null;
+        _showArchived = widget.showArchived;
+        unawaited(_loadInitial());
+        return;
+      }
       _previewFutures.clear();
       _previewVersions.clear();
-      _topics = null;
+      _topics = widget.repository.cachedPrivateMessages;
       _archivedTopicIds = const {};
       _selectedTopicIds = {};
       widget.onSelectionChanged?.call(false);
       _error = null;
-      _loading = true;
+      _loading = _topics == null;
       _showArchived = widget.showArchived;
       _messageRowExtent = 0;
       unawaited(_loadInitial());
@@ -381,11 +394,15 @@ class _MessagesPageState extends State<MessagesPage> {
   }
 
   Future<void> _loadInitial() async {
+    final operationId = ++_refreshOperationId;
+    final repository = widget.repository;
     try {
       final archivedTopicIdsFuture = _loadArchivedTopicIds();
-      final topics = await widget.repository.fetchPrivateMessages();
+      final topics = await repository.fetchPrivateMessages();
       final archivedTopicIds = await archivedTopicIdsFuture;
-      if (!mounted) {
+      if (!mounted ||
+          operationId != _refreshOperationId ||
+          !identical(repository, widget.repository)) {
         return;
       }
       setState(() {
@@ -397,7 +414,9 @@ class _MessagesPageState extends State<MessagesPage> {
       _updatePreviewVersions(topics);
       unawaited(_refreshList(silent: true, showIndicator: false));
     } on Object catch (error) {
-      if (!mounted) {
+      if (!mounted ||
+          operationId != _refreshOperationId ||
+          !identical(repository, widget.repository)) {
         return;
       }
       setState(() {

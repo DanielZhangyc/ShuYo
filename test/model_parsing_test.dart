@@ -676,6 +676,21 @@ void main() {
     );
   });
 
+  test('orders every post independently in reverse chronological order', () {
+    final posts = [
+      _post(postNumber: 1),
+      _post(postNumber: 2),
+      _post(postNumber: 3, replyToPostNumber: 2),
+      _post(postNumber: 4, replyToPostNumber: 3),
+    ];
+
+    final reversed = buildReverseChronologicalPosts(posts);
+
+    expect(reversed.map((post) => post.postNumber), [4, 3, 2, 1]);
+    expect(reversed[0].replyToPostNumber, 3);
+    expect(posts.map((post) => post.postNumber), [1, 2, 3, 4]);
+  });
+
   test('formats forum times without labels', () {
     final now = DateTime(2026, 7, 9, 18, 48);
 

@@ -62,4 +62,43 @@ void main() {
     expect(header, contains('_t=trust-token'));
     expect(header, contains('webvpn-token=portal'));
   });
+
+  test('forum sign-out never clears the independent WebVPN token', () async {
+    final cleared = <WebViewCookie>[];
+    final service = ForumAuthService(
+      cookieLoader: (_) async => const [
+        WebViewCookie(
+          name: 'webvpn-token',
+          value: 'portal',
+          domain: 'webvpn.shu.edu.cn',
+        ),
+        WebViewCookie(
+          name: '_forum_session',
+          value: 'forum',
+          domain: 'https-bbs-shu-edu-cn-443.webvpn.shu.edu.cn',
+        ),
+      ],
+      cookieSetter: (cookie) async => cleared.add(cookie),
+    );
+
+    await service.clearCookiesForMode(ForumAccessMode.webVpn);
+
+    expect(cleared.map((cookie) => cookie.name), ['_forum_session']);
+    expect(cleared.single.value, isEmpty);
+  });
+
+  test('removes a rejected WebVPN token but preserves forum sessions',
+      () async {
+    final service = ForumAuthService(
+      cookieLoader: (_) async => const [],
+      cookieSetter: (_) async {},
+    );
+
+    await service.removeCachedCookieNames({'webvpn-token'});
+
+    final header = await service.cookieHeader();
+    expect(header, contains('_t=trust-token'));
+    expect(header, contains('_forum_session=old-session'));
+    expect(header, isNot(contains('webvpn-token=')));
+  });
 }

@@ -20,6 +20,7 @@ class ProfilePage extends StatelessWidget {
     required this.activityCountsFuture,
     required this.onOpenActivity,
     this.onOpenDrafts,
+    this.onLoginRequired,
   });
 
   final UserProfile profile;
@@ -32,6 +33,7 @@ class ProfilePage extends StatelessWidget {
   final Future<ForumActivityCounts>? activityCountsFuture;
   final ValueChanged<ForumActivityKind> onOpenActivity;
   final VoidCallback? onOpenDrafts;
+  final VoidCallback? onLoginRequired;
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +51,7 @@ class ProfilePage extends StatelessWidget {
               ? null
               : hasLocalAccount
                   ? (isOnline ? onEditProfile : null)
-                  : null,
+                  : onLoginRequired,
           trailing: isBusy
               ? const SizedBox(
                   width: 22,

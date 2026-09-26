@@ -159,6 +159,18 @@ class DemoForumRepository implements ForumRepository {
   bool canLoadMoreFeed(TopicFeedQuery query) => false;
 
   @override
+  List<TopicListItem> cachedTopicFeed(TopicFeedQuery query) {
+    Iterable<TopicListItem> result = query.hot
+        ? (_topics.toList()..sort((a, b) => b.likeCount.compareTo(a.likeCount)))
+        : _topics;
+    final categoryId = query.categoryId;
+    if (categoryId != null) {
+      result = result.where((topic) => topic.categoryId == categoryId);
+    }
+    return result.toList(growable: false);
+  }
+
+  @override
   Future<List<TopicListItem>> fetchTopicFeed(TopicFeedQuery query,
       {bool forceRefresh = false}) async {
     Iterable<TopicListItem> result = query.hot
@@ -381,6 +393,10 @@ class DemoForumRepository implements ForumRepository {
   @override
   Future<List<TopicListItem>> fetchPrivateMessages(
           {bool forceRefresh = false}) async =>
+      List.unmodifiable(_privateMessages);
+
+  @override
+  List<TopicListItem> get cachedPrivateMessages =>
       List.unmodifiable(_privateMessages);
 
   @override

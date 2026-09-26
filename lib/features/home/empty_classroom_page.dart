@@ -257,7 +257,9 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
       range: range,
       forceRefresh: forceRefresh,
     );
-    setState(() => _resultFuture = future);
+    setState(() {
+      _resultFuture = future;
+    });
     await future.then<void>((_) {}, onError: (_) {});
   }
 
@@ -532,22 +534,22 @@ class _SearchControls extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 6,
+            for (var rowStart = 0; rowStart < ranges.length; rowStart += 3) ...[
+              if (rowStart > 0) const SizedBox(height: 6),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (final range in ranges)
-                    FilterChip(
-                      label: Text(range.label),
-                      selected: selectedRange?.start == range.start &&
-                          selectedRange?.end == range.end,
-                      onSelected: (_) => onRangeChanged(range),
+                  for (var column = 0; column < 3; column++) ...[
+                    if (column > 0) const SizedBox(width: 8),
+                    Expanded(
+                      child: rowStart + column < ranges.length
+                          ? _rangeButton(context, ranges[rowStart + column])
+                          : const SizedBox.shrink(),
                     ),
+                  ],
                 ],
               ),
-            ),
+            ],
             const SizedBox(height: 10),
             TextField(
               decoration: const InputDecoration(
@@ -560,6 +562,35 @@ class _SearchControls extends StatelessWidget {
               onChanged: onKeywordChanged,
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _rangeButton(BuildContext context, ClassroomSectionRange range) {
+    final colors = context.shuyoColors;
+    final selected =
+        selectedRange?.start == range.start && selectedRange?.end == range.end;
+    return MergeSemantics(
+      child: Semantics(
+        selected: selected,
+        inMutuallyExclusiveGroup: true,
+        child: OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(0, 48),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            foregroundColor:
+                selected ? colors.onAccentSoft : colors.textPrimary,
+            backgroundColor: selected ? colors.accentSoft : colors.surface,
+            side: BorderSide(
+              color: selected ? colors.accent : colors.borderStrong,
+              width: selected ? 2 : 1,
+            ),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          onPressed: () => onRangeChanged(range),
+          child: Text(range.label, textAlign: TextAlign.center),
         ),
       ),
     );

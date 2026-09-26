@@ -35,6 +35,24 @@ bool isForumRegistrationCompletionUri(Uri uri) {
   return path == '/' || path == '/latest' || path == '/latest/';
 }
 
+@visibleForTesting
+bool isAuthenticatedForumCallbackCookie(String value) {
+  var decoded = value;
+  for (var attempt = 0; attempt < 2; attempt++) {
+    try {
+      decoded = Uri.decodeComponent(decoded);
+    } on FormatException {
+      break;
+    }
+  }
+  try {
+    final data = jsonDecode(decoded);
+    return data is Map && data['authenticated'] == true;
+  } on Object {
+    return false;
+  }
+}
+
 bool _isForumRegistrationFlowUri(Uri uri) {
   if (uri.scheme != 'https' ||
       !ForumUrlResolver.isActiveForumHost(uri.host.toLowerCase())) {
@@ -80,6 +98,7 @@ class _ForumOAuthCompletionPageState extends State<ForumOAuthCompletionPage> {
   Uri? _currentUri;
   String? _error;
   int _certificateErrorGeneration = 0;
+  int _webVpnLoginRedirectCount = 0;
   final String _status = '正在建立乐乎论坛会话';
 
   static const _reachabilityService = CampusReachabilityService();
@@ -152,6 +171,14 @@ class _ForumOAuthCompletionPageState extends State<ForumOAuthCompletionPage> {
       child: Scaffold(
         appBar: AppBar(
           title: Text(_registrationActive ? '设置论坛昵称' : '乐乎论坛账户'),
+          actions: [
+            if (!_registrationActive && _error == null)
+              IconButton(
+                tooltip: '取消登录',
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+          ],
         ),
         body: Stack(
           children: [
@@ -292,6 +319,15 @@ class _ForumOAuthCompletionPageState extends State<ForumOAuthCompletionPage> {
 
   NavigationDecision _handleNavigationRequest(NavigationRequest request) {
     final uri = Uri.tryParse(request.url);
+    if (uri != null &&
+        request.isMainFrame &&
+        _isRepeatedWebVpnLoginRedirect(uri)) {
+      _webVpnLoginRedirectCount++;
+      if (_webVpnLoginRedirectCount >= 2) {
+        _fail('WebVPN登录凭证未能传递到论坛，请返回后重试');
+        return NavigationDecision.prevent;
+      }
+    }
     if (uri != null && _isInternalWebViewScheme(uri.scheme)) {
       return NavigationDecision.navigate;
     }
@@ -302,6 +338,15 @@ class _ForumOAuthCompletionPageState extends State<ForumOAuthCompletionPage> {
       _fail('认证页面尝试跳转到非上海大学地址');
     }
     return NavigationDecision.prevent;
+  }
+
+  bool _isRepeatedWebVpnLoginRedirect(Uri uri) {
+    if (!ForumUrlResolver.usesWebVpn || !_forumReached) return false;
+    final portalHost = Uri.parse(ForumUrlResolver.webVpnPortalUrl).host;
+    if (uri.host.toLowerCase() != portalHost) return false;
+    return uri.queryParameters.containsKey('returnUrl') ||
+        uri.path == '/' ||
+        uri.path.startsWith('/auth/login');
   }
 
   void _handleSslAuthError(SslAuthError error) {
@@ -364,6 +409,10 @@ class _ForumOAuthCompletionPageState extends State<ForumOAuthCompletionPage> {
         await _checkWebViewSession();
         return;
       }
+      if (ForumUrlResolver.usesWebVpn) {
+        await _checkWebVpnCallbackCookie();
+        return;
+      }
       await _authService.refreshFromWebView();
       final apiClient = DiscourseApiClient(authService: _authService);
       final session = await apiClient.getJson('/session/current.json');
@@ -386,6 +435,27 @@ class _ForumOAuthCompletionPageState extends State<ForumOAuthCompletionPage> {
     } finally {
       _checkingSession = false;
     }
+  }
+
+  Future<void> _checkWebVpnCallbackCookie() async {
+    final cookies = await WebViewCookieManager().getCookies(
+      domain: ForumUrlResolver.baseUri,
+    );
+    final authenticated = cookies.any(
+      (cookie) =>
+          cookie.name == 'authentication_data' &&
+          isAuthenticatedForumCallbackCookie(cookie.value),
+    );
+    if (kDebugMode) {
+      debugPrint(
+        '[FORUM_AUTH_CALLBACK] webvpn callback-cookie '
+        'authenticated=$authenticated '
+        'names=${cookies.map((cookie) => cookie.name).where((name) => name.isNotEmpty).toSet().toList()..sort()}',
+      );
+    }
+    if (!authenticated || _finalizingWebViewSession) return;
+    _finalizingWebViewSession = true;
+    unawaited(_completeWebViewSession());
   }
 
   Future<void> _checkWebViewSession() async {

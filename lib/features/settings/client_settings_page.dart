@@ -31,8 +31,10 @@ class ClientSettingsPage extends StatelessWidget {
     this.onClearForumCache,
     this.hasAcademicAccount = false,
     this.hasForumAccount = false,
+    this.hasWebVpnSession = false,
     this.onAcademicLogout,
     this.onForumLogout,
+    this.onWebVpnLogout,
     this.isDemo = false,
     this.onExitDemo,
   });
@@ -49,8 +51,10 @@ class ClientSettingsPage extends StatelessWidget {
   final Future<int> Function()? onClearForumCache;
   final bool hasAcademicAccount;
   final bool hasForumAccount;
+  final bool hasWebVpnSession;
   final Future<bool> Function()? onAcademicLogout;
   final Future<bool> Function()? onForumLogout;
+  final Future<bool> Function()? onWebVpnLogout;
   final bool isDemo;
   final Future<void> Function()? onExitDemo;
 
@@ -60,17 +64,6 @@ class ClientSettingsPage extends StatelessWidget {
       appBar: AppBar(title: const Text('设置')),
       body: ListView(
         children: [
-          _SettingsRow(
-            title: '通知设置',
-            onTap: () => Navigator.of(context).push<void>(
-              shuyoRoute(
-                builder: (context) => _NotificationSettingsPage(
-                  settingsService: settingsService,
-                  scheduleNotificationService: scheduleNotificationService,
-                ),
-              ),
-            ),
-          ),
           _SettingsRow(
             title: '主题切换',
             onTap: () => Navigator.of(context).push<void>(
@@ -104,12 +97,15 @@ class ClientSettingsPage extends StatelessWidget {
             loadSize: loadForumCacheSize,
             onClear: onClearForumCache,
           ),
-          if (!isDemo && (hasAcademicAccount || hasForumAccount))
+          if (!isDemo &&
+              (hasAcademicAccount || hasForumAccount || hasWebVpnSession))
             _AccountLogoutRow(
               hasAcademicAccount: hasAcademicAccount,
               hasForumAccount: hasForumAccount,
+              hasWebVpnSession: hasWebVpnSession,
               onAcademicLogout: onAcademicLogout,
               onForumLogout: onForumLogout,
+              onWebVpnLogout: onWebVpnLogout,
             ),
         ],
       ),
@@ -235,14 +231,18 @@ class _AccountLogoutRow extends StatefulWidget {
   const _AccountLogoutRow({
     required this.hasAcademicAccount,
     required this.hasForumAccount,
+    required this.hasWebVpnSession,
     required this.onAcademicLogout,
     required this.onForumLogout,
+    required this.onWebVpnLogout,
   });
 
   final bool hasAcademicAccount;
   final bool hasForumAccount;
+  final bool hasWebVpnSession;
   final Future<bool> Function()? onAcademicLogout;
   final Future<bool> Function()? onForumLogout;
+  final Future<bool> Function()? onWebVpnLogout;
 
   @override
   State<_AccountLogoutRow> createState() => _AccountLogoutRowState();
@@ -251,6 +251,7 @@ class _AccountLogoutRow extends StatefulWidget {
 class _AccountLogoutRowState extends State<_AccountLogoutRow> {
   late bool _hasAcademicAccount;
   late bool _hasForumAccount;
+  late bool _hasWebVpnSession;
   bool _loggingOut = false;
 
   @override
@@ -258,6 +259,7 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
     super.initState();
     _hasAcademicAccount = widget.hasAcademicAccount;
     _hasForumAccount = widget.hasForumAccount;
+    _hasWebVpnSession = widget.hasWebVpnSession;
   }
 
   @override
@@ -269,6 +271,9 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
     if (oldWidget.hasForumAccount != widget.hasForumAccount) {
       _hasForumAccount = widget.hasForumAccount;
     }
+    if (oldWidget.hasWebVpnSession != widget.hasWebVpnSession) {
+      _hasWebVpnSession = widget.hasWebVpnSession;
+    }
   }
 
   @override
@@ -276,7 +281,8 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
     final colors = context.shuyoColors;
     final enabled = !_loggingOut &&
         ((_hasAcademicAccount && widget.onAcademicLogout != null) ||
-            (_hasForumAccount && widget.onForumLogout != null));
+            (_hasForumAccount && widget.onForumLogout != null) ||
+            (_hasWebVpnSession && widget.onWebVpnLogout != null));
     return ListTile(
       title: Text('退出登录', style: TextStyle(color: colors.danger)),
       subtitle: _loggingOut ? const Text('正在退出...') : null,
@@ -329,7 +335,7 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
                     leading: const Icon(Icons.school_outlined),
                     title: const Text('上大校园账户'),
                     subtitle: Text(
-                      _hasAcademicAccount ? '课表和校园服务需要重新登录' : '未登录',
+                      _hasAcademicAccount ? '退出课表和校园服务' : '未登录',
                     ),
                     enabled:
                         _hasAcademicAccount && widget.onAcademicLogout != null,
@@ -343,11 +349,22 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
                     leading: const Icon(Icons.forum_outlined),
                     title: const Text('乐乎账户'),
                     subtitle: Text(
-                      _hasForumAccount ? '清除论坛会话和本地账户数据' : '未登录',
+                      _hasForumAccount ? '退出论坛' : '未登录',
                     ),
                     enabled: _hasForumAccount && widget.onForumLogout != null,
                     onTap: _hasForumAccount && widget.onForumLogout != null
                         ? () => Navigator.of(context).pop(_LogoutTarget.forum)
+                        : null,
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.vpn_key_off_outlined),
+                    title: const Text('WebVPN'),
+                    subtitle: Text(
+                      _hasWebVpnSession ? '重置WebVPN' : '未登录',
+                    ),
+                    enabled: _hasWebVpnSession && widget.onWebVpnLogout != null,
+                    onTap: _hasWebVpnSession && widget.onWebVpnLogout != null
+                        ? () => Navigator.of(context).pop(_LogoutTarget.webVpn)
                         : null,
                   ),
                 ],
@@ -363,14 +380,23 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
 
   Future<void> _confirmAndLogout(_LogoutTarget target) async {
     final academic = target == _LogoutTarget.academic;
+    final forum = target == _LogoutTarget.forum;
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: Text(academic ? '退出上大校园账户？' : '退出乐乎论坛账户？'),
+            title: Text(
+              academic
+                  ? '退出校园账户'
+                  : forum
+                      ? '退出乐乎论坛账户'
+                      : '退出WebVPN',
+            ),
             content: Text(
               academic
-                  ? '退出后课表和校园服务需要重新登录。论坛账户也需在登录校园账户后使用。'
-                  : '退出后将清除论坛会话和本地账户数据，校园账户不会受影响。',
+                  ? '退出后校园服务需重新登录\n\n已保存的课表信息不会被清除'
+                  : forum
+                      ? '退出后将清除论坛会话\n\n这不会影响校园账户'
+                      : '退出后将关闭WebVPN并清除登录状态',
             ),
             actions: [
               TextButton(
@@ -388,25 +414,34 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
     if (!confirmed || !mounted) return;
 
     setState(() => _loggingOut = true);
-    final loggedOut = academic
-        ? await widget.onAcademicLogout?.call() ?? false
-        : await widget.onForumLogout?.call() ?? false;
+    final loggedOut = switch (target) {
+      _LogoutTarget.academic => await widget.onAcademicLogout?.call() ?? false,
+      _LogoutTarget.forum => await widget.onForumLogout?.call() ?? false,
+      _LogoutTarget.webVpn => await widget.onWebVpnLogout?.call() ?? false,
+    };
     if (!mounted) return;
     setState(() {
       _loggingOut = false;
       if (loggedOut && academic) _hasAcademicAccount = false;
-      if (loggedOut && !academic) _hasForumAccount = false;
+      if (loggedOut && forum) _hasForumAccount = false;
+      if (loggedOut && target == _LogoutTarget.webVpn) {
+        _hasWebVpnSession = false;
+      }
     });
     if (loggedOut) {
       _showSnack(
         context,
-        academic ? '已退出上大校园账户' : '已退出乐乎论坛账户',
+        academic
+            ? '已退出上大校园账户'
+            : forum
+                ? '已退出乐乎论坛账户'
+                : '已退出WebVPN',
       );
     }
   }
 }
 
-enum _LogoutTarget { academic, forum }
+enum _LogoutTarget { academic, forum, webVpn }
 
 class _AboutClientPage extends StatefulWidget {
   const _AboutClientPage({
@@ -1011,6 +1046,8 @@ class _NotificationSettingsPageState extends State<_NotificationSettingsPage> {
   bool _alarmsSupported = false;
   AcademicScheduleAlarmSettings? _alarmSettings;
   bool _savingAlarm = false;
+  String? _alarmRingtoneName;
+  bool _pickingAlarmRingtone = false;
 
   @override
   void initState() {
@@ -1071,7 +1108,7 @@ class _NotificationSettingsPageState extends State<_NotificationSettingsPage> {
                 ),
                 if (alarmSettings.enabled)
                   ListTile(
-                    title: const Text('闹钟提前时间'),
+                    title: const Text('提前时间'),
                     trailing: Padding(
                       padding: const EdgeInsets.only(right: 7),
                       child: Text('${alarmSettings.leadMinutes} 分钟'),
@@ -1080,6 +1117,25 @@ class _NotificationSettingsPageState extends State<_NotificationSettingsPage> {
                     onTap: _savingAlarm
                         ? null
                         : () => _editAlarmLeadMinutes(alarmSettings),
+                  ),
+                if (alarmSettings.enabled &&
+                    widget.scheduleNotificationService
+                        .supportsAlarmRingtoneCustomization)
+                  ListTile(
+                    title: const Text('闹钟铃声'),
+                    subtitle: Text(
+                      _alarmRingtoneName ?? '默认',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: _pickingAlarmRingtone
+                        ? const SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2.5),
+                          )
+                        : const Icon(Icons.chevron_right),
+                    enabled: !_savingAlarm && !_pickingAlarmRingtone,
+                    onTap: _pickAlarmRingtone,
                   ),
               ],
             ],
@@ -1104,10 +1160,14 @@ class _NotificationSettingsPageState extends State<_NotificationSettingsPage> {
             enabled: false,
             leadMinutes: 20,
           );
+    final ringtoneName = supported
+        ? await widget.scheduleNotificationService.loadAlarmRingtoneName()
+        : null;
     if (!mounted) return;
     setState(() {
       _alarmsSupported = supported;
       _alarmSettings = settings;
+      _alarmRingtoneName = ringtoneName;
     });
   }
 
@@ -1187,7 +1247,7 @@ class _NotificationSettingsPageState extends State<_NotificationSettingsPage> {
     final value = await showDialog<int>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('设置闹钟提前时间'),
+        title: const Text('提前时间'),
         content: Form(
           key: formKey,
           child: TextFormField(
@@ -1228,6 +1288,29 @@ class _NotificationSettingsPageState extends State<_NotificationSettingsPage> {
     );
     if (value != null && mounted) {
       await _saveAlarm(settings.copyWith(leadMinutes: value));
+    }
+  }
+
+  Future<void> _pickAlarmRingtone() async {
+    if (_pickingAlarmRingtone || _savingAlarm) {
+      return;
+    }
+    setState(() => _pickingAlarmRingtone = true);
+    try {
+      final name = await widget.scheduleNotificationService.pickAlarmRingtone();
+      if (!mounted || name == null) {
+        return;
+      }
+      setState(() => _alarmRingtoneName = name);
+      _showSnack(context, '闹钟铃声已设置为$name');
+    } on Object catch (error) {
+      if (mounted) {
+        _showSnack(context, '选择闹钟铃声失败：$error');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _pickingAlarmRingtone = false);
+      }
     }
   }
 }

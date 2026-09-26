@@ -107,6 +107,7 @@ abstract class ForumRepository {
   bool get canLoadMoreLatest;
   bool get canLoadMoreHot;
   bool canLoadMoreFeed(TopicFeedQuery query);
+  List<TopicListItem>? cachedTopicFeed(TopicFeedQuery query);
   Future<List<TopicListItem>> fetchTopicFeed(
     TopicFeedQuery query, {
     bool forceRefresh = false,
@@ -175,6 +176,7 @@ abstract class ForumRepository {
   Future<UserProfile> useCustomAvatar(int uploadId);
   Future<Post> createReply(ReplyDraft draft);
   Future<List<TopicListItem>> fetchPrivateMessages({bool forceRefresh = false});
+  List<TopicListItem>? get cachedPrivateMessages;
   Future<Post> createPrivateMessage(PrivateMessageDraft draft);
   Future<List<ForumNotification>> fetchNotifications(
     NotificationFeedFilter filter, {
@@ -326,6 +328,16 @@ class FixtureForumRepository implements ForumRepository {
 
   @override
   bool canLoadMoreFeed(TopicFeedQuery query) => false;
+
+  @override
+  List<TopicListItem> cachedTopicFeed(TopicFeedQuery query) {
+    Iterable<TopicListItem> topics = query.hot ? _hotTopics : _latestTopics;
+    final categoryId = query.categoryId;
+    if (categoryId != null) {
+      topics = topics.where((topic) => topic.categoryId == categoryId);
+    }
+    return topics.toList(growable: false);
+  }
 
   @override
   Future<List<TopicListItem>> fetchTopicFeed(
@@ -576,6 +588,9 @@ class FixtureForumRepository implements ForumRepository {
   }
 
   @override
+  List<TopicListItem> get cachedPrivateMessages => const [];
+
+  @override
   Future<Post> createPrivateMessage(PrivateMessageDraft draft) {
     throw const ForumAuthException('请先登录后再发私信');
   }
@@ -730,39 +745,60 @@ class OnlineForumRepository implements ForumRepository {
         _activityUpdatedAt = activityUpdatedAt,
         users = Map<int, DiscourseUser>.of(fallback.users) {
     users[session.user.id] = session.user;
+    users[profile.id] = profile.user;
   }
 
   static Future<OnlineForumRepository> connect({
     required FixtureForumRepository fallback,
     ForumAuthService? authService,
+    DiscourseApiClient? apiClient,
+    bool warmOptionalData = true,
   }) async {
     final auth = authService ?? ForumAuthService();
     if (!await auth.hasForumCookies()) {
       throw const ForumAuthException();
     }
-    final apiClient = DiscourseApiClient(authService: auth);
-    final session = await _fetchSession(apiClient);
+    final client = apiClient ?? DiscourseApiClient(authService: auth);
+    final session = await _fetchSession(client);
     await auth.persistLastCookieHeader();
     final persistentCache = await ForumPersistentCache.open(
       username: session.profile.username,
     );
     final snapshotStore = const ForumAccountSnapshotStore();
+    final storedSnapshot = await snapshotStore.load();
+    final snapshot = storedSnapshot != null &&
+            storedSnapshot.session.user.id == session.user.id &&
+            storedSnapshot.session.username.toLowerCase() ==
+                session.username.toLowerCase()
+        ? storedSnapshot
+        : null;
     final repository = OnlineForumRepository._(
-      apiClient: apiClient,
+      apiClient: client,
       authService: auth,
       fallback: fallback,
       session: session,
-      userSummary: _emptyUserSummary,
-      hasCachedUserSummary: false,
-      profile: session.profile,
+      userSummary: snapshot?.summary ?? _emptyUserSummary,
+      hasCachedUserSummary: snapshot?.summary != null,
+      profile: snapshot?.profile ?? session.profile,
       categories: Map<int, ForumCategory>.of(fallback._categories),
       persistentCache: persistentCache,
       snapshotStore: snapshotStore,
       connectionState: ForumConnectionState.online,
+      profileUpdatedAt: snapshot?.profileUpdatedAt,
+      summaryUpdatedAt: snapshot?.summaryUpdatedAt,
+      activityCountsJson: snapshot?.activityCounts,
+      activityUpdatedAt: snapshot?.activityUpdatedAt,
     );
+    if (snapshot?.activityCounts != null) {
+      repository._activityCounts = _activityCountsFromJson(
+        snapshot!.activityCounts!,
+      );
+    }
     await repository._restorePersistentCache();
     await repository._saveAccountSnapshot();
-    unawaited(repository._warmOptionalStartupData());
+    if (warmOptionalData) {
+      unawaited(repository._warmOptionalStartupData());
+    }
     return repository;
   }
 
@@ -1039,6 +1075,10 @@ class OnlineForumRepository implements ForumRepository {
   @override
   bool canLoadMoreFeed(TopicFeedQuery query) =>
       _feedMorePaths[query.key] != null;
+
+  @override
+  List<TopicListItem>? cachedTopicFeed(TopicFeedQuery query) =>
+      _feedTopics[query.key];
 
   @override
   Future<List<TopicListItem>> fetchTopicFeed(
@@ -1585,6 +1625,9 @@ class OnlineForumRepository implements ForumRepository {
     }
     return _privateMessages = messages;
   }
+
+  @override
+  List<TopicListItem>? get cachedPrivateMessages => _privateMessages;
 
   List<TopicListItem> _parsePrivateMessages(JsonMap json) {
     final messages = FixtureForumRepository._parseTopics(json).toList()

@@ -7,6 +7,8 @@ Route<T> shuyoRoute<T>({
   RouteSettings? settings,
   bool fullscreenDialog = false,
   bool animated = true,
+  // Deep links can appear immediately while keeping the normal back transition.
+  bool animatePush = true,
 }) {
   if (!animated) {
     return PageRouteBuilder<T>(
@@ -21,7 +23,8 @@ Route<T> shuyoRoute<T>({
     );
   }
   if (defaultTargetPlatform == TargetPlatform.iOS) {
-    return CupertinoPageRoute<T>(
+    return _ShuYoCupertinoRoute<T>(
+      animatePush: animatePush,
       settings: settings,
       fullscreenDialog: fullscreenDialog,
       builder: (context) => _ShuYoRouteSurface(child: builder(context)),
@@ -31,7 +34,8 @@ Route<T> shuyoRoute<T>({
     settings: settings,
     fullscreenDialog: fullscreenDialog,
     opaque: true,
-    transitionDuration: const Duration(milliseconds: 240),
+    transitionDuration:
+        animatePush ? const Duration(milliseconds: 240) : Duration.zero,
     reverseTransitionDuration: const Duration(milliseconds: 210),
     pageBuilder: (context, animation, secondaryAnimation) {
       return _ShuYoRouteSurface(child: builder(context));
@@ -48,6 +52,26 @@ Route<T> shuyoRoute<T>({
   );
 }
 
+// Keep the native back transition and interactive gesture handling even when
+// a Widget deep link skips the push animation.
+class _ShuYoCupertinoRoute<T> extends CupertinoPageRoute<T> {
+  _ShuYoCupertinoRoute({
+    required super.builder,
+    required this.animatePush,
+    super.settings,
+    super.fullscreenDialog,
+  });
+
+  final bool animatePush;
+
+  @override
+  Duration get transitionDuration =>
+      animatePush ? super.transitionDuration : Duration.zero;
+
+  @override
+  Duration get reverseTransitionDuration => super.transitionDuration;
+}
+
 class _ShuYoRouteSurface extends StatelessWidget {
   const _ShuYoRouteSurface({required this.child});
 
@@ -55,9 +79,15 @@ class _ShuYoRouteSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: Theme.of(context).scaffoldBackgroundColor,
-      child: child,
+    // RenderFractionalTranslation, which backs SlideTransition, only shifts the
+    // paint offset and creates no layer. Without a repaint boundary the whole
+    // page is re-recorded on every frame of the transition; this boundary lets
+    // the recorded layer be reused and only re-composited.
+    return RepaintBoundary(
+      child: ColoredBox(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: child,
+      ),
     );
   }
 }

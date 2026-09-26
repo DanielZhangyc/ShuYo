@@ -9,6 +9,8 @@ import '../../shared/widgets/avatar.dart';
 import '../../shared/widgets/forum_network_image.dart';
 
 class ProfileHeader extends StatelessWidget {
+  static const backgroundHeight = 122.0;
+
   const ProfileHeader({
     super.key,
     required this.profile,
@@ -48,7 +50,7 @@ class ProfileHeader extends StatelessWidget {
             left: 0,
             top: 0,
             right: 0,
-            height: 122,
+            height: backgroundHeight,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: _ProfileBackground(
@@ -146,8 +148,8 @@ class ProfileHeader extends StatelessWidget {
     if (onTap == null) {
       return header;
     }
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: header,
     );

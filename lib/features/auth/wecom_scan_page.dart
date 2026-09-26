@@ -74,6 +74,14 @@ class _WeComScanPageState extends State<WeComScanPage> {
       if (mounted) {
         setState(() => _status = WeComScanStatus.succeeded);
       }
+      // WebVPN 的 OAuth callback 只是 SPA 入口，还必须在同一原生
+      // Cookie 会话中完成 auth/finish 并用 user/info 确认身份。
+      if (widget.target.kind == WeComOAuthTargetKind.webVpn) {
+        final webVpnResult = await widget.authService.completeWebVpnLogin();
+        if (!mounted) return;
+        Navigator.of(context).pop(webVpnResult);
+        return;
+      }
       // 阶段二：SSO 会话 → 目标业务系统授权码回调。
       //
       // 需要 state 预热的系统（如论坛）改由 WebView 自行走入口到回调的链路：

@@ -20,6 +20,9 @@ const _scheduleCellInset = 2.5;
 const _scheduleCourseInset = 2.5;
 const _scheduleCellRadius = 4.0;
 const _scheduleCourseRadius = 5.0;
+const _nonCurrentWeekCourseFill = Color(0xFFBDBDBD);
+const _nonCurrentWeekCourseText = Color(0xFFFFFFFF);
+const _nonCurrentWeekCourseMetaText = Color(0xD9FFFFFF);
 
 class AcademicSchedulePage extends StatefulWidget {
   const AcademicSchedulePage({
@@ -57,7 +60,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
   final _displaySettingsService = AcademicScheduleDisplaySettingsService();
   AcademicScheduleDisplaySettings _displaySettings =
       const AcademicScheduleDisplaySettings(
-          colorful: false, showTeacher: false);
+          colorful: true, showTeacher: false, showCredit: false);
   Map<String, int> _courseColorValues = const {};
   late bool _usingInitialState;
   String? _initialLoadError;
@@ -93,7 +96,29 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_schedule?.term.displayName ?? '课表'),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_schedule?.term.displayName ?? '课表'),
+            Transform.translate(
+              offset: const Offset(-3, -0.5),
+              child: Opacity(
+                opacity: 0.65,
+                child: IconButton(
+                  tooltip: '课表信息说明',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 28,
+                    minHeight: 28,
+                  ),
+                  icon: const Icon(Icons.info_outline, size: 18),
+                  onPressed: _showScheduleDataInfo,
+                ),
+              ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             tooltip: '设置开学日期',
@@ -176,6 +201,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
       canAddCourse: true,
       onEmptySlotTap: _handleEmptySlotTap,
       onCourseTap: _handleCourseTap,
+      onDayHeaderTap: _handleDayHeaderTap,
     );
   }
 
@@ -404,6 +430,273 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
             });
       }
     }
+    unawaited(
+      widget.widgetService.syncSchedule(
+        schedule: next,
+        weekState: _weekState,
+      ),
+    );
+    unawaited(widget.notificationService.syncScheduleReminders());
+  }
+
+  Future<void> _handleDayHeaderTap(int weekday) async {
+    final schedule = _schedule;
+    final weekState = _weekState;
+    if (schedule == null || weekState == null) {
+      return;
+    }
+    final targetWeek = _displayedWeek;
+    final targetDate = weekState.anchorMonday.add(
+      Duration(days: (targetWeek - weekState.currentWeek) * 7 + weekday - 1),
+    );
+    final action = await showModalBottomSheet<_DayAction>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final colors = context.shuyoColors;
+        final bottomPadding = MediaQuery.of(context).viewPadding.bottom;
+        return SafeArea(
+          top: false,
+          bottom: false,
+          child: Container(
+            width: double.infinity,
+            padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + bottomPadding),
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(8)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '整日编辑',
+                        style: TextStyle(
+                          color: colors.textPrimary,
+                          fontSize: 16.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${targetDate.month}月${targetDate.day}日 · ${_weekdayName(weekday)}',
+                        style: ShuYoTextStyles.meta(color: colors.textMuted),
+                      ),
+                    ],
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.content_copy_outlined),
+                  title: const Text('从其他日期复制课程'),
+                  onTap: () =>
+                      Navigator.of(context).pop(_DayAction.copyFromDate),
+                ),
+                ListTile(
+                  leading:
+                      Icon(Icons.delete_sweep_outlined, color: colors.danger),
+                  title: Text(
+                    '清空这一天',
+                    style: TextStyle(color: colors.danger),
+                  ),
+                  onTap: () => Navigator.of(context).pop(_DayAction.clear),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (!mounted || action == null) {
+      return;
+    }
+    switch (action) {
+      case _DayAction.copyFromDate:
+        await _copyDayFromPicker(
+          schedule: schedule,
+          weekState: weekState,
+          targetWeek: targetWeek,
+          targetWeekday: weekday,
+          targetDate: targetDate,
+        );
+      case _DayAction.clear:
+        if (await _confirmClearDay(weekday) && mounted) {
+          await _clearDay(targetWeek, weekday);
+        }
+    }
+  }
+
+  Future<void> _copyDayFromPicker({
+    required AcademicSchedule schedule,
+    required ScheduleWeekState weekState,
+    required int targetWeek,
+    required int targetWeekday,
+    required DateTime targetDate,
+  }) async {
+    final firstWeekStart = weekState.firstWeekStart;
+    final lastDate = firstWeekStart.add(
+      Duration(days: schedule.maxWeek * 7 - 1),
+    );
+    final initialDate = targetDate.isBefore(firstWeekStart)
+        ? firstWeekStart
+        : (targetDate.isAfter(lastDate) ? lastDate : targetDate);
+    final picked = await showDialog<DateTime>(
+      context: context,
+      builder: (context) => _FirstWeekDatePickerDialog(
+        initialDate: initialDate,
+        title: '选择要复制的日期',
+        mondayOnly: false,
+        firstDate: firstWeekStart,
+        lastDate: lastDate,
+      ),
+    );
+    if (picked == null || !mounted) {
+      return;
+    }
+    final sourceWeek = picked.difference(firstWeekStart).inDays ~/ 7 + 1;
+    await _copyDay(
+      sourceWeek: sourceWeek,
+      sourceWeekday: picked.weekday,
+      targetWeek: targetWeek,
+      targetWeekday: targetWeekday,
+    );
+  }
+
+  Future<bool> _confirmClearDay(int weekday) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        final colors = context.shuyoColors;
+        return AlertDialog(
+          title: const Text('确认清空'),
+          content: Text('清空${_weekdayName(weekday)}这一天的全部课程？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: colors.danger,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('清空'),
+            ),
+          ],
+        );
+      },
+    );
+    return confirmed ?? false;
+  }
+
+  Future<void> _clearDay(int week, int weekday) async {
+    final schedule = _schedule;
+    if (schedule == null) {
+      return;
+    }
+    final nextSessions = <CourseSession>[];
+    var changed = false;
+    for (final session in schedule.sessions) {
+      if (session.weekday != weekday || !session.occursInWeek(week)) {
+        nextSessions.add(session);
+        continue;
+      }
+      changed = true;
+      final weeks = session.weeks.isEmpty
+          ? [
+              for (var w = 1; w <= schedule.maxWeek; w++)
+                if (w != week) w,
+            ]
+          : session.weeks.where((w) => w != week).toList();
+      if (weeks.isEmpty) {
+        continue;
+      }
+      nextSessions.add(_copySessionWithWeeks(session, weeks));
+    }
+    if (!changed) {
+      _showSnack('这一天本来就没有课程');
+      return;
+    }
+    await _persistSessions(schedule.copyWith(sessions: nextSessions));
+    _showSnack('已清空${_weekdayName(weekday)}的课程');
+  }
+
+  Future<void> _copyDay({
+    required int sourceWeek,
+    required int sourceWeekday,
+    required int targetWeek,
+    required int targetWeekday,
+  }) async {
+    final schedule = _schedule;
+    if (schedule == null) {
+      return;
+    }
+    if (sourceWeek < 1 || sourceWeek > schedule.maxWeek) {
+      _showSnack('所选日期不在本学期内');
+      return;
+    }
+    if (sourceWeek == targetWeek && sourceWeekday == targetWeekday) {
+      _showSnack('源日期与目标日期相同');
+      return;
+    }
+    final sourceSessions = schedule.sessions
+        .where((session) =>
+            session.weekday == sourceWeekday &&
+            session.occursInWeek(sourceWeek))
+        .toList();
+    if (sourceSessions.isEmpty) {
+      _showSnack('${_weekdayName(sourceWeekday)}没有课程可复制');
+      return;
+    }
+    final nextSessions = <CourseSession>[];
+    for (final session in schedule.sessions) {
+      if (session.weekday == targetWeekday &&
+          session.occursInWeek(targetWeek)) {
+        final weeks = session.weeks.isEmpty
+            ? [
+                for (var w = 1; w <= schedule.maxWeek; w++)
+                  if (w != targetWeek) w,
+              ]
+            : session.weeks.where((w) => w != targetWeek).toList();
+        if (weeks.isEmpty) {
+          continue;
+        }
+        nextSessions.add(_copySessionWithWeeks(session, weeks));
+        continue;
+      }
+      nextSessions.add(session);
+    }
+    final stamp = DateTime.now().microsecondsSinceEpoch;
+    for (var index = 0; index < sourceSessions.length; index++) {
+      nextSessions.add(
+        _oneOffDayCopy(
+          sourceSessions[index],
+          targetWeek: targetWeek,
+          targetWeekday: targetWeekday,
+          uniqueSuffix: '$stamp-$index',
+        ),
+      );
+    }
+    await _persistSessions(schedule.copyWith(sessions: nextSessions));
+    _showSnack(
+        '已从${_weekdayName(sourceWeekday)}复制 ${sourceSessions.length} 门课');
+  }
+
+  Future<void> _persistSessions(AcademicSchedule next) async {
+    await widget.repository.saveCachedSchedule(next);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _schedule = next;
+      _selectedManualSlot = null;
+    });
     unawaited(
       widget.widgetService.syncSchedule(
         schedule: next,
@@ -947,33 +1240,115 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
 
   Future<void> _openNotificationSettings() async {
     final initial = await widget.notificationService.loadSettings();
+    final alarmsSupported =
+        await widget.notificationService.supportsEarlyClassAlarms();
+    final alarmInitial = alarmsSupported
+        ? await widget.notificationService.loadAlarmSettings()
+        : const AcademicScheduleAlarmSettings(enabled: false, leadMinutes: 20);
+    final alarmRingtoneName = alarmsSupported
+        ? await widget.notificationService.loadAlarmRingtoneName()
+        : null;
     if (!mounted) {
       return;
     }
     final next =
-        await showModalBottomSheet<AcademicScheduleNotificationSettings>(
+        await showModalBottomSheet<_ScheduleNotificationSettingsResult>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _NotificationSettingsSheet(initial: initial),
+      builder: (context) => _NotificationSettingsSheet(
+        initial: initial,
+        alarmsSupported: alarmsSupported,
+        alarmInitial: alarmInitial,
+        notificationService: widget.notificationService,
+        alarmRingtoneName: alarmRingtoneName,
+      ),
     );
     if (!mounted || next == null) {
       return;
     }
     final saved = await widget.notificationService.saveSettingsAndSync(
-      next,
-      requestPermission: next.enabled,
+      next.regular,
+      requestPermission: next.regular.enabled,
     );
+    AcademicScheduleAlarmSettings? savedAlarm;
+    if (next.alarm != null) {
+      savedAlarm = await widget.notificationService.saveAlarmSettingsAndSync(
+        next.alarm!,
+        requestPermission: next.alarm!.enabled,
+      );
+    }
     if (!mounted) {
       return;
     }
-    if (next.enabled && !saved.enabled) {
-      _showSnack('系统通知或精确提醒权限未开启，课程提醒已关闭');
-      return;
-    }
     _showSnack(
-      saved.enabled ? '课程提醒已开启，提前 ${saved.leadMinutes} 分钟' : '课程提醒已关闭',
+      _notificationSettingsSaveMessage(
+        initialRegular: initial,
+        requestedRegular: next.regular,
+        savedRegular: saved,
+        initialAlarm: alarmsSupported ? alarmInitial : null,
+        requestedAlarm: next.alarm,
+        savedAlarm: savedAlarm,
+      ),
     );
+  }
+
+  Future<void> _showScheduleDataInfo() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('课表信息说明'),
+        content: const Text(
+          '应用每次获取的课表信息为当时教务系统中数据，并非实时更新\n\n因此当发生课程变更、教室变更等情况，需手动进行刷新',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _notificationSettingsSaveMessage({
+    required AcademicScheduleNotificationSettings initialRegular,
+    required AcademicScheduleNotificationSettings requestedRegular,
+    required AcademicScheduleNotificationSettings savedRegular,
+    required AcademicScheduleAlarmSettings? initialAlarm,
+    required AcademicScheduleAlarmSettings? requestedAlarm,
+    required AcademicScheduleAlarmSettings? savedAlarm,
+  }) {
+    final messages = <String>[];
+    if (requestedRegular.enabled && !savedRegular.enabled) {
+      messages.add('系统通知或精确提醒权限未开启，课程提醒已关闭');
+    } else if (initialRegular.enabled != savedRegular.enabled ||
+        (savedRegular.enabled &&
+            initialRegular.leadMinutes != savedRegular.leadMinutes)) {
+      messages.add(
+        savedRegular.enabled
+            ? '课程提醒已开启，提前 ${savedRegular.leadMinutes} 分钟'
+            : '课程提醒已关闭',
+      );
+    }
+
+    if (requestedAlarm != null && savedAlarm != null) {
+      if (requestedAlarm.enabled && !savedAlarm.enabled) {
+        messages.add('未获得闹钟权限，早课闹钟已关闭');
+      } else if (initialAlarm == null ||
+          initialAlarm.enabled != savedAlarm.enabled ||
+          (savedAlarm.enabled &&
+              (initialAlarm.leadMinutes != savedAlarm.leadMinutes ||
+                  initialAlarm.vibrationEnabled !=
+                      savedAlarm.vibrationEnabled))) {
+        messages.add(
+          savedAlarm.enabled
+              ? '早课闹钟已开启，提前 ${savedAlarm.leadMinutes} 分钟响铃'
+              : '早课闹钟已关闭',
+        );
+      }
+    }
+    return messages.isEmpty ? '通知设置已保存' : messages.join('；');
   }
 
   void _showSnack(String message) {
@@ -1081,6 +1456,11 @@ enum _CourseDeleteScope {
   allCourseSlots,
 }
 
+enum _DayAction {
+  copyFromDate,
+  clear,
+}
+
 int _displayableWeek(int activeWeek, AcademicSchedule schedule) =>
     activeWeek.clamp(1, schedule.maxWeek);
 
@@ -1114,12 +1494,16 @@ class _DisplaySettingsSheet extends StatefulWidget {
 class _DisplaySettingsSheetState extends State<_DisplaySettingsSheet> {
   late bool _colorful;
   late bool _showTeacher;
+  late bool _showCredit;
+  late bool _showNonCurrentWeekCourses;
 
   @override
   void initState() {
     super.initState();
     _colorful = widget.initial.colorful;
     _showTeacher = widget.initial.showTeacher;
+    _showCredit = widget.initial.showCredit;
+    _showNonCurrentWeekCourses = widget.initial.showNonCurrentWeekCourses;
   }
 
   @override
@@ -1136,64 +1520,103 @@ class _DisplaySettingsSheetState extends State<_DisplaySettingsSheet> {
           color: colors.surface,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-              child: Text(
-                '显示设置',
-                style: TextStyle(
-                  color: colors.textPrimary,
-                  fontSize: 16.5,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            SwitchListTile(
-              title: const Text('多彩显示'),
-              value: _colorful,
-              onChanged: (value) => setState(() => _colorful = value),
-            ),
-            SwitchListTile(
-              title: const Text('显示教师'),
-              value: _showTeacher,
-              onChanged: (value) => setState(() => _showTeacher = value),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-              child: Text(
-                'ShuYo 支持添加小组件，试着在系统桌面中找找吧～',
-                style: ShuYoTextStyles.meta(color: colors.textMuted),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () => Navigator.of(context).pop(
-                    AcademicScheduleDisplaySettings(
-                      colorful: _colorful,
-                      showTeacher: _showTeacher,
-                    ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+                child: Text(
+                  '显示设置',
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontSize: 16.5,
+                    fontWeight: FontWeight.w600,
                   ),
-                  child: const Text('完成'),
                 ),
               ),
-            ),
-          ],
+              SwitchListTile(
+                title: const _DisplaySettingTitle('多彩显示'),
+                value: _colorful,
+                onChanged: (value) => setState(() => _colorful = value),
+              ),
+              SwitchListTile(
+                title: const _DisplaySettingTitle('显示教师'),
+                value: _showTeacher,
+                onChanged: (value) => setState(() => _showTeacher = value),
+              ),
+              SwitchListTile(
+                title: const _DisplaySettingTitle('显示学分'),
+                value: _showCredit,
+                onChanged: (value) => setState(() => _showCredit = value),
+              ),
+              SwitchListTile(
+                title: const _DisplaySettingTitle('显示非本周课程'),
+                value: _showNonCurrentWeekCourses,
+                onChanged: (value) =>
+                    setState(() => _showNonCurrentWeekCourses = value),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+                child: Text(
+                  'ShuYo 支持添加小组件，试着在系统桌面中找找吧～',
+                  style: ShuYoTextStyles.meta(color: colors.textMuted),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(context).pop(
+                      AcademicScheduleDisplaySettings(
+                        colorful: _colorful,
+                        showTeacher: _showTeacher,
+                        showCredit: _showCredit,
+                        showNonCurrentWeekCourses: _showNonCurrentWeekCourses,
+                      ),
+                    ),
+                    child: const Text('完成'),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
+class _DisplaySettingTitle extends StatelessWidget {
+  const _DisplaySettingTitle(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.translate(
+      offset: const Offset(0, 4.5),
+      child: Text(text),
+    );
+  }
+}
+
 class _FirstWeekDatePickerDialog extends StatefulWidget {
-  const _FirstWeekDatePickerDialog({required this.initialDate});
+  const _FirstWeekDatePickerDialog({
+    required this.initialDate,
+    this.title = '选择开学日期',
+    this.mondayOnly = true,
+    this.firstDate,
+    this.lastDate,
+  });
 
   final DateTime initialDate;
+  final String title;
+  final bool mondayOnly;
+  final DateTime? firstDate;
+  final DateTime? lastDate;
 
   @override
   State<_FirstWeekDatePickerDialog> createState() =>
@@ -1228,7 +1651,7 @@ class _FirstWeekDatePickerDialogState
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
                 child: Text(
-                  '选择开学日期',
+                  widget.title,
                   style: ShuYoTextStyles.sectionTitle(
                     color: colors.textPrimary,
                   ),
@@ -1236,10 +1659,11 @@ class _FirstWeekDatePickerDialogState
               ),
               CalendarDatePicker(
                 initialDate: widget.initialDate,
-                firstDate: DateTime(2000),
-                lastDate: DateTime(2100, 12, 31),
-                selectableDayPredicate: (date) =>
-                    date.weekday == DateTime.monday,
+                firstDate: widget.firstDate ?? DateTime(2000),
+                lastDate: widget.lastDate ?? DateTime(2100, 12, 31),
+                selectableDayPredicate: widget.mondayOnly
+                    ? (date) => date.weekday == DateTime.monday
+                    : null,
                 onDateChanged: (date) => setState(() => _selectedDate = date),
               ),
               Padding(
@@ -1369,6 +1793,30 @@ CourseSession _copySessionWithWeeks(CourseSession session, List<int> weeks) {
   );
 }
 
+CourseSession _oneOffDayCopy(
+  CourseSession session, {
+  required int targetWeek,
+  required int targetWeekday,
+  required String uniqueSuffix,
+}) {
+  return CourseSession(
+    id: '${session.id}#daycopy-$targetWeek-$targetWeekday-$uniqueSuffix',
+    courseName: session.courseName,
+    courseCode: session.courseCode,
+    teacherName: session.teacherName,
+    campus: session.campus,
+    location: session.location,
+    weekday: targetWeekday,
+    startSection: session.startSection,
+    endSection: session.endSection,
+    sections: session.sections,
+    weeks: [targetWeek],
+    weekText: _formatWeekText([targetWeek]),
+    credit: session.credit,
+    note: session.note,
+  );
+}
+
 bool _sectionRangesOverlap(
   int startA,
   int endA,
@@ -1427,10 +1875,30 @@ String _formatWeekText(List<int> weeks) {
   return ranges.join(',');
 }
 
+class _ScheduleNotificationSettingsResult {
+  const _ScheduleNotificationSettingsResult({
+    required this.regular,
+    required this.alarm,
+  });
+
+  final AcademicScheduleNotificationSettings regular;
+  final AcademicScheduleAlarmSettings? alarm;
+}
+
 class _NotificationSettingsSheet extends StatefulWidget {
-  const _NotificationSettingsSheet({required this.initial});
+  const _NotificationSettingsSheet({
+    required this.initial,
+    required this.alarmsSupported,
+    required this.alarmInitial,
+    required this.notificationService,
+    required this.alarmRingtoneName,
+  });
 
   final AcademicScheduleNotificationSettings initial;
+  final bool alarmsSupported;
+  final AcademicScheduleAlarmSettings alarmInitial;
+  final AcademicScheduleNotificationService notificationService;
+  final String? alarmRingtoneName;
 
   @override
   State<_NotificationSettingsSheet> createState() =>
@@ -1441,18 +1909,26 @@ class _NotificationSettingsSheetState
     extends State<_NotificationSettingsSheet> {
   late bool _enabled;
   late int _leadMinutes;
+  late bool _alarmEnabled;
+  late int _alarmLeadMinutes;
+  late bool _alarmVibrationEnabled;
+  late String? _alarmRingtoneName;
+  bool _pickingAlarmRingtone = false;
 
   @override
   void initState() {
     super.initState();
     _enabled = widget.initial.enabled;
     _leadMinutes = widget.initial.leadMinutes;
+    _alarmEnabled = widget.alarmInitial.enabled;
+    _alarmLeadMinutes = widget.alarmInitial.leadMinutes;
+    _alarmVibrationEnabled = widget.alarmInitial.vibrationEnabled;
+    _alarmRingtoneName = widget.alarmRingtoneName;
   }
 
   @override
   Widget build(BuildContext context) {
-    final minuteOptions =
-        <int>{5, 10, 15, 20, 30, 45, 60, _leadMinutes}.toList()..sort();
+    const minuteOptions = <int>[15, 20, 30, 45, 60, 90, 120];
     final mediaQuery = MediaQuery.of(context);
     final colors = context.shuyoColors;
     final bottomInset = mediaQuery.viewInsets.bottom > 0
@@ -1499,41 +1975,127 @@ class _NotificationSettingsSheetState
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('课程开始前提醒'),
+              title: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('课程开始前提醒'),
+                  Transform.translate(
+                    offset: const Offset(-3, -1),
+                    child: Opacity(
+                      opacity: 0.65,
+                      child: IconButton(
+                        tooltip: '提醒说明',
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 26,
+                          minHeight: 26,
+                        ),
+                        icon: const Icon(Icons.info_outline, size: 18),
+                        onPressed: () => _showReminderLimitInfo(context),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
               value: _enabled,
               onChanged: (value) => setState(() => _enabled = value),
             ),
-            const SizedBox(height: 6),
-            DropdownButtonFormField<int>(
-              initialValue: _leadMinutes,
-              decoration: const InputDecoration(
-                labelText: '提前多久提醒',
-                border: OutlineInputBorder(),
+            if (_enabled) ...[
+              const SizedBox(height: 6),
+              DropdownButtonFormField<int>(
+                initialValue: _leadMinutes,
+                decoration: const InputDecoration(
+                  labelText: '提前时间',
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  for (final value in minuteOptions)
+                    DropdownMenuItem(
+                      value: value,
+                      child: Text('$value 分钟'),
+                    ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _leadMinutes = value);
+                  }
+                },
               ),
-              items: [
-                for (final value in minuteOptions)
-                  DropdownMenuItem(
-                    value: value,
-                    child: Text('$value 分钟'),
+            ],
+            if (widget.alarmsSupported) ...[
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('早课闹钟'),
+                value: _alarmEnabled,
+                onChanged: (value) => setState(() => _alarmEnabled = value),
+              ),
+              if (_alarmEnabled)
+                DropdownButtonFormField<int>(
+                  initialValue: _alarmLeadMinutes,
+                  decoration: const InputDecoration(
+                    labelText: '提前时间',
+                    border: OutlineInputBorder(),
                   ),
-              ],
-              onChanged: _enabled
-                  ? (value) {
-                      if (value != null) {
-                        setState(() => _leadMinutes = value);
-                      }
+                  items: [
+                    for (final value in minuteOptions)
+                      DropdownMenuItem(
+                        value: value,
+                        child: Text('$value 分钟'),
+                      ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => _alarmLeadMinutes = value);
                     }
-                  : null,
-            ),
+                  },
+                ),
+              if (_alarmEnabled)
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('开启震动'),
+                  value: _alarmVibrationEnabled,
+                  onChanged: (value) =>
+                      setState(() => _alarmVibrationEnabled = value),
+                ),
+              if (_alarmEnabled &&
+                  widget.notificationService.supportsAlarmRingtoneCustomization)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('闹钟铃声'),
+                  subtitle: Text(
+                    _alarmRingtoneName ?? '默认',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: _pickingAlarmRingtone
+                      ? const SizedBox.square(
+                          dimension: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2.5),
+                        )
+                      : const Icon(Icons.chevron_right),
+                  enabled: !_pickingAlarmRingtone,
+                  onTap: _pickAlarmRingtone,
+                ),
+            ],
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
               child: FilledButton(
                 onPressed: () {
                   Navigator.of(context).pop(
-                    AcademicScheduleNotificationSettings(
-                      enabled: _enabled,
-                      leadMinutes: _leadMinutes,
+                    _ScheduleNotificationSettingsResult(
+                      regular: AcademicScheduleNotificationSettings(
+                        enabled: _enabled,
+                        leadMinutes: _leadMinutes,
+                      ),
+                      alarm: widget.alarmsSupported
+                          ? AcademicScheduleAlarmSettings(
+                              enabled: _alarmEnabled,
+                              leadMinutes: _alarmLeadMinutes,
+                              vibrationEnabled: _alarmVibrationEnabled,
+                            )
+                          : null,
                     ),
                   );
                 },
@@ -1544,6 +2106,42 @@ class _NotificationSettingsSheetState
         ),
       ),
     );
+  }
+
+  Future<void> _showReminderLimitInfo(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('课程提醒说明'),
+        content: const Text(
+          '系统最多同时保留 64 条最近的课程提醒。打开 ShuYo 后，应用会自动补充后续提醒。\n\n因此记得时不时上线一下哦~',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickAlarmRingtone() async {
+    if (_pickingAlarmRingtone) {
+      return;
+    }
+    setState(() => _pickingAlarmRingtone = true);
+    try {
+      final name = await widget.notificationService.pickAlarmRingtone();
+      if (!mounted || name == null) {
+        return;
+      }
+      setState(() => _alarmRingtoneName = name);
+    } finally {
+      if (mounted) {
+        setState(() => _pickingAlarmRingtone = false);
+      }
+    }
   }
 }
 
@@ -1883,6 +2481,36 @@ class _ManualCourseSheetState extends State<_ManualCourseSheet> {
   }
 }
 
+List<CourseSession> _sessionsIncludingNonCurrentWeek(
+  AcademicSchedule schedule,
+  int displayedWeek,
+  List<CourseSession> currentWeekSessions,
+) {
+  final nonCurrentWeekSessions = schedule.sessions.where((session) {
+    if (session.occursInWeek(displayedWeek)) {
+      return false;
+    }
+    return !currentWeekSessions.any(
+      (current) =>
+          current.weekday == session.weekday &&
+          _sectionRangesOverlap(
+            current.startSection,
+            current.endSection,
+            session.startSection,
+            session.endSection,
+          ),
+    );
+  }).toList()
+    ..sort((a, b) {
+      final weekday = a.weekday.compareTo(b.weekday);
+      return weekday != 0 ? weekday : a.startSection.compareTo(b.startSection);
+    });
+
+  // Current-week courses are painted last as an additional safeguard so they
+  // always win if future layout rules allow overlapping blocks.
+  return [...nonCurrentWeekSessions, ...currentWeekSessions];
+}
+
 class _ScheduleBody extends StatelessWidget {
   const _ScheduleBody({
     required this.schedule,
@@ -1897,6 +2525,7 @@ class _ScheduleBody extends StatelessWidget {
     required this.canAddCourse,
     required this.onEmptySlotTap,
     required this.onCourseTap,
+    required this.onDayHeaderTap,
   });
 
   final AcademicSchedule schedule;
@@ -1911,10 +2540,18 @@ class _ScheduleBody extends StatelessWidget {
   final bool canAddCourse;
   final ValueChanged<_ScheduleSlot> onEmptySlotTap;
   final ValueChanged<CourseSession> onCourseTap;
+  final ValueChanged<int> onDayHeaderTap;
 
   @override
   Widget build(BuildContext context) {
-    final sessions = schedule.sessionsForWeek(displayedWeek);
+    final currentWeekSessions = schedule.sessionsForWeek(displayedWeek);
+    final sessions = displaySettings.showNonCurrentWeekCourses
+        ? _sessionsIncludingNonCurrentWeek(
+            schedule,
+            displayedWeek,
+            currentWeekSessions,
+          )
+        : currentWeekSessions;
     final untimed = schedule.untimedForWeek(displayedWeek);
     const weekdays = [1, 2, 3, 4, 5, 6, 7];
 
@@ -1952,6 +2589,7 @@ class _ScheduleBody extends StatelessWidget {
                         canAddCourse: canAddCourse,
                         onEmptySlotTap: onEmptySlotTap,
                         onCourseTap: onCourseTap,
+                        onDayHeaderTap: onDayHeaderTap,
                       ),
                     ),
                     if (untimed.isNotEmpty)
@@ -2245,6 +2883,7 @@ class _ScheduleGrid extends StatelessWidget {
     required this.canAddCourse,
     required this.onEmptySlotTap,
     required this.onCourseTap,
+    required this.onDayHeaderTap,
   });
 
   static const leftWidth = 68.0;
@@ -2262,6 +2901,7 @@ class _ScheduleGrid extends StatelessWidget {
   final bool canAddCourse;
   final ValueChanged<_ScheduleSlot> onEmptySlotTap;
   final ValueChanged<CourseSession> onCourseTap;
+  final ValueChanged<int> onDayHeaderTap;
 
   @override
   Widget build(BuildContext context) {
@@ -2286,6 +2926,7 @@ class _ScheduleGrid extends StatelessWidget {
                 selectedManualSlot: selectedManualSlot,
                 canAddCourse: canAddCourse,
                 onEmptySlotTap: onEmptySlotTap,
+                onDayHeaderTap: onDayHeaderTap,
               ),
               for (final session in sessions)
                 if (weekdays.contains(session.weekday))
@@ -2301,7 +2942,9 @@ class _ScheduleGrid extends StatelessWidget {
                             _rowHeight -
                         _scheduleCourseInset * 2,
                     child: _CourseBlock(
+                      key: ValueKey('schedule-course-${session.id}'),
                       session: session,
+                      isCurrentWeek: session.occursInWeek(displayedWeek),
                       displaySettings: displaySettings,
                       courseColorValues: courseColorValues,
                       onTap: () => onCourseTap(session),
@@ -2329,6 +2972,7 @@ class _GridBackground extends StatelessWidget {
     required this.selectedManualSlot,
     required this.canAddCourse,
     required this.onEmptySlotTap,
+    required this.onDayHeaderTap,
   });
 
   final List<CourseSession> sessions;
@@ -2343,6 +2987,7 @@ class _GridBackground extends StatelessWidget {
   final _ScheduleSlot? selectedManualSlot;
   final bool canAddCourse;
   final ValueChanged<_ScheduleSlot> onEmptySlotTap;
+  final ValueChanged<int> onDayHeaderTap;
 
   @override
   Widget build(BuildContext context) {
@@ -2363,6 +3008,7 @@ class _GridBackground extends StatelessWidget {
                       1,
                 ),
               ),
+              onTap: () => onDayHeaderTap(weekdays[index]),
             ),
           ),
         for (var section = 1; section <= sectionCount; section++)
@@ -2455,31 +3101,40 @@ class _EmptyScheduleCell extends StatelessWidget {
 }
 
 class _DayHeader extends StatelessWidget {
-  const _DayHeader({required this.weekday, required this.date});
+  const _DayHeader({
+    required this.weekday,
+    required this.date,
+    this.onTap,
+  });
 
   final int weekday;
   final DateTime date;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.shuyoColors;
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(
-          _weekdayName(weekday),
-          style: TextStyle(
-            color: colors.textPrimary,
-            fontWeight: FontWeight.w600,
-            fontSize: 12.5,
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            _weekdayName(weekday),
+            style: TextStyle(
+              color: colors.textPrimary,
+              fontWeight: FontWeight.w600,
+              fontSize: 12.5,
+            ),
           ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          '${date.month}/${date.day}',
-          style: TextStyle(color: colors.textMuted, fontSize: 11.5),
-        ),
-      ],
+          const SizedBox(height: 3),
+          Text(
+            '${date.month}/${date.day}',
+            style: TextStyle(color: colors.textMuted, fontSize: 11.5),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2523,13 +3178,16 @@ class _SectionLabel extends StatelessWidget {
 
 class _CourseBlock extends StatelessWidget {
   const _CourseBlock({
+    super.key,
     required this.session,
+    required this.isCurrentWeek,
     required this.displaySettings,
     required this.courseColorValues,
     required this.onTap,
   });
 
   final CourseSession session;
+  final bool isCurrentWeek;
   final AcademicScheduleDisplaySettings displaySettings;
   final Map<String, int> courseColorValues;
   final VoidCallback onTap;
@@ -2537,17 +3195,29 @@ class _CourseBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.shuyoColors;
-    final fillColor = displaySettings.colorful
-        ? (courseColorValues[_courseColorSeed(session)] == null
-            ? _courseColorForSession(context, session)
-            : Color(courseColorValues[_courseColorSeed(session)]!))
-        : colors.scheduleCourseFill;
-    final courseTextColor = displaySettings.colorful
-        ? const Color(0xFFFFFFFF)
-        : colors.scheduleCourseText;
-    final metaTextColor = displaySettings.colorful
-        ? const Color(0xD9FFFFFF)
-        : colors.scheduleCourseMetaText;
+    final fillColor = !isCurrentWeek
+        ? _nonCurrentWeekCourseFill
+        : displaySettings.colorful
+            ? (courseColorValues[_courseColorSeed(session)] == null
+                ? _courseColorForSession(context, session)
+                : Color(courseColorValues[_courseColorSeed(session)]!))
+            : colors.scheduleCourseFill;
+    final courseTextColor = !isCurrentWeek
+        ? _nonCurrentWeekCourseText
+        : displaySettings.colorful
+            ? const Color(0xFFFFFFFF)
+            : colors.scheduleCourseText;
+    final metaTextColor = !isCurrentWeek
+        ? _nonCurrentWeekCourseMetaText
+        : displaySettings.colorful
+            ? const Color(0xD9FFFFFF)
+            : colors.scheduleCourseMetaText;
+    final courseMetaLines = <String>[
+      if (displaySettings.showTeacher && session.teacherName.isNotEmpty)
+        session.teacherName,
+      if (displaySettings.showCredit && session.credit.isNotEmpty)
+        session.credit,
+    ];
     return Material(
       color: fillColor,
       borderRadius: BorderRadius.circular(_scheduleCourseRadius),
@@ -2573,18 +3243,18 @@ class _CourseBlock extends StatelessWidget {
                   height: 1.2,
                 ),
               ),
-              if (displaySettings.showTeacher &&
-                  session.teacherName.isNotEmpty) ...[
+              if (courseMetaLines.isNotEmpty) ...[
                 const SizedBox(height: 3),
-                Text(
-                  session.teacherName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: metaTextColor,
-                    fontSize: 10.5,
+                for (final line in courseMetaLines)
+                  Text(
+                    line,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: metaTextColor,
+                      fontSize: 10.5,
+                    ),
                   ),
-                ),
               ],
               const Spacer(),
               if (session.location.isNotEmpty)

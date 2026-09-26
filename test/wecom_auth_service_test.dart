@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuyo/core/wecom_constants.dart';
 import 'package:shuyo/data/services/wecom_auth_service.dart';
 
@@ -69,6 +71,76 @@ void main() {
       expect(result.sessionCookies.single.name, 'SHU_OAUTH2');
       expect(result.cookieSourceUri.host, 'newsso.shu.edu.cn');
     });
+
+    test('mirrors SSO session to direct and WebVPN forum OAuth hosts', () {
+      final sourceCookie = Cookie('SHU_OAUTH2', 'session')..path = '/';
+      final jar = WeComAuthService.mirrorForumSsoCookies([
+        WeComStoredCookie(
+          cookie: sourceCookie,
+          domain: 'newsso.shu.edu.cn',
+          path: '/',
+        ),
+        WeComStoredCookie(
+          cookie: Cookie('unrelated', 'value'),
+          domain: 'newsso.shu.edu.cn',
+          path: '/',
+        ),
+      ]);
+
+      final sessionDomains = jar
+          .where((entry) => entry.cookie.name == 'SHU_OAUTH2')
+          .map((entry) => entry.domain)
+          .toSet();
+      expect(
+        sessionDomains,
+        {
+          'newsso.shu.edu.cn',
+          WeComConstants.forumSsoHost,
+          WeComConstants.forumWebVpnSsoHost,
+        },
+      );
+      expect(
+        jar.where((entry) => entry.cookie.name == 'unrelated'),
+        hasLength(1),
+      );
+    });
+
+    test('WebVPN state uses standard padded base64', () {
+      final state = WeComAuthService.webVpnState('YJrvSXWl');
+      expect(state, endsWith('=='));
+      expect(
+        jsonDecode(utf8.decode(base64Decode(state))),
+        {'externalId': 'YJrvSXWl'},
+      );
+    });
+
+    test('unproxies only the trusted WebVPN newsso authorize host', () {
+      final direct = WeComAuthService.directWebVpnAuthorizeUri(
+        'https://https-newsso-shu-edu-cn-443.webvpn.shu.edu.cn/oauth/authorize?client_id=x',
+      );
+      expect(direct.host, 'newsso.shu.edu.cn');
+      expect(direct.path, '/oauth/authorize');
+      expect(direct.queryParameters['client_id'], 'x');
+      expect(
+        () => WeComAuthService.directWebVpnAuthorizeUri(
+          'https://example.com/oauth/authorize',
+        ),
+        throwsA(isA<WeComAuthException>()),
+      );
+    });
+
+    test('WebVPN device id is stable and uses 32 lowercase hex digits',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final service = WeComAuthService(random: Random(7));
+      addTearDown(service.dispose);
+
+      final first = await service.loadWebVpnDeviceId();
+      final second = await service.loadWebVpnDeviceId();
+
+      expect(first, matches(RegExp(r'^[0-9a-f]{32}$')));
+      expect(second, first);
+    });
   });
 
   group('WeComOAuthTarget', () {
@@ -98,6 +170,18 @@ void main() {
       expect(
         decoded['redirectUri'],
         'https://bbs.shu.edu.cn/auth/oauth2_basic/callback',
+      );
+    });
+
+    test('WebVPN target uses its dedicated OAuth client', () {
+      expect(WeComOAuthTarget.webVpn.kind, WeComOAuthTargetKind.webVpn);
+      expect(
+        WeComOAuthTarget.webVpn.clientId,
+        'nn7sbb22j2tKE100T024tEp42777p755',
+      );
+      expect(
+        WeComOAuthTarget.webVpn.redirectUri,
+        'https://webvpn.shu.edu.cn/callback/oauth2',
       );
     });
 

@@ -180,25 +180,23 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
                   minimumSize: const Size.fromHeight(50)),
               child: _buttonContent('继续'),
             ),
-            if (widget.destination != NativeLoginDestination.webVpn) ...[
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: (_busy || _preflighting) ? null : _startWeComLogin,
-                icon: const Icon(Icons.qr_code_scanner_outlined),
-                label: const Text('使用企业微信登录'),
-                style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(50)),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: (_busy || _preflighting) ? null : _startWeComLogin,
+              icon: const Icon(Icons.qr_code_scanner_outlined),
+              label: const Text('使用企业微信登录'),
+              style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(50)),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '使用企业微信扫码登录，可在手机企业微信中确认登录。',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
-              const SizedBox(height: 8),
-              Text(
-                '使用企业微信扫码登录，可在手机企业微信中确认登录。',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
+            ),
           ],
         ),
       );
@@ -381,10 +379,11 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
 
   /// 企微扫码登录的目标系统参数，必须与用户正在登录的入口一致，
   /// 否则 SSO 会把授权码下发给错误的业务系统。
-  WeComOAuthTarget get _weComTarget =>
-      widget.destination == NativeLoginDestination.forum
-          ? WeComOAuthTarget.forum
-          : WeComOAuthTarget.academic;
+  WeComOAuthTarget get _weComTarget => switch (widget.destination) {
+        NativeLoginDestination.forum => WeComOAuthTarget.forum,
+        NativeLoginDestination.webVpn => WeComOAuthTarget.webVpn,
+        NativeLoginDestination.academic => WeComOAuthTarget.academic,
+      };
 
   /// 仅当目标业务系统是乐乎论坛且当前为直连时才拦截。
   bool get _requiresDirectForumAccess =>
@@ -538,6 +537,22 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
         : await auth.validateDirectAcademicSession();
     if (!mounted) return;
     if (status != WebVpnSessionStatus.valid) {
+      if (widget.destination == NativeLoginDestination.academic) {
+        // A callback that cannot produce a valid direct session must leave the
+        // next attempt in the same clean state as an explicit campus logout.
+        try {
+          await auth.clearAccount();
+        } on Object catch (error, stackTrace) {
+          if (kDebugMode) {
+            debugPrint('[SHU_AUTH] failed-login cleanup failed: $error');
+            debugPrintStack(
+              label: '[SHU_AUTH] cleanup stack',
+              stackTrace: stackTrace,
+            );
+          }
+        }
+        if (!mounted) return;
+      }
       _showError(widget.destination == NativeLoginDestination.webVpn
           ? 'WebVPN登录未完成，请重试'
           : '教务系统登录未完成，请重试');

@@ -23,4 +23,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('使用企业微信登录'), findsOneWidget);
   });
+
+  testWidgets('WebVPN login shows the WeCom login entry button',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: NativeLoginPage.webVpn(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('使用企业微信登录'), findsOneWidget);
+  });
 }

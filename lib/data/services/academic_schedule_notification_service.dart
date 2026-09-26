@@ -7,7 +7,6 @@ import 'package:timezone/timezone.dart' as timezone;
 
 import '../models/academic_schedule.dart';
 import '../repositories/academic_schedule_repository.dart';
-import 'client_settings_service.dart';
 
 class AcademicScheduleNotificationSettings {
   const AcademicScheduleNotificationSettings({
@@ -33,18 +32,22 @@ class AcademicScheduleAlarmSettings {
   const AcademicScheduleAlarmSettings({
     required this.enabled,
     required this.leadMinutes,
+    this.vibrationEnabled = false,
   });
 
   final bool enabled;
   final int leadMinutes;
+  final bool vibrationEnabled;
 
   AcademicScheduleAlarmSettings copyWith({
     bool? enabled,
     int? leadMinutes,
+    bool? vibrationEnabled,
   }) {
     return AcademicScheduleAlarmSettings(
       enabled: enabled ?? this.enabled,
       leadMinutes: leadMinutes ?? this.leadMinutes,
+      vibrationEnabled: vibrationEnabled ?? this.vibrationEnabled,
     );
   }
 }
@@ -65,6 +68,8 @@ class AcademicScheduleNotificationService {
   static const _leadMinutesKey = 'academic.schedule.notifications.leadMinutes';
   static const _alarmEnabledKey = 'academic.schedule.alarms.enabled';
   static const _alarmLeadMinutesKey = 'academic.schedule.alarms.leadMinutes';
+  static const _alarmVibrationEnabledKey =
+      'academic.schedule.alarms.vibrationEnabled';
   static const _channelId = 'course_reminders';
   static const _baseNotificationId = 420000;
   static const _maxPendingReminders = 64;
@@ -89,7 +94,7 @@ class AcademicScheduleNotificationService {
   ) async {
     final prefs = await _preferencesLoader();
     final normalized = settings.copyWith(
-      leadMinutes: settings.leadMinutes.clamp(1, 120),
+      leadMinutes: settings.leadMinutes.clamp(15, 120),
     );
     await prefs.setBool(_enabledKey, normalized.enabled);
     await prefs.setInt(_leadMinutesKey, normalized.leadMinutes);
@@ -117,7 +122,7 @@ class AcademicScheduleNotificationService {
   }
 
   Future<bool> supportsEarlyClassAlarms() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+    if (kIsWeb) {
       return false;
     }
     try {
@@ -129,11 +134,42 @@ class AcademicScheduleNotificationService {
     }
   }
 
+  bool get supportsAlarmRingtoneCustomization =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  Future<String?> loadAlarmRingtoneName() async {
+    if (!supportsAlarmRingtoneCustomization) {
+      return null;
+    }
+    try {
+      final value = await _alarmChannel.invokeMethod<Map<Object?, Object?>>(
+        'getRingtone',
+      );
+      return value?['name']?.toString();
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  Future<String?> pickAlarmRingtone() async {
+    if (!supportsAlarmRingtoneCustomization) {
+      return null;
+    }
+    final value = await _alarmChannel.invokeMethod<Map<Object?, Object?>>(
+      'pickRingtone',
+    );
+    return value?['name']?.toString();
+  }
+
   Future<AcademicScheduleAlarmSettings> loadAlarmSettings() async {
     final prefs = await _preferencesLoader();
     return AcademicScheduleAlarmSettings(
       enabled: prefs.getBool(_alarmEnabledKey) ?? false,
       leadMinutes: prefs.getInt(_alarmLeadMinutesKey) ?? 20,
+      vibrationEnabled:
+          prefs.getBool(_alarmVibrationEnabledKey) ?? false,
     );
   }
 
@@ -142,10 +178,14 @@ class AcademicScheduleNotificationService {
   ) async {
     final prefs = await _preferencesLoader();
     final normalized = settings.copyWith(
-      leadMinutes: settings.leadMinutes.clamp(1, 120),
+      leadMinutes: settings.leadMinutes.clamp(15, 120),
     );
     await prefs.setBool(_alarmEnabledKey, normalized.enabled);
     await prefs.setInt(_alarmLeadMinutesKey, normalized.leadMinutes);
+    await prefs.setBool(
+      _alarmVibrationEnabledKey,
+      normalized.vibrationEnabled,
+    );
     return normalized;
   }
 
@@ -183,6 +223,7 @@ class AcademicScheduleNotificationService {
           schedule: schedule,
           weekState: weekState,
           leadMinutes: settings.leadMinutes,
+          vibrationEnabled: settings.vibrationEnabled,
           now: now ?? DateTime.now(),
         ),
       );
@@ -208,13 +249,6 @@ class AcademicScheduleNotificationService {
     }
     await _ensureInitialized();
     await _cancelCourseReminders();
-
-    final clientSettings = await ClientSettingsService(
-      preferencesLoader: _preferencesLoader,
-    ).loadNotificationSettings();
-    if (!clientSettings.scheduleEnabled) {
-      return 0;
-    }
 
     final settings = await loadSettings();
     if (!settings.enabled) {
@@ -366,6 +400,7 @@ class AcademicScheduleNotificationService {
     required AcademicSchedule schedule,
     required ScheduleWeekState weekState,
     required int leadMinutes,
+    required bool vibrationEnabled,
     required DateTime now,
   }) sync* {
     final shanghaiNow = timezone.TZDateTime.from(now, timezone.local);
@@ -411,12 +446,32 @@ class AcademicScheduleNotificationService {
         range.$1,
         range.$2,
       );
+      final endRange =
+          AcademicScheduleRepository.sectionTimes[earliest.endSection];
+      final end = endRange == null
+          ? null
+          : timezone.TZDateTime(
+              timezone.local,
+              day.year,
+              day.month,
+              day.day,
+              endRange.$3,
+              endRange.$4,
+            );
       final fireTime = start.subtract(Duration(minutes: leadMinutes));
       if (fireTime.isAfter(shanghaiNow.add(const Duration(seconds: 30)))) {
         alarms.add(
           _EarlyClassAlarm(
+            id: '${earliest.id}-${start.millisecondsSinceEpoch}',
             title: earliest.courseName.isEmpty ? '早课' : earliest.courseName,
             fireTime: fireTime,
+            courseTime: start,
+            courseEndTime: end,
+            sectionText: earliest.sectionText,
+            campus: earliest.campus,
+            location: earliest.location,
+            teacherName: earliest.teacherName,
+            vibrationEnabled: vibrationEnabled,
           ),
         );
       }
@@ -500,13 +555,41 @@ class _CourseReminder {
 }
 
 class _EarlyClassAlarm {
-  const _EarlyClassAlarm({required this.title, required this.fireTime});
+  const _EarlyClassAlarm({
+    required this.id,
+    required this.title,
+    required this.fireTime,
+    required this.courseTime,
+    required this.courseEndTime,
+    required this.sectionText,
+    required this.campus,
+    required this.location,
+    required this.teacherName,
+    required this.vibrationEnabled,
+  });
 
+  final String id;
   final String title;
   final DateTime fireTime;
+  final DateTime courseTime;
+  final DateTime? courseEndTime;
+  final String sectionText;
+  final String campus;
+  final String location;
+  final String teacherName;
+  final bool vibrationEnabled;
 
   Map<String, Object> toMap() => {
+        'id': id,
         'title': title,
         'fireTime': fireTime.millisecondsSinceEpoch,
+        'courseTime': courseTime.millisecondsSinceEpoch,
+        if (courseEndTime != null)
+          'courseEndTime': courseEndTime!.millisecondsSinceEpoch,
+        'sectionText': sectionText,
+        'campus': campus,
+        'location': location,
+        'teacherName': teacherName,
+        'vibrationEnabled': vibrationEnabled,
       };
 }

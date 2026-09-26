@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/client_user_agent.dart';
 import '../../core/wecom_constants.dart';
@@ -94,8 +95,8 @@ class WeComStoredCookie {
 
 /// 企微扫码登录的最终结果。
 ///
-/// [callbackUri] 是**目标业务系统**的授权码回调地址（阶段二 `authorize` 的
-/// 302 Location），等价于密码登录流程的 callbackUri；
+/// [callbackUri] 是**目标业务系统**的完成地址：普通目标为
+/// `authorize` 的 302 callback，WebVPN 则为私有握手完成后的落地页；
 /// [sessionCookies] 是本次流程收集到的全部 Cookie，必须写入 WebView，
 /// 否则加载 [callbackUri] 时 SSO 会认为未登录并重定向回登录页。
 class WeComRedeemResult {
@@ -134,20 +135,30 @@ class WeComAuthException implements Exception {
 /// 4. 按目标系统准备 `state`（bbs 预热 / jwxt 随机）；
 /// 5. `GET /oauth/authorize?response_type=code&client_id&redirect_uri&scope&state`
 ///    → 302 到业务系统的 callback 地址（带 `code`）。
+/// 6. WebVPN 作为例外，还会用 code 调用 `auth/finish` 并通过
+///    `user/info` 验证会话。
 ///
 /// 整个流程共享同一个 Cookie 容器，否则第 5 步会因缺少 `SHU_OAUTH2`
 /// 而被判定为未登录。需要 state 预热的系统（如论坛）在 [WeComScanPage]
 /// 里改为让 WebView 自行走完整链路。
 class WeComAuthService {
-  WeComAuthService({HttpClient? httpClient})
-      : _client = httpClient ?? HttpClient() {
+  WeComAuthService({
+    HttpClient? httpClient,
+    Future<SharedPreferences> Function()? preferencesLoader,
+    Random? random,
+  })  : _client = httpClient ?? HttpClient(),
+        _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance,
+        _random = random ?? Random.secure() {
     _client.connectionTimeout = HttpTimeout.connect;
   }
 
   final HttpClient _client;
+  final Future<SharedPreferences> Function() _preferencesLoader;
+  final Random _random;
   final AcademicSessionCookieStore _cookies = AcademicSessionCookieStore();
   static final _qrImgKeyPattern = RegExp(r'qrImg\?key=([0-9a-fA-F]+)');
   static final _jsonpPattern = RegExp(r'jsonpCallback\((\{.*?\})\)');
+  static const _webVpnDeviceIdKey = 'webvpn.auth.device_id';
 
   void dispose() => _client.close(force: true);
 
@@ -156,10 +167,10 @@ class WeComAuthService {
   /// 必须在阶段二结束后取出并写入 WebView，否则回调会因缺少会话而失败
   /// （论坛更会因缺少 `_forum_session` 返回 `csrf_detected`）。
   ///
-  /// `SHU_OAUTH2` 会额外镜像到论坛使用的 SSO 域（[WeComConstants.forumSsoHost]），
-  /// 因为该 cookie 按 host 隔离，而论坛的 `authorize` 走的是另一个域名。
+  /// `SHU_OAUTH2` 会额外镜像到论坛直连与 WebVPN 代理使用的
+  /// SSO 域，因为该 cookie 按 host 隔离。
   List<WeComStoredCookie> get cookieJar {
-    final jar = <WeComStoredCookie>[
+    final collected = <WeComStoredCookie>[
       for (final entry in _cookies.entries)
         WeComStoredCookie(
           cookie: entry.cookie,
@@ -167,17 +178,32 @@ class WeComAuthService {
           path: entry.path,
         ),
     ];
+    return mirrorForumSsoCookies(collected);
+  }
+
+  @visibleForTesting
+  static List<WeComStoredCookie> mirrorForumSsoCookies(
+    Iterable<WeComStoredCookie> cookies,
+  ) {
+    final collected = cookies.toList();
+    final jar = [...collected];
     final ssoHost = Uri.parse(WeComConstants.ssoBase).host;
-    for (final entry in [...jar]) {
+    final mirrors = <String>{
+      WeComConstants.forumSsoHost,
+      WeComConstants.forumWebVpnSsoHost,
+    };
+    for (final entry in collected) {
       if (entry.cookie.name != WeComConstants.sessionCookieName) continue;
       if (entry.domain != ssoHost) continue;
-      jar.add(
-        WeComStoredCookie(
-          cookie: entry.cookie,
-          domain: WeComConstants.forumSsoHost,
-          path: entry.path,
-        ),
-      );
+      for (final domain in mirrors) {
+        jar.add(
+          WeComStoredCookie(
+            cookie: entry.cookie,
+            domain: domain,
+            path: entry.path,
+          ),
+        );
+      }
     }
     return jar;
   }
@@ -318,6 +344,12 @@ class WeComAuthService {
   /// 先按目标系统的策略准备 `state`，再请求 `/oauth/authorize`，
   /// 返回其 302 的 Location。
   Future<Uri> authorizeTarget(WeComOAuthTarget target) async {
+    if (target.kind == WeComOAuthTargetKind.webVpn) {
+      throw const WeComAuthException(
+        'webVpnRequiresFinish',
+        'WebVPN 需要完成专用授权握手',
+      );
+    }
     _debug('authorizeTarget begin client=${target.clientName}');
     final state = await _prepareState(target);
     _debug('authorizeTarget stateLength=${state.length}');
@@ -355,6 +387,229 @@ class WeComAuthService {
     return callbackUri;
   }
 
+  /// 使用当前企微扫码建立的临时 SSO 会话，独立完成 WebVPN
+  /// `auth/start → authorize → auth/finish → user/info` 握手。
+  ///
+  /// 返回的 Cookie 只包含 WebVPN 会话；`SHU_OAUTH2` 不会被安装到
+  /// WebView，因此不会变成其他业务系统可复用的全局登录。
+  Future<WeComRedeemResult> completeWebVpnLogin() async {
+    final portal = Uri.parse(WeComConstants.webVpnBase);
+    final callback = Uri.parse(WeComConstants.webVpnCallback);
+    _debug('webvpn begin');
+
+    final methods = await _webVpnJsonRequest(
+      'GET',
+      portal.resolve('/api/access/authentication/list?type=0'),
+      refererPath: '/auth/login',
+    );
+    final externalId =
+        _webVpnExternalId(methods) ?? WeComConstants.webVpnExternalIdFallback;
+    final state = webVpnState(externalId);
+    final start = await _webVpnJsonRequest(
+      'POST',
+      portal.resolve('/api/access/auth/start'),
+      refererPath: '/auth/login',
+      body: {
+        'externalId': externalId,
+        'data': jsonEncode({
+          'callbackUrl': callback.toString(),
+          'state': state,
+        }),
+      },
+    );
+    if (start['code'] != 0) {
+      throw WeComAuthException(
+        'webVpnStartFailed',
+        _webVpnApiMessage(start, 'WebVPN 企业微信授权启动失败'),
+      );
+    }
+    final startData = start['data'];
+    final action = startData is Map ? startData['action'] : null;
+    final loginUrl = action is Map ? action['login_url']?.toString() : null;
+    if (loginUrl == null || loginUrl.isEmpty) {
+      throw const WeComAuthException(
+        'webVpnLoginUrlMissing',
+        'WebVPN 未返回统一认证地址',
+      );
+    }
+    final authorizeUri = directWebVpnAuthorizeUri(loginUrl);
+    _validateWebVpnAuthorizeUri(authorizeUri, state);
+    final authorizeResponse = await _get(
+      authorizeUri,
+      host: _RequestHost.sso,
+    );
+    final authorizeStatus = authorizeResponse.statusCode;
+    final location =
+        authorizeResponse.headers.value(HttpHeaders.locationHeader);
+    await authorizeResponse.drain<void>().timeout(HttpTimeout.normal);
+    if (authorizeStatus < 300 || authorizeStatus >= 400 || location == null) {
+      throw WeComAuthException(
+        'webVpnAuthorizeFailed',
+        'SSO 未返回 WebVPN 授权码（HTTP $authorizeStatus）',
+      );
+    }
+    if (location.contains(WeComConstants.loginPathMarker)) {
+      throw const WeComAuthException(
+        'sessionNotReused',
+        '企业微信会话未能完成 WebVPN 授权，请重新登录',
+      );
+    }
+    final callbackUri = authorizeUri.resolve(location);
+    _validateRedirect(callbackUri, callback.toString());
+    final code = callbackUri.queryParameters['code'];
+    final callbackState = callbackUri.queryParameters['state'];
+    if (code == null || code.isEmpty || callbackState != state) {
+      throw const WeComAuthException(
+        'webVpnCallbackMismatch',
+        'WebVPN 授权回调校验失败，请重新尝试',
+      );
+    }
+
+    final finish = await _webVpnJsonRequest(
+      'POST',
+      portal.resolve('/api/access/auth/finish'),
+      refererPath: '/callback/oauth2',
+      body: {
+        'externalId': externalId,
+        'data': jsonEncode({
+          'callbackUrl': callback.toString(),
+          'code': code,
+          'deviceId': await loadWebVpnDeviceId(),
+          'state': state,
+        }),
+      },
+    );
+    if (finish['code'] != 0) {
+      throw WeComAuthException(
+        'webVpnFinishFailed',
+        _webVpnApiMessage(finish, 'WebVPN 企业微信登录失败'),
+      );
+    }
+    final info = await _webVpnJsonRequest(
+      'GET',
+      portal.resolve('/api/access/user/info'),
+      refererPath: '/site-nav/',
+    );
+    final user = info['data'];
+    final userId = user is Map ? user['userId'] : null;
+    if (info['code'] != 0 ||
+        userId == null ||
+        userId.toString().isEmpty ||
+        userId.toString() == '0') {
+      throw const WeComAuthException(
+        'webVpnUserInfoMissing',
+        'WebVPN 未能确认登录身份，请重新尝试',
+      );
+    }
+    if (user is Map &&
+        (user['needTriggerTFA'] == true ||
+            user['needChangePwd'] == true ||
+            user['needToBindLocalAccount'] == true)) {
+      throw const WeComAuthException(
+        'webVpnActionRequired',
+        'WebVPN 要求完成额外验证或账户操作，请暂时使用账密登录',
+      );
+    }
+
+    final webVpnCookies = _webVpnCookies;
+    if (!webVpnCookies.any(
+      (entry) =>
+          entry.cookie.name == 'webvpn-token' && entry.cookie.value.isNotEmpty,
+    )) {
+      throw const WeComAuthException(
+        'webVpnTokenMissing',
+        'WebVPN 已认证但未返回服务会话，请重试',
+      );
+    }
+    _debug('webvpn ok userId=$userId '
+        'cookies=${webVpnCookies.map((entry) => entry.cookie.name).toSet().toList()}');
+    return WeComRedeemResult(
+      callbackUri: Uri.parse(WeComConstants.webVpnLanding),
+      sessionCookies: webVpnCookies,
+    );
+  }
+
+  List<WeComStoredCookie> get _webVpnCookies {
+    final portalHost = Uri.parse(WeComConstants.webVpnBase).host;
+    final result = <WeComStoredCookie>[
+      for (final entry in _cookies.entries)
+        if (entry.cookie.name == 'webvpn-token' ||
+            entry.domain == portalHost ||
+            entry.domain.endsWith('.webvpn.shu.edu.cn'))
+          WeComStoredCookie(
+            cookie: entry.cookie,
+            domain: entry.domain,
+            path: entry.path,
+          ),
+    ];
+    WeComStoredCookie? token;
+    for (final entry in result) {
+      if (entry.cookie.name == 'webvpn-token' &&
+          entry.cookie.value.isNotEmpty) {
+        token = entry;
+        break;
+      }
+    }
+    // WebViewCookieManager cannot preserve a native Set-Cookie Domain
+    // attribute. Always add a portal-host copy so WebVPN's own page and the
+    // existing session validator can observe the freshly-created session.
+    if (token != null &&
+        !result.any(
+          (entry) =>
+              entry.cookie.name == 'webvpn-token' &&
+              entry.domain == portalHost &&
+              entry.path == '/',
+        )) {
+      result.add(
+        WeComStoredCookie(
+          cookie: token.cookie,
+          domain: portalHost,
+          path: '/',
+        ),
+      );
+    }
+    return result;
+  }
+
+  @visibleForTesting
+  static String webVpnState(String externalId) => base64Encode(
+        utf8.encode(jsonEncode({'externalId': externalId})),
+      );
+
+  @visibleForTesting
+  static Uri directWebVpnAuthorizeUri(String value) {
+    final uri = Uri.tryParse(value);
+    if (uri == null || uri.scheme != 'https') {
+      throw const WeComAuthException(
+        'unsafeWebVpnAuthorizeUrl',
+        'WebVPN 返回了不安全的授权地址',
+      );
+    }
+    if (uri.host == WeComConstants.webVpnNewssoProxyHost) {
+      return uri.replace(host: Uri.parse(WeComConstants.ssoBase).host);
+    }
+    if (uri.host == Uri.parse(WeComConstants.ssoBase).host) return uri;
+    throw const WeComAuthException(
+      'unexpectedWebVpnAuthorizeHost',
+      'WebVPN 返回了未预期的授权地址',
+    );
+  }
+
+  @visibleForTesting
+  Future<String> loadWebVpnDeviceId() async {
+    final preferences = await _preferencesLoader();
+    final existing = preferences.getString(_webVpnDeviceIdKey);
+    if (existing != null && RegExp(r'^[0-9a-f]{32}$').hasMatch(existing)) {
+      return existing;
+    }
+    final value = List.generate(
+      16,
+      (_) => _random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
+    await preferences.setString(_webVpnDeviceIdKey, value);
+    return value;
+  }
+
   /// 按目标系统准备 `state`。
   Future<String> _prepareState(WeComOAuthTarget target) async {
     final bootstrapUrl = target.stateBootstrapUrl;
@@ -363,10 +618,9 @@ class WeComAuthService {
     }
     if (target.generateState) {
       // jwxt 的授权请求不带 state，本地生成随机值防 CSRF。
-      final random = Random.secure();
       return List.generate(
         16,
-        (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+        (_) => _random.nextInt(256).toRadixString(16).padLeft(2, '0'),
       ).join();
     }
     return '';
@@ -389,6 +643,103 @@ class WeComAuthService {
     await response.drain<void>();
     if (location == null || location.isEmpty) return '';
     return uri.resolve(location).queryParameters['state'] ?? '';
+  }
+
+  Future<Map<String, dynamic>> _webVpnJsonRequest(
+    String method,
+    Uri uri, {
+    required String refererPath,
+    Map<String, Object?>? body,
+  }) async {
+    final portal = Uri.parse(WeComConstants.webVpnBase);
+    if (uri.scheme != 'https' || uri.host != portal.host) {
+      throw const WeComAuthException(
+        'unsafeWebVpnApiUrl',
+        'WebVPN 接口地址不安全',
+      );
+    }
+    final request = await _client.openUrl(method, uri).timeout(
+          HttpTimeout.connect,
+        );
+    request.followRedirects = false;
+    request.headers
+      ..set(HttpHeaders.acceptHeader, 'application/json, text/plain, */*')
+      ..set(HttpHeaders.userAgentHeader, ClientUserAgent.mobileBrowser)
+      ..set(HttpHeaders.refererHeader, portal.resolve(refererPath).toString())
+      ..set('Origin', portal.toString());
+    final cookieHeader = _cookies.headerFor(uri);
+    if (cookieHeader.isNotEmpty) {
+      request.headers.set(HttpHeaders.cookieHeader, cookieHeader);
+    }
+    if (body != null) {
+      request.headers.contentType = ContentType.json;
+      request.write(jsonEncode(body));
+    }
+    final response = await request.close().timeout(HttpTimeout.normal);
+    final responseCookies = _parseCookies(response);
+    _cookies.save(uri, responseCookies);
+    final text = await utf8.decodeStream(response).timeout(HttpTimeout.normal);
+    Map<String, dynamic> decoded;
+    try {
+      final value = jsonDecode(text);
+      if (value is! Map) throw const FormatException();
+      decoded = value.map((key, value) => MapEntry(key.toString(), value));
+    } on Object {
+      throw WeComAuthException(
+        'invalidWebVpnResponse',
+        'WebVPN 返回了无法识别的内容（HTTP ${response.statusCode}）',
+      );
+    }
+    _debug('webvpn response method=$method path=${uri.path} '
+        'status=${response.statusCode} code=${decoded['code'] ?? '-'} '
+        'cookies=${responseCookies.map((cookie) => cookie.name).toList()}');
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw WeComAuthException(
+        'webVpnHttpError',
+        _webVpnApiMessage(
+          decoded,
+          'WebVPN 服务请求失败（HTTP ${response.statusCode}）',
+        ),
+      );
+    }
+    return decoded;
+  }
+
+  String? _webVpnExternalId(Map<String, dynamic> response) {
+    if (response['code'] != 0) return null;
+    final data = response['data'];
+    final list = data is Map ? data['list'] : null;
+    if (list is! List) return null;
+    for (final item in list) {
+      if (item is Map && item['authType'].toString() == '5') {
+        final value = item['externalId']?.toString();
+        if (value != null && value.isNotEmpty) return value;
+      }
+    }
+    return null;
+  }
+
+  void _validateWebVpnAuthorizeUri(Uri uri, String state) {
+    final ssoHost = Uri.parse(WeComConstants.ssoBase).host;
+    if (uri.scheme != 'https' ||
+        uri.host != ssoHost ||
+        uri.path != WeComConstants.authorizePath ||
+        uri.queryParameters['client_id'] != WeComOAuthTarget.webVpn.clientId ||
+        uri.queryParameters['redirect_uri'] != WeComConstants.webVpnCallback ||
+        uri.queryParameters['state'] != state) {
+      throw const WeComAuthException(
+        'unexpectedWebVpnAuthorizeParams',
+        'WebVPN 返回了未预期的授权参数',
+      );
+    }
+  }
+
+  String _webVpnApiMessage(
+    Map<String, dynamic> response,
+    String fallback,
+  ) {
+    final message = response['message']?.toString().trim();
+    return message == null || message.isEmpty ? fallback : message;
   }
 
   /// 单次长轮询请求，返回扫码状态。

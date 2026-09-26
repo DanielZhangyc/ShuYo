@@ -3,9 +3,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shuyo/data/models/discourse_user.dart';
 import 'package:shuyo/data/models/user_profile.dart';
 import 'package:shuyo/features/profile/profile_page.dart';
+import 'package:shuyo/shared/widgets/avatar.dart';
 
 void main() {
   testWidgets('shows a complete logged-out profile state', (tester) async {
+    var loginRequiredCalls = 0;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -34,6 +36,7 @@ void main() {
             onEditProfile: () {},
             activityCountsFuture: null,
             onOpenActivity: (_) {},
+            onLoginRequired: () => loginRequiredCalls++,
           ),
         ),
       ),
@@ -43,5 +46,13 @@ void main() {
     expect(find.text('登录后可查看个人资料'), findsOneWidget);
     expect(find.text('登录功能即将开放'), findsNothing);
     expect(find.text('访问天数'), findsNothing);
+
+    await tester.tap(find.text('暂未登录乐乎论坛'));
+    await tester.pump();
+    expect(loginRequiredCalls, 1);
+
+    await tester.tap(find.byType(ForumAvatar));
+    await tester.pump();
+    expect(loginRequiredCalls, 2);
   });
 }

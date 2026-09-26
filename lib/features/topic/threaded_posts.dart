@@ -10,6 +10,11 @@ class ThreadedPost {
   final List<Post> replies;
 }
 
+List<Post> buildReverseChronologicalPosts(List<Post> posts) {
+  return List<Post>.of(posts)
+    ..sort((a, b) => b.postNumber.compareTo(a.postNumber));
+}
+
 List<ThreadedPost> buildThreadedPosts(List<Post> posts) {
   final byPostNumber = {
     for (final post in posts) post.postNumber: post,

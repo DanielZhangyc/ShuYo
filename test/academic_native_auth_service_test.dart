@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuyo/data/services/academic_native_auth_service.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 void main() {
   test('academic password encryption produces randomized 1024-bit RSA data',
@@ -72,5 +73,80 @@ void main() {
       store.save(source, [Cookie('SHU_OAUTH2', 'new')..path = '/']);
       expect(store.headerFor(Uri.parse(newsso)), 'SHU_OAUTH2=new');
     });
+  });
+
+  test('forum session detection distinguishes native and browser bootstrap',
+      () {
+    final store = AcademicSessionCookieStore();
+    store.save(
+      Uri.parse('https://newsso.shu.edu.cn'),
+      [Cookie('SHU_OAUTH2', 'sso')..path = '/'],
+    );
+    expect(
+      AcademicNativeAuthService.hasNativeForumSession(store.entries),
+      isFalse,
+    );
+
+    store.save(
+      Uri.parse('https://https-bbs-shu-edu-cn-443.webvpn.shu.edu.cn'),
+      [Cookie('_forum_session', 'fresh')..path = '/'],
+    );
+    expect(
+      AcademicNativeAuthService.hasNativeForumSession(store.entries),
+      isTrue,
+    );
+  });
+
+  test('selects a valid WebVPN token past an empty host-only shadow', () {
+    expect(
+      AcademicNativeAuthService.selectNonEmptyCookieValue(
+        const [
+          WebViewCookie(
+            name: 'webvpn-token',
+            value: '',
+            domain: 'https-bbs-shu-edu-cn-443.webvpn.shu.edu.cn',
+          ),
+          WebViewCookie(
+            name: 'webvpn-token',
+            value: 'valid-token',
+            domain: 'webvpn.shu.edu.cn',
+          ),
+        ],
+        'webvpn-token',
+      ),
+      'valid-token',
+    );
+  });
+
+  test('installs a WebVPN token when the forum proxy has none', () {
+    expect(
+      AcademicNativeAuthService.webVpnTokenPathsNeedingInstall(
+        const [],
+        'valid-token',
+      ),
+      {'/'},
+    );
+  });
+
+  test('repairs empty WebVPN token shadows on their existing paths', () {
+    expect(
+      AcademicNativeAuthService.webVpnTokenPathsNeedingInstall(
+        const [
+          WebViewCookie(
+            name: 'webvpn-token',
+            value: '',
+            domain: 'https-bbs-shu-edu-cn-443.webvpn.shu.edu.cn',
+            path: '/auth',
+          ),
+          WebViewCookie(
+            name: 'webvpn-token',
+            value: 'valid-token',
+            domain: 'webvpn.shu.edu.cn',
+          ),
+        ],
+        'valid-token',
+      ),
+      {'/auth', '/'},
+    );
   });
 }

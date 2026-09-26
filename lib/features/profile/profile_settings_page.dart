@@ -10,6 +10,7 @@ import '../../data/services/local_image_picker.dart';
 import '../../shared/shuyo_text_styles.dart';
 import '../../shared/widgets/empty_state.dart';
 import 'avatar_crop_page.dart';
+import 'background_crop_page.dart';
 import 'profile_header.dart';
 
 class ProfileSettingsPage extends StatefulWidget {
@@ -23,8 +24,10 @@ class ProfileSettingsPage extends StatefulWidget {
 
 class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
   static const _bioMaxLength = 20;
+  static const _horizontalPadding = 16.0;
 
   final _bioController = TextEditingController();
+  final _scrollController = ScrollController();
   late Future<void> _loadFuture;
   UserProfile? _profile;
   String _baselineBio = '';
@@ -65,6 +68,7 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
   void dispose() {
     _bioController.removeListener(_onBioChanged);
     _bioController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -122,8 +126,14 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
               );
             }
             return ListView(
+              controller: _scrollController,
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 30),
+              padding: const EdgeInsets.fromLTRB(
+                _horizontalPadding,
+                12,
+                _horizontalPadding,
+                30,
+              ),
               children: [
                 ProfileHeader(
                   profile: profile,
@@ -279,11 +289,36 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
     try {
       final picked = await LocalImagePicker.pickImage();
       if (picked == null || !mounted) return;
+      final cropped = await Navigator.of(context).push<Uint8List>(
+        MaterialPageRoute(
+          builder: (context) => LayoutBuilder(
+            builder: (context, constraints) => BackgroundCropPage(
+              image: picked.bytes,
+              // Use the same content width as the profile header, including
+              // after rotation while the picker or crop page is open.
+              aspectRatio: (constraints.maxWidth - 2 * _horizontalPadding) /
+                  ProfileHeader.backgroundHeight,
+            ),
+          ),
+        ),
+      );
+      if (cropped == null || !mounted) return;
       setState(() {
-        _backgroundImage = picked;
+        _backgroundImage = PickedImage(
+          bytes: cropped,
+          filename: 'profile-background.png',
+          mimeType: 'image/png',
+        );
         _backgroundUpload = null;
         _backgroundCleared = false;
       });
+      if (_scrollController.hasClients) {
+        await _scrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
     } on Object catch (error) {
       if (mounted) _showSnack('背景图选择失败：$error');
     } finally {

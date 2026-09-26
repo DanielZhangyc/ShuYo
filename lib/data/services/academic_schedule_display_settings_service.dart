@@ -6,18 +6,27 @@ class AcademicScheduleDisplaySettings {
   const AcademicScheduleDisplaySettings({
     required this.colorful,
     required this.showTeacher,
+    this.showCredit = false,
+    this.showNonCurrentWeekCourses = true,
   });
 
   final bool colorful;
   final bool showTeacher;
+  final bool showCredit;
+  final bool showNonCurrentWeekCourses;
 
   AcademicScheduleDisplaySettings copyWith({
     bool? colorful,
     bool? showTeacher,
+    bool? showCredit,
+    bool? showNonCurrentWeekCourses,
   }) {
     return AcademicScheduleDisplaySettings(
       colorful: colorful ?? this.colorful,
       showTeacher: showTeacher ?? this.showTeacher,
+      showCredit: showCredit ?? this.showCredit,
+      showNonCurrentWeekCourses:
+          showNonCurrentWeekCourses ?? this.showNonCurrentWeekCourses,
     );
   }
 }
@@ -39,6 +48,9 @@ class AcademicScheduleDisplaySettingsService {
 
   static const _colorfulKey = 'academic.schedule.display.colorful';
   static const _showTeacherKey = 'academic.schedule.display.showTeacher';
+  static const _showCreditKey = 'academic.schedule.display.showCredit';
+  static const _showNonCurrentWeekCoursesKey =
+      'academic.schedule.display.showNonCurrentWeekCourses';
   static const _courseColorsKey = 'academic.schedule.display.courseColors';
 
   final Future<SharedPreferences> Function() _preferencesLoader;
@@ -60,8 +72,11 @@ class AcademicScheduleDisplaySettingsService {
     SharedPreferences prefs,
   ) {
     return AcademicScheduleDisplaySettings(
-      colorful: prefs.getBool(_colorfulKey) ?? false,
+      colorful: prefs.getBool(_colorfulKey) ?? true,
       showTeacher: prefs.getBool(_showTeacherKey) ?? false,
+      showCredit: prefs.getBool(_showCreditKey) ?? false,
+      showNonCurrentWeekCourses:
+          prefs.getBool(_showNonCurrentWeekCoursesKey) ?? true,
     );
   }
 
@@ -71,6 +86,11 @@ class AcademicScheduleDisplaySettingsService {
     final prefs = await _preferencesLoader();
     await prefs.setBool(_colorfulKey, settings.colorful);
     await prefs.setBool(_showTeacherKey, settings.showTeacher);
+    await prefs.setBool(_showCreditKey, settings.showCredit);
+    await prefs.setBool(
+      _showNonCurrentWeekCoursesKey,
+      settings.showNonCurrentWeekCourses,
+    );
     return settings;
   }
 
