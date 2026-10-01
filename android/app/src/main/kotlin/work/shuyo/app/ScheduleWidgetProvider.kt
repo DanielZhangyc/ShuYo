@@ -215,11 +215,11 @@ abstract class ScheduleWidgetBaseProvider(
             return
         }
         if (todayCourses.isEmpty()) {
-            views.setTextViewText(R.id.widget_status, "今日暂无课程")
+            views.setTextViewText(R.id.widget_status, "明日暂无课程")
             return
         }
         if (upcoming == null) {
-            views.setTextViewText(R.id.widget_status, "今日课程已结束")
+            views.setTextViewText(R.id.widget_status, "明日暂无课程")
             return
         }
         val prefix = if (upcoming.isActive(nowMinute)) "正在上课" else "下一节 ${upcoming.startText}"
@@ -268,10 +268,10 @@ abstract class ScheduleWidgetBaseProvider(
         nowMinute: Int
     ): String {
         if (todayCourses.isEmpty()) {
-            return "今日暂无课程"
+            return "明日暂无课程"
         }
         if (upcoming == null) {
-            return "今日课程已结束"
+            return "明日暂无课程"
         }
         if (upcoming.isActive(nowMinute)) {
             return "正在上课 · ${upcoming.name}"

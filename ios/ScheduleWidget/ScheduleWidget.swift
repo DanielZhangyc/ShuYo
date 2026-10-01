@@ -198,10 +198,10 @@ private struct SchedulePresentation {
       status = "假期中"
       compactDetail = ""
     } else if todayCourses.isEmpty {
-      status = "今日暂无课程"
+      status = "明日暂无课程"
       compactDetail = ""
     } else if next == nil {
-      status = "今日课程已结束"
+      status = "明日暂无课程"
       compactDetail = ""
     } else if next!.isActive(at: nowMinute) {
       status = "正在上课 · \(next!.name)"
