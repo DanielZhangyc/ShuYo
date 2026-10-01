@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/classroom_url_resolver.dart';
@@ -34,6 +36,7 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
   late DateTime _selectedDate = widget.initialDate ?? DateTime.now();
   bool _refreshingOptions = false;
   String _keyword = '';
+  bool _initialSelectionApplied = false;
 
   @override
   void initState() {
@@ -102,6 +105,8 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
                 onCampusChanged: _setCampus,
                 onBuildingChanged: _setBuilding,
                 onRangeChanged: _setRange,
+                onPreviousRange: () => _stepRange(-1),
+                onNextRange: () => _stepRange(1),
                 onDateChanged: _setDate,
                 onKeywordChanged: (value) => setState(() => _keyword = value),
               ),
@@ -125,6 +130,17 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
     return FutureBuilder<_ClassroomQueryResult>(
       future: future,
       builder: (context, snapshot) {
+        // FutureBuilder retains the previous result while a new query runs.
+        // Keep it visible until the replacement is ready to avoid a flash.
+        if (snapshot.hasData) {
+          return RefreshIndicator(
+            onRefresh: _search,
+            child: _ClassroomResultList(
+              result: snapshot.data!,
+              keyword: _keyword,
+            ),
+          );
+        }
         if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator(strokeWidth: 3));
         }
@@ -140,13 +156,7 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
             ),
           );
         }
-        return RefreshIndicator(
-          onRefresh: _search,
-          child: _ClassroomResultList(
-            result: snapshot.data!,
-            keyword: _keyword,
-          ),
-        );
+        return const SizedBox.shrink();
       },
     );
   }
@@ -165,7 +175,16 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
         _options = options;
         _selectedCampus = _validCampus(options);
         _selectedBuilding = _validBuilding(options);
-        _selectedRange ??= widget.repository.defaultRangeFor(options);
+        if (!_initialSelectionApplied) {
+          final now = DateTime.now();
+          if (widget.initialDate == null) {
+            _selectedDate = widget.repository.defaultDateFor(options, now: now);
+          }
+          _selectedRange = widget.repository.defaultRangeFor(options, now: now);
+          _initialSelectionApplied = true;
+        } else {
+          _selectedRange ??= widget.repository.defaultRangeFor(options);
+        }
       });
       _search(forceRefresh: force);
     } on ClassroomWebVpnAuthException {
@@ -234,6 +253,27 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
   void _setRange(ClassroomSectionRange range) {
     setState(() => _selectedRange = range);
     _search();
+  }
+
+  void _stepRange(int delta) {
+    final options = _options;
+    if (options == null) {
+      return;
+    }
+    final ranges = widget.repository.defaultRanges(options.sections);
+    final currentIndex = ranges.indexWhere(
+      (range) =>
+          range.start == _selectedRange?.start &&
+          range.end == _selectedRange?.end,
+    );
+    if (currentIndex < 0) {
+      return;
+    }
+    final nextIndex = currentIndex + delta;
+    if (nextIndex < 0 || nextIndex >= ranges.length) {
+      return;
+    }
+    _setRange(ranges[nextIndex]);
   }
 
   void _setDate(DateTime date) {
@@ -408,6 +448,8 @@ class _SearchControls extends StatelessWidget {
     required this.onCampusChanged,
     required this.onBuildingChanged,
     required this.onRangeChanged,
+    required this.onPreviousRange,
+    required this.onNextRange,
     required this.onDateChanged,
     required this.onKeywordChanged,
   });
@@ -421,6 +463,8 @@ class _SearchControls extends StatelessWidget {
   final ValueChanged<String?> onCampusChanged;
   final ValueChanged<ClassroomBuilding?> onBuildingChanged;
   final ValueChanged<ClassroomSectionRange> onRangeChanged;
+  final VoidCallback onPreviousRange;
+  final VoidCallback onNextRange;
   final ValueChanged<DateTime> onDateChanged;
   final ValueChanged<String> onKeywordChanged;
 
@@ -534,31 +578,15 @@ class _SearchControls extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            for (var rowStart = 0; rowStart < ranges.length; rowStart += 3) ...[
-              if (rowStart > 0) const SizedBox(height: 6),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (var column = 0; column < 3; column++) ...[
-                    if (column > 0) const SizedBox(width: 8),
-                    Expanded(
-                      child: rowStart + column < ranges.length
-                          ? _rangeButton(context, ranges[rowStart + column])
-                          : const SizedBox.shrink(),
-                    ),
-                  ],
-                ],
-              ),
-            ],
-            const SizedBox(height: 10),
-            TextField(
-              decoration: const InputDecoration(
-                hintText: '搜索课程、教师或教室',
-                prefixIcon: Icon(Icons.search),
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-              textInputAction: TextInputAction.search,
+            _SectionRangeSelector(
+              ranges: ranges,
+              selectedRange: selectedRange,
+              onChanged: onRangeChanged,
+              onPrevious: onPreviousRange,
+              onNext: onNextRange,
+            ),
+            const SizedBox(height: 6),
+            _ClassroomSearchField(
               onChanged: onKeywordChanged,
             ),
           ],
@@ -566,31 +594,249 @@ class _SearchControls extends StatelessWidget {
       ),
     );
   }
+}
 
-  Widget _rangeButton(BuildContext context, ClassroomSectionRange range) {
+class _ClassroomSearchField extends StatefulWidget {
+  const _ClassroomSearchField({required this.onChanged});
+
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_ClassroomSearchField> createState() => _ClassroomSearchFieldState();
+}
+
+class _ClassroomSearchFieldState extends State<_ClassroomSearchField> {
+  final FocusNode _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_onFocusChanged);
+  }
+
+  void _onFocusChanged() => setState(() {});
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_onFocusChanged);
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final colors = context.shuyoColors;
-    final selected =
-        selectedRange?.start == range.start && selectedRange?.end == range.end;
+    return Container(
+      height: 52,
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: _focusNode.hasFocus ? colors.accent : colors.borderStrong,
+            width: _focusNode.hasFocus ? 1.5 : 1,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: _focusNode.requestFocus,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 8, right: 12),
+              child: Icon(Icons.search, size: 20, color: colors.textSecondary),
+            ),
+          ),
+          Expanded(
+            child: TextField(
+              focusNode: _focusNode,
+              onTapOutside: (_) => _focusNode.unfocus(),
+              decoration: const InputDecoration(
+                hintText: '搜索课程、教师或教室',
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                isCollapsed: true,
+              ),
+              textInputAction: TextInputAction.search,
+              onChanged: widget.onChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionRangeSelector extends StatelessWidget {
+  const _SectionRangeSelector({
+    required this.ranges,
+    required this.selectedRange,
+    required this.onChanged,
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  final List<ClassroomSectionRange> ranges;
+  final ClassroomSectionRange? selectedRange;
+  final ValueChanged<ClassroomSectionRange> onChanged;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedIndex = ranges.indexWhere(
+      (range) =>
+          range.start == selectedRange?.start &&
+          range.end == selectedRange?.end,
+    );
+    return Row(
+      children: [
+        IconButton(
+          tooltip: '上一节',
+          onPressed: selectedIndex > 0 ? onPrevious : null,
+          icon: const Icon(Icons.chevron_left),
+          visualDensity: VisualDensity.compact,
+        ),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              const compactWidth = 18.0;
+              const gap = 6.0;
+              final compactTotal = (ranges.length - 1) * (compactWidth + gap);
+              final selectedWidth = (constraints.maxWidth - compactTotal)
+                  .clamp(72.0, 104.0)
+                  .toDouble();
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  for (var index = 0; index < ranges.length; index++) ...[
+                    if (index > 0) const SizedBox(width: gap),
+                    _AnimatedRangeButton(
+                      range: ranges[index],
+                      selected: index == selectedIndex,
+                      selectedWidth: selectedWidth,
+                      onTap: () => onChanged(ranges[index]),
+                    ),
+                  ],
+                ],
+              );
+            },
+          ),
+        ),
+        IconButton(
+          tooltip: '下一节',
+          onPressed: selectedIndex >= 0 && selectedIndex < ranges.length - 1
+              ? onNext
+              : null,
+          icon: const Icon(Icons.chevron_right),
+          visualDensity: VisualDensity.compact,
+        ),
+      ],
+    );
+  }
+}
+
+class _AnimatedRangeButton extends StatefulWidget {
+  const _AnimatedRangeButton({
+    required this.range,
+    required this.selected,
+    required this.selectedWidth,
+    required this.onTap,
+  });
+
+  final ClassroomSectionRange range;
+  final bool selected;
+  final double selectedWidth;
+  final VoidCallback onTap;
+
+  @override
+  State<_AnimatedRangeButton> createState() => _AnimatedRangeButtonState();
+}
+
+class _AnimatedRangeButtonState extends State<_AnimatedRangeButton> {
+  static const _widthDuration = Duration(milliseconds: 500);
+  static const _labelDelay = Duration(milliseconds: 50);
+  Timer? _labelTimer;
+  late bool _showLabel;
+
+  @override
+  void initState() {
+    super.initState();
+    _showLabel = widget.selected;
+  }
+
+  @override
+  void didUpdateWidget(covariant _AnimatedRangeButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selected == widget.selected) {
+      return;
+    }
+    _labelTimer?.cancel();
+    if (widget.selected) {
+      setState(() => _showLabel = false);
+      _labelTimer = Timer(_labelDelay, () {
+        if (mounted && widget.selected) {
+          setState(() => _showLabel = true);
+        }
+      });
+    } else {
+      setState(() => _showLabel = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _labelTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.shuyoColors;
     return MergeSemantics(
       child: Semantics(
-        selected: selected,
+        label: widget.range.label,
+        selected: widget.selected,
         inMutuallyExclusiveGroup: true,
-        child: OutlinedButton(
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size(0, 48),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-            foregroundColor:
-                selected ? colors.onAccentSoft : colors.textPrimary,
-            backgroundColor: selected ? colors.accentSoft : colors.surface,
-            side: BorderSide(
-              color: selected ? colors.accent : colors.borderStrong,
-              width: selected ? 2 : 1,
+        child: AnimatedContainer(
+          duration: _widthDuration,
+          curve: Curves.easeOutCubic,
+          width: widget.selected ? widget.selectedWidth : 18,
+          height: 44,
+          decoration: BoxDecoration(
+            color: widget.selected ? colors.accentSoft : colors.surfaceMuted,
+            border: Border.all(
+              color: widget.selected ? colors.accent : colors.borderStrong,
+              width: widget.selected ? 2 : 1,
             ),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            borderRadius: BorderRadius.circular(10),
           ),
-          onPressed: () => onRangeChanged(range),
-          child: Text(range.label, textAlign: TextAlign.center),
+          child: Material(
+            type: MaterialType.transparency,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: widget.onTap,
+              borderRadius: BorderRadius.circular(10),
+              child: Center(
+                child: AnimatedOpacity(
+                  opacity: _showLabel ? 1 : 0,
+                  duration: _showLabel
+                      ? const Duration(milliseconds: 300)
+                      : Duration.zero,
+                  child: Text(
+                    widget.range.label,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: colors.onAccentSoft,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

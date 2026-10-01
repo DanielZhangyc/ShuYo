@@ -153,13 +153,6 @@ class ClassroomRepository {
     if (ranges.isEmpty) {
       return const ClassroomSectionRange(start: 1, end: 2);
     }
-    final current = options.currentSection;
-    if (current > 0) {
-      return ranges.firstWhere(
-        (range) => range.contains(current),
-        orElse: () => ranges.first,
-      );
-    }
     final section = _sectionFromTime(options.sections, now ?? DateTime.now());
     if (section != null) {
       return ranges.firstWhere(
@@ -167,7 +160,31 @@ class ClassroomRepository {
         orElse: () => ranges.first,
       );
     }
-    return ranges.first;
+    return ranges.firstWhere(
+      (range) => range.start == 3 && range.end == 4,
+      orElse: () => ranges.first,
+    );
+  }
+
+  DateTime defaultDateFor(
+    ClassroomSearchOptions options, {
+    DateTime? now,
+  }) {
+    final current = now ?? DateTime.now();
+    final minutes = current.hour * 60 + current.minute;
+    final endMinutes = options.sections
+        .map((section) => _minutes(section.endTime))
+        .whereType<int>()
+        .fold<int?>(null, (latest, value) {
+      if (latest == null || value > latest) {
+        return value;
+      }
+      return latest;
+    });
+    if (endMinutes != null && minutes > endMinutes) {
+      return DateTime(current.year, current.month, current.day + 1);
+    }
+    return DateTime(current.year, current.month, current.day);
   }
 
   Future<ClassroomSearchOptions?> _loadCachedOptions() async {
