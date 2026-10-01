@@ -652,23 +652,41 @@ class _TimeEditorState extends State<_TimeEditor> {
                   crossAxisCount: 6,
                   children: [
                     for (var week = 1; week <= widget.maxWeek; week++)
-                      InkWell(
-                        onTap: () => setSheetState(() {
-                          selected.contains(week)
-                              ? selected.remove(week)
-                              : selected.add(week);
-                        }),
-                        child: Center(
-                          child: CircleAvatar(
-                            backgroundColor: selected.contains(week)
-                                ? Theme.of(context).colorScheme.primary
-                                : Colors.transparent,
-                            child: Text(
-                              '$week',
-                              style: TextStyle(
-                                color: selected.contains(week)
-                                    ? Theme.of(context).colorScheme.onPrimary
-                                    : context.shuyoColors.textPrimary,
+                      Center(
+                        child: SizedBox.square(
+                          dimension: 48,
+                          child: Material(
+                            color: Colors.transparent,
+                            shape: const CircleBorder(),
+                            clipBehavior: Clip.antiAlias,
+                            child: InkWell(
+                              customBorder: const CircleBorder(),
+                              onTap: () => setSheetState(() {
+                                selected.contains(week)
+                                    ? selected.remove(week)
+                                    : selected.add(week);
+                              }),
+                              child: Center(
+                                child: SizedBox.square(
+                                  dimension: 40,
+                                  child: CircleAvatar(
+                                    backgroundColor: selected.contains(week)
+                                        ? Theme.of(context)
+                                            .colorScheme
+                                            .primary
+                                        : Colors.transparent,
+                                    child: Text(
+                                      '$week',
+                                      style: TextStyle(
+                                        color: selected.contains(week)
+                                            ? Theme.of(context)
+                                                .colorScheme
+                                                .onPrimary
+                                            : context.shuyoColors.textPrimary,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
                           ),
