@@ -177,7 +177,7 @@ class HomeDashboardPage extends StatelessWidget {
       '5-1': ['劳动节快乐，愿努力都有收获！'],
       '6-1': ['儿童节快乐，愿你永远保有童心！'],
       '9-10': ['教师节快乐，为老师送上一份祝福吧！'],
-      '10-1': ['盛世华诞，举国同庆，给自己放个大假！'],
+      '10-1': ['盛世华诞，举国同庆'],
     };
     final greetings = specialGreetings[key];
     return greetings == null ? null : _pick(greetings);
