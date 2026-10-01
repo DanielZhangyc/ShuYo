@@ -2556,30 +2556,32 @@ class _ScheduleBody extends StatelessWidget {
     final untimed = schedule.untimedForWeek(displayedWeek);
     const weekdays = [1, 2, 3, 4, 5, 6, 7];
 
-    return Column(
-      children: [
-        _WeekSwitcher(
-          week: displayedWeek,
-          maxWeek: schedule.maxWeek,
-          onPrevious: onPreviousWeek,
-          onNext: onNextWeek,
-          onQuickWeekSelected: onQuickWeekSelected,
-        ),
-        Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final weekdayWidth =
-                  (constraints.maxWidth - _ScheduleGrid.leftWidth) / 5;
-              final gridWidth =
-                  _ScheduleGrid.leftWidth + weekdays.length * weekdayWidth;
-              final grid = SingleChildScrollView(
-                key: const PageStorageKey('academic-schedule-vertical-scroll'),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SizedBox(
-                      width: gridWidth,
-                      child: _ScheduleGrid(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final weekdayWidth =
+            (constraints.maxWidth - _ScheduleGrid.leftWidth) / 5;
+        final gridWidth =
+            _ScheduleGrid.leftWidth + weekdays.length * weekdayWidth;
+        return SingleChildScrollView(
+          key: const PageStorageKey('academic-schedule-vertical-scroll'),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _WeekSwitcher(
+                week: displayedWeek,
+                maxWeek: schedule.maxWeek,
+                onPrevious: onPreviousWeek,
+                onNext: onNextWeek,
+                onQuickWeekSelected: onQuickWeekSelected,
+              ),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: gridWidth,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _ScheduleGrid(
                         sessions: sessions,
                         weekdays: weekdays,
                         weekState: weekState,
@@ -2592,21 +2594,17 @@ class _ScheduleBody extends StatelessWidget {
                         onCourseTap: onCourseTap,
                         onDayHeaderTap: onDayHeaderTap,
                       ),
-                    ),
-                    if (untimed.isNotEmpty)
-                      _UntimedCourseList(courses: untimed),
-                    const SizedBox(height: 24),
-                  ],
+                      if (untimed.isNotEmpty)
+                        _UntimedCourseList(courses: untimed),
+                      const SizedBox(height: 24),
+                    ],
+                  ),
                 ),
-              );
-              return SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SizedBox(width: gridWidth, child: grid),
-              );
-            },
+              ),
+            ],
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 }
