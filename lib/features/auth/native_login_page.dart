@@ -10,6 +10,7 @@ import '../../data/services/academic_auth_service.dart';
 import '../../data/services/verification_delivery_service.dart';
 import '../../data/services/wecom_auth_service.dart';
 import '../../data/demo/demo_session.dart';
+import '../../shared/theme/shuyo_theme.dart';
 import 'webvpn_oauth_completion_page.dart';
 import 'wecom_scan_page.dart';
 
@@ -44,6 +45,7 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
   final _weComAuthService = WeComAuthService();
   final _studentId = TextEditingController();
   final _password = TextEditingController();
+  final _passwordFocusNode = FocusNode();
   final _code = TextEditingController();
   final _credentialsKey = GlobalKey<FormState>();
   final _verificationKey = GlobalKey<FormState>();
@@ -57,12 +59,22 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
   int _countdown = 0;
 
   @override
+  void initState() {
+    super.initState();
+    _passwordFocusNode.addListener(_onPasswordFocusChanged);
+  }
+
+  void _onPasswordFocusChanged() => setState(() {});
+
+  @override
   void dispose() {
     _countdownTimer?.cancel();
     _authServiceInstance?.dispose();
     _weComAuthService.dispose();
     _studentId.dispose();
     _password.dispose();
+    _passwordFocusNode.removeListener(_onPasswordFocusChanged);
+    _passwordFocusNode.dispose();
     _code.dispose();
     super.dispose();
   }
@@ -76,13 +88,7 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(switch (_step) {
-            0 => switch (widget.destination) {
-                NativeLoginDestination.webVpn => '登录WebVPN服务',
-                NativeLoginDestination.academic => '上大校园账户',
-              },
-            _ => '验证身份',
-          }),
+          title: _step == 0 ? null : const Text('验证身份'),
         ),
         body: SafeArea(
           child: AnimatedSwitcher(
@@ -97,89 +103,199 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
     );
   }
 
-  Widget _credentials() => Form(
-        key: _credentialsKey,
-        child: ListView(
+  Widget _credentials() {
+    final colors = context.shuyoColors;
+    final academic = widget.destination == NativeLoginDestination.academic;
+    return Form(
+      key: _credentialsKey,
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
           key: const ValueKey('credentials'),
-          padding: const EdgeInsets.all(24),
-          children: [
-            Text(
-              switch (widget.destination) {
-                NativeLoginDestination.webVpn => '登录WebVPN服务',
-                NativeLoginDestination.academic => '登录校园账户',
-              },
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '使用上海大学统一认证系统',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 28),
-            TextFormField(
-              controller: _studentId,
-              enabled: !_busy,
-              keyboardType: TextInputType.text,
-              autofillHints: const [AutofillHints.username],
-              textInputAction: TextInputAction.next,
-              decoration: const InputDecoration(
-                  labelText: '用户名/学号', prefixIcon: Icon(Icons.badge_outlined)),
-              validator: (value) =>
-                  value?.trim().isEmpty == true ? '请输入学号' : null,
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _password,
-              enabled: !_busy,
-              obscureText: !_passwordVisible,
-              autofillHints: const [AutofillHints.password],
-              onFieldSubmitted: (_) => _submitCredentials(),
-              decoration: InputDecoration(
-                labelText: '密码',
-                prefixIcon: const Icon(Icons.lock_outline),
-                suffixIcon: IconButton(
-                  tooltip: _passwordVisible ? '隐藏密码' : '显示密码',
-                  onPressed: () =>
-                      setState(() => _passwordVisible = !_passwordVisible),
-                  icon: Icon(_passwordVisible
-                      ? Icons.visibility_off_outlined
-                      : Icons.visibility_outlined),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 440),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 55, 24, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        academic ? '上大校园账户' : 'WebVPN服务',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineLarge
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 8),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 28),
+                        child: Text(
+                          academic
+                              ? '使用上海大学统一认证账户来访问各类校园服务'
+                              : '使用上海大学统一认证账户来访问WebVPN服务',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: colors.textSecondary),
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: colors.surface,
+                          border: Border.all(color: colors.border),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Column(
+                          children: [
+                            _credentialRow(
+                              label: '学/工号',
+                              field: TextFormField(
+                                controller: _studentId,
+                                enabled: !_busy,
+                                keyboardType: TextInputType.text,
+                                autofillHints: const [AutofillHints.username],
+                                textInputAction: TextInputAction.next,
+                                onTapOutside: (_) =>
+                                    FocusScope.of(context).unfocus(),
+                                decoration: _credentialDecoration(),
+                                validator: (value) =>
+                                    value?.trim().isEmpty == true
+                                        ? '请输入学/工号'
+                                        : null,
+                              ),
+                            ),
+                            Divider(
+                                height: 1,
+                                indent: 16,
+                                endIndent: 16,
+                                color: colors.border),
+                            _credentialRow(
+                              label: '密码',
+                              rightPadding: 8,
+                              field: TextFormField(
+                                controller: _password,
+                                focusNode: _passwordFocusNode,
+                                enabled: !_busy,
+                                obscureText: !_passwordVisible,
+                                autofillHints: const [AutofillHints.password],
+                                onTapOutside: (_) =>
+                                    _passwordFocusNode.unfocus(),
+                                onFieldSubmitted: (_) => _submitCredentials(),
+                                decoration: _credentialDecoration(
+                                  suffixIcon: IgnorePointer(
+                                    ignoring: !_passwordFocusNode.hasFocus,
+                                    child: AnimatedOpacity(
+                                      opacity:
+                                          _passwordFocusNode.hasFocus ? 1 : 0,
+                                      duration:
+                                          const Duration(milliseconds: 180),
+                                      child: IconButton(
+                                        style: const ButtonStyle(
+                                          splashFactory: NoSplash.splashFactory,
+                                          overlayColor: WidgetStatePropertyAll(
+                                            Colors.transparent,
+                                          ),
+                                        ),
+                                        tooltip:
+                                            _passwordVisible ? '隐藏密码' : '显示密码',
+                                        onPressed: () => setState(() =>
+                                            _passwordVisible =
+                                                !_passwordVisible),
+                                        icon: Icon(
+                                          _passwordVisible
+                                              ? Icons.visibility_off_outlined
+                                              : Icons.visibility_outlined,
+                                          color: colors.textTertiary,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                validator: (value) =>
+                                    value?.isEmpty == true ? '请输入密码' : null,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 28),
+                      FilledButton(
+                        onPressed: _busy ? null : _submitCredentials,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(50),
+                        ),
+                        child: _buttonContent('继续'),
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: _busy ? null : _startWeComLogin,
+                        icon: const Icon(Icons.qr_code_scanner_outlined),
+                        label: const Text('使用企业微信登录'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(50),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '使用企业微信扫码或跳转至企业微信登录',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: colors.textTertiary,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              validator: (value) => value?.isEmpty == true ? '请输入密码' : null,
             ),
-            const SizedBox(height: 28),
-            FilledButton(
-              onPressed: (_busy) ? null : _submitCredentials,
-              style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(50)),
-              child: _buttonContent('继续'),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: (_busy) ? null : _startWeComLogin,
-              icon: const Icon(Icons.qr_code_scanner_outlined),
-              label: const Text('使用企业微信登录'),
-              style: OutlinedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(50)),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '使用企业微信扫码登录，可在手机企业微信中确认登录。',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
+          ),
         ),
-      );
+      ),
+    );
+  }
+
+  Widget _credentialRow({
+    required String label,
+    required Widget field,
+    double rightPadding = 16,
+  }) {
+    final colors = context.shuyoColors;
+    return Padding(
+      padding: EdgeInsets.only(left: 16, right: rightPadding),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 16),
+            child: SizedBox(
+              width: 72,
+              child: Text(label, style: TextStyle(color: colors.textSecondary)),
+            ),
+          ),
+          Expanded(child: field),
+        ],
+      ),
+    );
+  }
+
+  InputDecoration _credentialDecoration({Widget? suffixIcon}) {
+    return InputDecoration(
+      suffixIcon: suffixIcon,
+      contentPadding: const EdgeInsets.symmetric(vertical: 16),
+      border: InputBorder.none,
+      enabledBorder: InputBorder.none,
+      focusedBorder: InputBorder.none,
+      errorBorder: InputBorder.none,
+      focusedErrorBorder: InputBorder.none,
+      disabledBorder: InputBorder.none,
+    );
+  }
 
   Widget _verification() {
     final methods = _challenge?.methods ?? const {};
