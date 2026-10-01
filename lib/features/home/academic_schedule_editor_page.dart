@@ -25,6 +25,7 @@ class ScheduleCourseTimeDraft {
     required this.startSection,
     required this.endSection,
     required this.weeks,
+    required this.campus,
     required this.location,
     required this.teacherName,
     required this.note,
@@ -34,6 +35,7 @@ class ScheduleCourseTimeDraft {
   final int startSection;
   final int endSection;
   final List<int> weeks;
+  final String campus;
   final String location;
   final String teacherName;
   final String note;
@@ -353,10 +355,12 @@ class _EditableCourseTime {
     required this.startSection,
     required this.endSection,
     required this.weeks,
+    required String campus,
     required String location,
     required String teacherName,
     required String note,
-  })  : locationController = TextEditingController(text: location),
+  })  : campusController = TextEditingController(text: campus),
+        locationController = TextEditingController(text: location),
         teacherController = TextEditingController(text: teacherName),
         noteController = TextEditingController(text: note);
 
@@ -370,6 +374,7 @@ class _EditableCourseTime {
         startSection: section,
         endSection: section,
         weeks: {week},
+        campus: '',
         location: '',
         teacherName: '',
         note: '',
@@ -381,6 +386,7 @@ class _EditableCourseTime {
         startSection: session.startSection,
         endSection: session.endSection,
         weeks: session.weeks.toSet(),
+        campus: session.campus,
         location: session.location,
         teacherName: session.teacherName,
         note: session.note,
@@ -390,6 +396,7 @@ class _EditableCourseTime {
   int startSection;
   int endSection;
   Set<int> weeks;
+  final TextEditingController campusController;
   final TextEditingController locationController;
   final TextEditingController teacherController;
   final TextEditingController noteController;
@@ -399,6 +406,7 @@ class _EditableCourseTime {
         startSection,
         endSection,
         (weeks.toList()..sort()).join(','),
+        campusController.text,
         locationController.text,
         teacherController.text,
         noteController.text,
@@ -409,6 +417,7 @@ class _EditableCourseTime {
         startSection: startSection,
         endSection: endSection,
         weeks: {...weeks},
+        campus: campusController.text,
         location: locationController.text,
         teacherName: teacherController.text,
         note: noteController.text,
@@ -419,12 +428,14 @@ class _EditableCourseTime {
         startSection: startSection,
         endSection: endSection,
         weeks: weeks.toList()..sort(),
+        campus: campusController.text.trim(),
         location: locationController.text.trim(),
         teacherName: teacherController.text.trim(),
         note: noteController.text.trim(),
       );
 
   void dispose() {
+    campusController.dispose();
     locationController.dispose();
     teacherController.dispose();
     noteController.dispose();
@@ -456,6 +467,7 @@ class _TimeEditor extends StatefulWidget {
 }
 
 class _TimeEditorState extends State<_TimeEditor> {
+  late String _lastCampus;
   late String _lastLocation;
   late String _lastTeacher;
   late String _lastNote;
@@ -463,9 +475,11 @@ class _TimeEditorState extends State<_TimeEditor> {
   @override
   void initState() {
     super.initState();
+    _lastCampus = widget.value.campusController.text;
     _lastLocation = widget.value.locationController.text;
     _lastTeacher = widget.value.teacherController.text;
     _lastNote = widget.value.noteController.text;
+    widget.value.campusController.addListener(_syncTextDirty);
     widget.value.locationController.addListener(_syncTextDirty);
     widget.value.teacherController.addListener(_syncTextDirty);
     widget.value.noteController.addListener(_syncTextDirty);
@@ -473,6 +487,7 @@ class _TimeEditorState extends State<_TimeEditor> {
 
   @override
   void dispose() {
+    widget.value.campusController.removeListener(_syncTextDirty);
     widget.value.locationController.removeListener(_syncTextDirty);
     widget.value.teacherController.removeListener(_syncTextDirty);
     widget.value.noteController.removeListener(_syncTextDirty);
@@ -481,14 +496,17 @@ class _TimeEditorState extends State<_TimeEditor> {
   }
 
   void _syncTextDirty() {
+    final campus = widget.value.campusController.text;
     final location = widget.value.locationController.text;
     final teacher = widget.value.teacherController.text;
     final note = widget.value.noteController.text;
-    if (location == _lastLocation &&
+    if (campus == _lastCampus &&
+        location == _lastLocation &&
         teacher == _lastTeacher &&
         note == _lastNote) {
       return;
     }
+    _lastCampus = campus;
     _lastLocation = location;
     _lastTeacher = teacher;
     _lastNote = note;
@@ -546,6 +564,12 @@ class _TimeEditorState extends State<_TimeEditor> {
                 value:
                     '${_weekdayName(widget.value.weekday)} 第${widget.value.startSection}-${widget.value.endSection}节',
                 onTap: _chooseSections,
+              ),
+              _EditorTextTile(
+                icon: Icons.location_city_outlined,
+                label: '校区',
+                hint: '选填',
+                controller: widget.value.campusController,
               ),
               _EditorTextTile(
                 icon: Icons.place_outlined,

@@ -1736,7 +1736,7 @@ CourseSession _courseSessionFromDraft(
     courseName: courseName,
     courseCode: base?.courseCode ?? CourseSession.manualCode,
     teacherName: draft.teacherName,
-    campus: base?.campus ?? '',
+    campus: draft.campus,
     location: draft.location,
     weekday: weekday,
     startSection: draft.startSection,

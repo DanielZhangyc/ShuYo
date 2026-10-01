@@ -168,8 +168,7 @@ class AcademicScheduleNotificationService {
     return AcademicScheduleAlarmSettings(
       enabled: prefs.getBool(_alarmEnabledKey) ?? false,
       leadMinutes: prefs.getInt(_alarmLeadMinutesKey) ?? 20,
-      vibrationEnabled:
-          prefs.getBool(_alarmVibrationEnabledKey) ?? false,
+      vibrationEnabled: prefs.getBool(_alarmVibrationEnabledKey) ?? false,
     );
   }
 
@@ -549,7 +548,7 @@ class _CourseReminder {
   final DateTime fireTime;
 
   String body(int leadMinutes) {
-    final location = session.location.isEmpty ? '' : ' · ${session.location}';
+    final location = session.placeText.isEmpty ? '' : ' · ${session.placeText}';
     return '$leadMinutes 分钟后开始$location';
   }
 }
