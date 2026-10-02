@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C30000000000000000000005 /* home_widget_privacy.bundle in Resources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000006 /* home_widget_privacy.bundle */; };
+		C30000000000000000000001 /* Runner PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000003 /* PrivacyInfo.xcprivacy */; };
+		C30000000000000000000002 /* Widget PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000004 /* PrivacyInfo.xcprivacy */; };
 		A10000000000000000000001 /* ScheduleWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* ScheduleWidget.swift */; };
 		A10000000000000000000002 /* ScheduleWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* ScheduleWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = 1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */; };
@@ -62,6 +65,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		C30000000000000000000006 /* home_widget_privacy.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.cfbundle"; path = home_widget_privacy.bundle; sourceTree = "<group>"; };
+		C30000000000000000000003 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		C30000000000000000000004 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A10000000000000000000003 /* ScheduleWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleWidget.swift; sourceTree = "<group>"; };
 		A10000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000005 /* ScheduleWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ScheduleWidget.entitlements; sourceTree = "<group>"; };
@@ -108,6 +114,7 @@
 		A10000000000000000000011 /* ScheduleWidget */ = {
 			isa = PBXGroup;
 			children = (
+				C30000000000000000000004 /* PrivacyInfo.xcprivacy */,
 				A10000000000000000000003 /* ScheduleWidget.swift */,
 				A10000000000000000000004 /* Info.plist */,
 				A10000000000000000000005 /* ScheduleWidget.entitlements */,
@@ -159,6 +166,8 @@
 		97C146F01CF9000F007C117D /* Runner */ = {
 			isa = PBXGroup;
 			children = (
+				C30000000000000000000006 /* home_widget_privacy.bundle */,
+				C30000000000000000000003 /* PrivacyInfo.xcprivacy */,
 				A10000000000000000000009 /* Runner.entitlements */,
 				97C146FA1CF9000F007C117D /* Main.storyboard */,
 				97C146FD1CF9000F007C117D /* Assets.xcassets */,
@@ -286,6 +295,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C30000000000000000000002 /* Widget PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -300,6 +310,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C30000000000000000000005 /* home_widget_privacy.bundle in Resources */,
+				C30000000000000000000001 /* Runner PrivacyInfo.xcprivacy in Resources */,
 				97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */,
 				3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */,
 				97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */,
