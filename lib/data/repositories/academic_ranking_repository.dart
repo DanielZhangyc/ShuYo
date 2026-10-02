@@ -27,7 +27,9 @@ class AcademicRankingRepository {
     final decoded = jsonDecode(raw);
     if (decoded is! Map<String, dynamic>) return null;
     final ranking = AcademicRanking.fromJson(decoded);
-    final activeStudentId = await AcademicAccountStore().loadStudentId();
+    final activeStudentId = await AcademicAccountStore(
+      preferencesLoader: _preferencesLoader,
+    ).loadDataStudentId();
     if (activeStudentId != null &&
         activeStudentId.isNotEmpty &&
         ranking.studentId != activeStudentId) {

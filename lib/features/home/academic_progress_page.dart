@@ -80,9 +80,6 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
       _showRanking = showRanking;
       _ranking = ranking;
     });
-    if (showRanking && ranking == null) {
-      unawaited(_refreshRanking());
-    }
   }
 
   Future<void> _loadCached() async {
@@ -110,34 +107,47 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
   Future<void> _refresh() async {
     if (_refreshing) return;
     setState(() => _refreshing = true);
-    var loginRequired = false;
     try {
-      await _fetchAndShow();
-    } on AcademicAuthException {
+      // Each request updates its own data as soon as it succeeds. Waiting here
+      // only combines the final notice and handles an expired session once.
+      final results = await Future.wait([
+        _refreshProgress(),
+        _refreshRanking(),
+      ]);
       if (!mounted) return;
-      await widget.onLoginRequired();
-      if (!mounted) return;
-      try {
-        await _fetchAndShow();
-      } on AcademicAuthException {
-        loginRequired = true;
-        if (mounted) _showSnack('请先登录上大校园账户后再刷新');
-      } on Object catch (error) {
-        if (mounted) _showSnack('学业信息同步失败：$error');
+      if (results.contains(_AcademicRefreshResult.loginRequired)) {
+        await widget.onLoginRequired();
+        return; // Authentication never resumes this refresh automatically.
       }
-    } on Object catch (error) {
-      if (!mounted) return;
-      _showSnack('学业信息同步失败：$error');
+      final progressUpdated = results[0] == _AcademicRefreshResult.success;
+      final rankingUpdated = results[1] == _AcademicRefreshResult.success;
+      _showSnack(progressUpdated
+          ? rankingUpdated
+              ? '学业信息已同步'
+              : '学业信息已同步，排名获取失败'
+          : rankingUpdated
+              ? '排名已同步，学业信息获取失败'
+              : '学业信息同步失败');
     } finally {
-      if (mounted && _showRanking && !loginRequired) {
-        await _refreshRanking(notifyOnFailure: true);
-      }
       if (mounted) setState(() => _refreshing = false);
     }
   }
 
-  Future<void> _refreshRanking({bool notifyOnFailure = false}) async {
-    if (_rankingLoading) return;
+  Future<_AcademicRefreshResult> _refreshProgress() async {
+    try {
+      await _fetchAndShow();
+      return _AcademicRefreshResult.success;
+    } on AcademicAuthException {
+      return _AcademicRefreshResult.loginRequired;
+    } on Object catch (error) {
+      if (mounted && _progress == null) {
+        setState(() => _loadError = '学业信息同步失败：$error');
+      }
+      return _AcademicRefreshResult.failed;
+    }
+  }
+
+  Future<_AcademicRefreshResult> _refreshRanking() async {
     setState(() {
       _rankingLoading = true;
       _rankingError = null;
@@ -145,16 +155,13 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
     try {
       final ranking = await _rankingRepository.refreshRanking();
       if (mounted) setState(() => _ranking = ranking);
+      return _AcademicRefreshResult.success;
     } on AcademicAuthException {
-      if (!mounted) return;
-      setState(() => _rankingError = '登录已失效');
-      if (notifyOnFailure) _showSnack('教务登录已失效，排名未同步');
+      if (mounted) setState(() => _rankingError = '登录已失效');
+      return _AcademicRefreshResult.loginRequired;
     } on Object {
-      if (!mounted) return;
-      setState(() => _rankingError = '获取失败');
-      if (notifyOnFailure) {
-        _showSnack(_ranking == null ? '排名获取失败，可点击排名区域重试' : '排名同步失败，已保留上次的数据');
-      }
+      if (mounted) setState(() => _rankingError = '获取失败');
+      return _AcademicRefreshResult.failed;
     } finally {
       if (mounted) setState(() => _rankingLoading = false);
     }
@@ -172,8 +179,8 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
         if (mainId != null) _expandedNodes.add(mainId);
       }
       _loadError = null;
+      _loading = false;
     });
-    _showSnack('学业信息已同步');
   }
 
   void _showSnack(String message) {
@@ -264,9 +271,6 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
         _showRanking = settings.showRanking;
         if (rankingJustEnabled) _showCollegeRanking = true;
       });
-      if (settings.showRanking && _ranking == null) {
-        unawaited(_refreshRanking(notifyOnFailure: true));
-      }
     } on Object {
       if (mounted) _showSnack('显示设置保存失败，请重试');
     }
@@ -786,7 +790,7 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
         behavior: HitTestBehavior.opaque,
         onTap: () {
           if (_rankingError != null && ranking == null) {
-            unawaited(_refreshRanking(notifyOnFailure: true));
+            unawaited(_refresh());
           } else {
             setState(() => _showCollegeRanking = !_showCollegeRanking);
           }
@@ -795,7 +799,7 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
           message: ranking == null
               ? _rankingError == null
                   ? '点击切换学院和专业排名'
-                  : '点击重试获取排名'
+                  : '点击重新同步学业信息'
               : '${ranking.academicYear} ${ranking.term} · '
                   '同步于 ${_dateText(ranking.fetchedAt)}',
           child: Column(
@@ -959,6 +963,8 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
         '${two(date.hour)}:${two(date.minute)}';
   }
 }
+
+enum _AcademicRefreshResult { success, failed, loginRequired }
 
 enum _ProgressMenuAction { displaySettings, refreshProgress }
 

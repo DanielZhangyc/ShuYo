@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -98,6 +99,48 @@ class _FailingRankingRepository extends AcademicRankingRepository {
   @override
   Future<AcademicRanking> refreshRanking() async =>
       throw const AcademicApiException('ranking unavailable');
+}
+
+class _RefreshingProgressRepository extends AcademicProgressRepository {
+  _RefreshingProgressRepository({required this.fetch, this.cached});
+
+  final Future<AcademicProgress> Function() fetch;
+  final AcademicProgress? cached;
+  int requests = 0;
+
+  @override
+  Future<AcademicProgress?> loadCachedProgress() async => cached;
+
+  @override
+  Future<AcademicProgress> refreshProgress() {
+    requests++;
+    return fetch();
+  }
+}
+
+class _RefreshingRankingRepository extends AcademicRankingRepository {
+  _RefreshingRankingRepository({required this.fetch, this.cached});
+
+  final Future<AcademicRanking> Function() fetch;
+  final AcademicRanking? cached;
+  int requests = 0;
+
+  @override
+  Future<AcademicRanking?> loadCachedRanking() async => cached;
+
+  @override
+  Future<AcademicRanking> refreshRanking() {
+    requests++;
+    return fetch();
+  }
+}
+
+Future<void> _tapRefresh(WidgetTester tester) async {
+  await tester.tap(find.byTooltip('更多'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('刷新学业信息'));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
 }
 
 const _index = '''
@@ -220,6 +263,71 @@ void main() {
         requests
             .where((request) => request.url.path.endsWith('cxZgzsInfo.html')),
         hasLength(1));
+  });
+
+  test(
+      'QR identity lookup reads only the index without fetching or caching data',
+      () async {
+    final requests = <http.Request>[];
+    final api = AcademicProgressApiClient(
+      authService: _AuthWithCookie(),
+      httpClient: MockClient((request) async {
+        requests.add(request);
+        return http.Response(
+          '<form id="form"><input name="xh_id" value=" QR_ACCOUNT "></form>',
+          200,
+        );
+      }),
+    );
+    expect(await api.fetchAuthenticatedStudentId(), 'QR_ACCOUNT');
+    expect(requests, hasLength(1));
+    expect(requests.single.method, 'GET');
+    expect(requests.single.headers['cookie'], 'JSESSIONID=test');
+    final preferences = await SharedPreferences.getInstance();
+    expect(
+        preferences.containsKey(AcademicProgressRepository.cacheKey), isFalse);
+    expect(
+        preferences.containsKey(AcademicRankingRepository.cacheKey), isFalse);
+  });
+
+  test('QR identity lookup rejects missing identity and expired login',
+      () async {
+    var response = '<form id="form"></form>';
+    final api = AcademicProgressApiClient(
+      authService: _AuthWithCookie(),
+      httpClient: MockClient((_) async => http.Response(response, 200)),
+    );
+    await expectLater(api.fetchAuthenticatedStudentId(),
+        throwsA(isA<AcademicApiException>()));
+    response = '<html>newsso.shu.edu.cn/oauth2/login</html>';
+    await expectLater(api.fetchAuthenticatedStudentId(),
+        throwsA(isA<AcademicAuthException>()));
+  });
+
+  testWidgets('changing ranking visibility does not fetch missing ranking',
+      (tester) async {
+    final ranking = _RefreshingRankingRepository(
+      fetch: () async => DemoAcademicRankingRepository().ranking,
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: AcademicProgressPage(
+        repository: DemoAcademicProgressRepository(),
+        rankingRepository: ranking,
+        onLoginRequired: () async {},
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('显示设置'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('显示排名'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('完成'));
+    await tester.pumpAndSettle();
+    expect(ranking.requests, 0);
+    expect(find.text('学院排名'), findsOneWidget);
+    expect(find.text('暂无排名'), findsOneWidget);
   });
 
   testWidgets('browses categories and refreshes from the More menu',
@@ -448,11 +556,174 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('学业总览'), findsOneWidget);
     expect(find.text('学院排名'), findsOneWidget);
+    expect(find.text('暂无排名'), findsOneWidget);
+    await _tapRefresh(tester);
+    await tester.pumpAndSettle();
     expect(find.text('获取失败'), findsOneWidget);
     await tester.tap(find.text('学院排名'));
     await tester.pumpAndSettle();
     expect(find.text('获取失败'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'refresh starts both requests with ranking hidden and shows progress early',
+      (tester) async {
+    final progressResult = Completer<AcademicProgress>();
+    final rankingResult = Completer<AcademicRanking>();
+    final progress =
+        _RefreshingProgressRepository(fetch: () => progressResult.future);
+    final ranking =
+        _RefreshingRankingRepository(fetch: () => rankingResult.future);
+    await tester.pumpWidget(MaterialApp(
+      home: AcademicProgressPage(
+        repository: progress,
+        rankingRepository: ranking,
+        onLoginRequired: () async {},
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(progress.requests, 0);
+    expect(ranking.requests, 0);
+    await _tapRefresh(tester);
+    expect(progress.requests, 1);
+    expect(ranking.requests, 1);
+    progressResult.complete(DemoAcademicProgressRepository().progress);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('学业总览'), findsOneWidget);
+    expect(find.text('学院排名'), findsNothing);
+    rankingResult.completeError(const AcademicApiException('ranking offline'));
+    await tester.pumpAndSettle();
+    expect(find.text('学业总览'), findsOneWidget);
+    expect(find.text('学业信息已同步，排名获取失败'), findsOneWidget);
+  });
+
+  testWidgets('progress failure keeps its cache while new ranking is displayed',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      AcademicProgressDisplaySettingsService.showRankingKey: true,
+    });
+    final progress = _RefreshingProgressRepository(
+      cached: DemoAcademicProgressRepository().progress,
+      fetch: () async => throw const AcademicApiException('progress offline'),
+    );
+    final ranking = _RefreshingRankingRepository(
+      fetch: () async => DemoAcademicRankingRepository().ranking,
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: AcademicProgressPage(
+        repository: progress,
+        rankingRepository: ranking,
+        onLoginRequired: () async {},
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(ranking.requests, 0);
+    await _tapRefresh(tester);
+    await tester.pumpAndSettle();
+    expect(find.text('学业总览'), findsOneWidget);
+    expect(find.text('42/260'), findsOneWidget);
+    expect(find.text('排名已同步，学业信息获取失败'), findsOneWidget);
+  });
+
+  testWidgets('both failed requests preserve cached progress and ranking',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      AcademicProgressDisplaySettingsService.showRankingKey: true,
+    });
+    final progress = _RefreshingProgressRepository(
+      cached: DemoAcademicProgressRepository().progress,
+      fetch: () async => throw const AcademicApiException('progress offline'),
+    );
+    final ranking = _RefreshingRankingRepository(
+      cached: DemoAcademicRankingRepository().ranking,
+      fetch: () async => throw const AcademicApiException('ranking offline'),
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: AcademicProgressPage(
+        repository: progress,
+        rankingRepository: ranking,
+        onLoginRequired: () async {},
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await _tapRefresh(tester);
+    await tester.pumpAndSettle();
+    expect(find.text('学业总览'), findsOneWidget);
+    expect(find.text('42/260'), findsOneWidget);
+    expect(find.text('旧数据'), findsOneWidget);
+    expect(find.text('学业信息同步失败'), findsOneWidget);
+  });
+
+  for (final restoreSession in [false, true]) {
+    testWidgets(
+        'both expired requests open login once without retry, restored=$restoreSession',
+        (tester) async {
+      var authenticated = false;
+      var logins = 0;
+      final progress = _RefreshingProgressRepository(
+        cached: DemoAcademicProgressRepository().progress,
+        fetch: () async {
+          if (!authenticated) throw const AcademicAuthException();
+          return DemoAcademicProgressRepository().progress;
+        },
+      );
+      final ranking = _RefreshingRankingRepository(fetch: () async {
+        if (!authenticated) throw const AcademicAuthException();
+        return DemoAcademicRankingRepository().ranking;
+      });
+      await tester.pumpWidget(MaterialApp(
+        home: AcademicProgressPage(
+          repository: progress,
+          rankingRepository: ranking,
+          onLoginRequired: () async {
+            logins++;
+            authenticated = restoreSession;
+          },
+        ),
+      ));
+      await tester.pumpAndSettle();
+      await _tapRefresh(tester);
+      await tester.pumpAndSettle();
+      expect(logins, 1);
+      expect(progress.requests, 1);
+      expect(ranking.requests, 1);
+      expect(find.text('学业总览'), findsOneWidget);
+      if (restoreSession) {
+        await _tapRefresh(tester);
+        await tester.pumpAndSettle();
+        expect(progress.requests, 2);
+        expect(ranking.requests, 2);
+        expect(logins, 1);
+        expect(find.text('学业信息已同步'), findsOneWidget);
+      }
+    });
+  }
+
+  testWidgets('ranking expiration opens login and retains successful progress',
+      (tester) async {
+    var logins = 0;
+    final progress = _RefreshingProgressRepository(
+      fetch: () async => DemoAcademicProgressRepository().progress,
+    );
+    final ranking = _RefreshingRankingRepository(
+      fetch: () async => throw const AcademicAuthException(),
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: AcademicProgressPage(
+        repository: progress,
+        rankingRepository: ranking,
+        onLoginRequired: () async => logins++,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await _tapRefresh(tester);
+    await tester.pumpAndSettle();
+    expect(logins, 1);
+    expect(progress.requests, 1);
+    expect(ranking.requests, 1);
+    expect(find.text('学业总览'), findsOneWidget);
   });
 
   testWidgets('four overview metrics fit a narrow phone', (tester) async {

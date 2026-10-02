@@ -32,6 +32,26 @@ class AcademicProgressApiClient {
   final AcademicAuthService _authService;
   final http.Client _httpClient;
 
+  /// QR authentication has no typed username. Resolve only the authenticated
+  /// identity; do not fetch course details or update any academic data cache.
+  Future<String> fetchAuthenticatedStudentId() async {
+    final indexUri = AcademicUrlResolver.uri(_indexPath);
+    final cookie = await _authService.cookieHeader(targetUri: indexUri);
+    if (cookie == null || cookie.isEmpty) {
+      throw const AcademicAuthException('请先登录上大校园账户');
+    }
+    final response = await HttpTimeout.request(
+      _httpClient.get(indexUri, headers: _headers(cookie, indexUri)),
+      message: '账户信息请求超时，请重新尝试登录',
+    );
+    _ensureResponse(response);
+    final studentId = AcademicProgressParser.parseStudentId(response.body);
+    if (studentId.isEmpty) {
+      throw const AcademicApiException('未能确认登录学号，请重新尝试登录');
+    }
+    return studentId;
+  }
+
   Future<AcademicProgress> fetchProgress() async {
     final indexUri = AcademicUrlResolver.uri(_indexPath);
     final cookie = await _authService.cookieHeader(targetUri: indexUri);

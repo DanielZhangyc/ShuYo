@@ -63,13 +63,13 @@ class AcademicAuthService {
   /// Clears every piece of state that makes the campus account appear signed
   /// in. Schedule data and WebVPN cookies are intentionally
   /// outside this account boundary.
-  Future<void> clearAccount() async {
+  Future<void> clearAccount({bool sessionExpired = false}) async {
     try {
       await clearCookies();
     } finally {
       // Account identity must never survive a confirmed invalid session, even
       // if an individual platform-cookie operation fails.
-      await _accountStore.clear();
+      await _accountStore.clear(sessionExpired: sessionExpired);
     }
   }
 

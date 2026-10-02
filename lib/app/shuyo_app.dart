@@ -108,6 +108,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
           return StartupOnboarding(
             initiallyCompleted: demo || data.onboardingCompleted,
             initialAcademicLoggedIn: demo || data.hasAcademicSession,
+            initialAcademicSessionExpired: !demo && data.academicSessionExpired,
             onAcademicLoginCompleted: () {
               setState(() => _academicLoginSignal++);
             },
@@ -122,6 +123,8 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
               onFollowSystemThemeChanged: _changeFollowSystemTheme,
               academicLoginSignal: _academicLoginSignal,
               initialHasAcademicSession: demo || data.hasAcademicSession,
+              initialAcademicSessionExpired:
+                  !demo && data.academicSessionExpired,
               initialAcademicStudentId: demo
                   ? data.initialScheduleState?.schedule?.term.studentId
                   : data.academicStudentId,
@@ -169,6 +172,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
       useWebVpn: networkSettings.webVpnEnabled,
     );
     final academicAccountStore = AcademicAccountStore();
+    await academicAccountStore.rememberExistingAccounts();
     if (await academicAccountStore.hasLegacyExpiredAccount()) {
       await AcademicAuthService().clearAccount();
     }
@@ -181,6 +185,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
     return _StartupData(
       webVpnEnabled: networkSettings.webVpnEnabled,
       hasAcademicSession: academicStudentId != null,
+      academicSessionExpired: await academicAccountStore.isSessionExpired(),
       academicStudentId: academicStudentId,
       onboardingCompleted: onboardingCompleted,
       demoMode: false,
@@ -325,6 +330,7 @@ class _StartupData {
   const _StartupData({
     required this.webVpnEnabled,
     required this.hasAcademicSession,
+    this.academicSessionExpired = false,
     required this.academicStudentId,
     required this.onboardingCompleted,
     required this.demoMode,
@@ -336,6 +342,7 @@ class _StartupData {
 
   final bool webVpnEnabled;
   final bool hasAcademicSession;
+  final bool academicSessionExpired;
   final String? academicStudentId;
   final bool onboardingCompleted;
   final bool demoMode;

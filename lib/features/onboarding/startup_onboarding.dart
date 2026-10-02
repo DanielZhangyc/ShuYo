@@ -11,6 +11,7 @@ import '../auth/native_login_page.dart';
 
 class StartupOnboardingController extends ChangeNotifier {
   bool _academicLoggedIn = false;
+  bool _academicSessionExpired = false;
   VoidCallback? _onDismissAccountManager;
   Future<bool> Function()? _onAcademicLogout;
   Future<bool> Function(bool enabled)? _onWebVpnChanged;
@@ -23,6 +24,7 @@ class StartupOnboardingController extends ChangeNotifier {
   bool _disposed = false;
 
   bool get academicLoggedIn => _academicLoggedIn;
+  bool get academicSessionExpired => _academicSessionExpired;
   int get openRequest => _openRequest;
   bool get accountManagerOpen => _accountManagerOpen;
   bool get webVpnEnabled => _webVpnEnabled;
@@ -30,11 +32,13 @@ class StartupOnboardingController extends ChangeNotifier {
 
   void openAccountManager({
     required bool academicLoggedIn,
+    bool academicSessionExpired = false,
     bool webVpnEnabled = false,
     WebVpnServiceStatus webVpnServiceStatus =
         const WebVpnServiceStatus.unknown(),
   }) {
     _academicLoggedIn = academicLoggedIn;
+    _academicSessionExpired = !academicLoggedIn && academicSessionExpired;
     _webVpnEnabled = webVpnEnabled;
     _webVpnServiceStatus = webVpnServiceStatus;
     _openRequest++;
@@ -56,17 +60,21 @@ class StartupOnboardingController extends ChangeNotifier {
 
   void updateAccountStatus({
     required bool academicLoggedIn,
+    bool academicSessionExpired = false,
     bool? webVpnEnabled,
     WebVpnServiceStatus? webVpnServiceStatus,
   }) {
     final nextEnabled = webVpnEnabled ?? _webVpnEnabled;
     final nextStatus = webVpnServiceStatus ?? _webVpnServiceStatus;
     if (_academicLoggedIn == academicLoggedIn &&
+        _academicSessionExpired ==
+            (!academicLoggedIn && academicSessionExpired) &&
         _webVpnEnabled == nextEnabled &&
         identical(_webVpnServiceStatus, nextStatus)) {
       return;
     }
     _academicLoggedIn = academicLoggedIn;
+    _academicSessionExpired = !academicLoggedIn && academicSessionExpired;
     _webVpnEnabled = nextEnabled;
     _webVpnServiceStatus = nextStatus;
     _notifyListenersSafely();
@@ -122,6 +130,7 @@ class StartupOnboarding extends StatefulWidget {
     required this.child,
     required this.initiallyCompleted,
     required this.initialAcademicLoggedIn,
+    this.initialAcademicSessionExpired = false,
     required this.onAcademicLoginCompleted,
     this.onDemoLogin,
     this.onAcademicLogout,
@@ -133,6 +142,7 @@ class StartupOnboarding extends StatefulWidget {
   final Widget child;
   final bool initiallyCompleted;
   final bool initialAcademicLoggedIn;
+  final bool initialAcademicSessionExpired;
   final VoidCallback onAcademicLoginCompleted;
   final Future<void> Function()? onDemoLogin;
   final Future<bool> Function()? onAcademicLogout;
@@ -158,6 +168,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
   bool _webVpnExpanded = false;
   bool _changingWebVpn = false;
   late bool _academicLoggedIn = widget.initialAcademicLoggedIn;
+  late bool _academicSessionExpired = widget.initialAcademicSessionExpired;
   late bool _webVpnEnabled = widget.controller.webVpnEnabled;
   late WebVpnServiceStatus _webVpnServiceStatus =
       widget.controller.webVpnServiceStatus;
@@ -208,6 +219,10 @@ class _StartupOnboardingState extends State<StartupOnboarding>
     if (widget.initialAcademicLoggedIn != oldWidget.initialAcademicLoggedIn) {
       _academicLoggedIn = widget.initialAcademicLoggedIn;
     }
+    if (widget.initialAcademicSessionExpired !=
+        oldWidget.initialAcademicSessionExpired) {
+      _academicSessionExpired = widget.initialAcademicSessionExpired;
+    }
   }
 
   void _handleControllerChange() {
@@ -216,6 +231,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
     if (!shouldOpen) {
       setState(() {
         _academicLoggedIn = widget.controller.academicLoggedIn;
+        _academicSessionExpired = widget.controller.academicSessionExpired;
         _webVpnEnabled = widget.controller.webVpnEnabled;
         _webVpnServiceStatus = widget.controller.webVpnServiceStatus;
       });
@@ -227,6 +243,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
       _accountManagerMode = true;
       _page = 2;
       _academicLoggedIn = widget.controller.academicLoggedIn;
+      _academicSessionExpired = widget.controller.academicSessionExpired;
       _webVpnEnabled = widget.controller.webVpnEnabled;
       _webVpnServiceStatus = widget.controller.webVpnServiceStatus;
     });
@@ -314,6 +331,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
     if (result != NativeLoginResult.authenticated || !mounted) return;
     setState(() {
       _academicLoggedIn = true;
+      _academicSessionExpired = false;
     });
     widget.onAcademicLoginCompleted();
     if (!_accountManagerMode && mounted) {
@@ -676,7 +694,14 @@ class _StartupOnboardingState extends State<StartupOnboarding>
             icon: Icons.school_outlined,
             title: '上大校园账户',
             description: '用于访问课程表等教务服务',
-            statusLabel: _academicLoggedIn ? '已登录' : null,
+            statusLabel: _academicLoggedIn
+                ? '已登录'
+                : _academicSessionExpired
+                    ? '登录已失效'
+                    : null,
+            statusColor: _academicSessionExpired
+                ? Theme.of(context).colorScheme.error
+                : null,
             onTap: _academicLoggedIn
                 ? (widget.onAcademicLogout == null &&
                         !widget.controller.canLogoutAcademic

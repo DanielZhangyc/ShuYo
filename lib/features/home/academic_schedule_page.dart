@@ -319,7 +319,6 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     if (!mounted) {
       return;
     }
-    _showSnack('校园账户登录信息已过期，请重新登录');
     await widget.onLoginRequired();
     if (!mounted) {
       return;
@@ -1176,35 +1175,38 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
                 top: Radius.circular(8),
               ),
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ListTile(
-                  leading: _refreshing
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 3),
-                        )
-                      : const Icon(Icons.refresh),
-                  title: const Text('刷新课表'),
-                  enabled: !_refreshing,
-                  onTap: () => Navigator.of(context)
-                      .pop(_ScheduleMenuAction.refreshSchedule),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.notifications_none),
-                  title: const Text('通知设置'),
-                  onTap: () =>
-                      Navigator.of(context).pop(_ScheduleMenuAction.settings),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.palette_outlined),
-                  title: const Text('显示设置'),
-                  onTap: () => Navigator.of(context)
-                      .pop(_ScheduleMenuAction.displaySettings),
-                ),
-              ],
+            child: Material(
+              color: Colors.transparent,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    leading: _refreshing
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 3),
+                          )
+                        : const Icon(Icons.refresh),
+                    title: const Text('刷新课表'),
+                    enabled: !_refreshing,
+                    onTap: () => Navigator.of(context)
+                        .pop(_ScheduleMenuAction.refreshSchedule),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.notifications_none),
+                    title: const Text('通知设置'),
+                    onTap: () =>
+                        Navigator.of(context).pop(_ScheduleMenuAction.settings),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.palette_outlined),
+                    title: const Text('显示设置'),
+                    onTap: () => Navigator.of(context)
+                        .pop(_ScheduleMenuAction.displaySettings),
+                  ),
+                ],
+              ),
             ),
           ),
         );

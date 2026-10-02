@@ -7,6 +7,7 @@ import '../../core/wecom_constants.dart';
 import '../../data/services/academic_native_auth_service.dart';
 import '../../data/services/academic_account_store.dart';
 import '../../data/services/academic_auth_service.dart';
+import '../../data/services/academic_progress_api_client.dart';
 import '../../data/services/verification_delivery_service.dart';
 import '../../data/services/wecom_auth_service.dart';
 import '../../data/demo/demo_session.dart';
@@ -617,7 +618,9 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
         // A callback that cannot produce a valid direct session must leave the
         // next attempt in the same clean state as an explicit campus logout.
         try {
-          await auth.clearAccount();
+          await auth.clearAccount(
+            sessionExpired: await AcademicAccountStore().isSessionExpired(),
+          );
         } on Object catch (error, stackTrace) {
           if (kDebugMode) {
             debugPrint('[SHU_AUTH] failed-login cleanup failed: $error');
@@ -635,7 +638,10 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
       return;
     }
     if (widget.destination == NativeLoginDestination.academic) {
-      await AcademicAccountStore().saveStudentId(_studentId.text);
+      final studentId = weComRedeem != null
+          ? await AcademicProgressApiClient().fetchAuthenticatedStudentId()
+          : _studentId.text;
+      await AcademicAccountStore().saveStudentId(studentId);
     }
     if (mounted) Navigator.of(context).pop(NativeLoginResult.authenticated);
   }

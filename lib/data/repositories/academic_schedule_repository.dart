@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/academic_schedule.dart';
+import '../services/academic_account_store.dart';
 import '../services/academic_schedule_api_client.dart';
 
 class ScheduleWeekState {
@@ -60,7 +61,12 @@ class AcademicScheduleRepository {
     if (decoded is! Map<String, dynamic>) {
       return null;
     }
-    return AcademicSchedule.fromJson(decoded);
+    final schedule = AcademicSchedule.fromJson(decoded);
+    final studentId = await AcademicAccountStore(
+      preferencesLoader: _preferencesLoader,
+    ).loadDataStudentId();
+    if (studentId != null && schedule.term.studentId != studentId) return null;
+    return schedule;
   }
 
   Future<AcademicScheduleCacheState> loadCachedState({DateTime? now}) async {

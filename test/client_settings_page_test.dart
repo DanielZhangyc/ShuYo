@@ -193,7 +193,7 @@ Future<void> _pumpSettings(
 
 class _FakeAcademicAuthService implements AcademicAuthService {
   @override
-  Future<void> clearAccount() async {}
+  Future<void> clearAccount({bool sessionExpired = false}) async {}
 
   @override
   Future<Set<String>> clearCookies() async => {};
