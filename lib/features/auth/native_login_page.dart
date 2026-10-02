@@ -7,6 +7,7 @@ import '../../core/wecom_constants.dart';
 import '../../data/services/academic_native_auth_service.dart';
 import '../../data/services/academic_account_store.dart';
 import '../../data/services/academic_auth_service.dart';
+import '../../data/services/academic_progress_api_client.dart';
 import '../../data/services/verification_delivery_service.dart';
 import '../../data/services/wecom_auth_service.dart';
 import '../../data/demo/demo_session.dart';
@@ -87,9 +88,7 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
         if (!didPop && !_busy) setState(() => _step--);
       },
       child: Scaffold(
-        appBar: AppBar(
-          title: _step == 0 ? null : const Text('验证身份'),
-        ),
+        appBar: AppBar(),
         body: SafeArea(
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 260),
@@ -299,64 +298,125 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
 
   Widget _verification() {
     final methods = _challenge?.methods ?? const {};
+    final colors = context.shuyoColors;
     return Form(
       key: _verificationKey,
-      child: ListView(
-        key: const ValueKey('verification'),
-        padding: const EdgeInsets.all(24),
-        children: [
-          Text('二步验证',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          Text(_methodHint(methods)),
-          const SizedBox(height: 24),
-          SegmentedButton<AcademicVerificationMethod>(
-            segments: [
-              if (methods.containsKey(AcademicVerificationMethod.wecom))
-                const ButtonSegment(
-                    value: AcademicVerificationMethod.wecom,
-                    label: Text('企业微信'),
-                    icon: Icon(Icons.business_center_outlined)),
-              if (methods.containsKey(AcademicVerificationMethod.sms))
-                const ButtonSegment(
-                    value: AcademicVerificationMethod.sms,
-                    label: Text('手机号'),
-                    icon: Icon(Icons.sms_outlined)),
-            ],
-            selected: {_method},
-            onSelectionChanged: _busy
-                ? null
-                : (value) => _selectVerificationMethod(value.first),
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          key: const ValueKey('verification'),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 440),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 55, 24, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        '二步验证',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineLarge
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 8),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 28),
+                        child: Text(
+                          '验证码将${_methodHint(methods)}',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: colors.textSecondary),
+                        ),
+                      ),
+                      if (methods.length > 1) ...[
+                        const SizedBox(height: 24),
+                        SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<AcademicVerificationMethod>(
+                            expandedInsets: EdgeInsets.zero,
+                            showSelectedIcon: false,
+                            segments: [
+                              if (methods.containsKey(
+                                  AcademicVerificationMethod.wecom))
+                                const ButtonSegment(
+                                  value: AcademicVerificationMethod.wecom,
+                                  label: Text('企业微信'),
+                                ),
+                              if (methods
+                                  .containsKey(AcademicVerificationMethod.sms))
+                                const ButtonSegment(
+                                  value: AcademicVerificationMethod.sms,
+                                  label: Text('手机号'),
+                                ),
+                            ],
+                            selected: {_method},
+                            onSelectionChanged: _busy
+                                ? null
+                                : (value) =>
+                                    _selectVerificationMethod(value.first),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: colors.surface,
+                          border: Border.all(color: colors.border),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 16, right: 8),
+                          child: TextFormField(
+                            controller: _code,
+                            enabled: !_busy,
+                            keyboardType: TextInputType.number,
+                            autofillHints: const [AutofillHints.oneTimeCode],
+                            maxLength: 6,
+                            textInputAction: TextInputAction.done,
+                            onFieldSubmitted: (_) => _verifyCode(),
+                            decoration: _credentialDecoration(
+                              suffixIcon: TextButton(
+                                onPressed:
+                                    _busy || _countdown > 0 ? null : _sendCode,
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                  ),
+                                ),
+                                child: Text(_countdown > 0
+                                    ? '重发 ${_countdown}s'
+                                    : '发送验证码'),
+                              ),
+                            ).copyWith(
+                              hintText: '验证码',
+                              counterText: '',
+                            ),
+                            validator: (value) =>
+                                value?.trim().length == 6 ? null : '请输入6位验证码',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      FilledButton(
+                        onPressed: _busy ? null : _verifyCode,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(50),
+                        ),
+                        child: _buttonContent('完成验证'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
-          const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: _busy || _countdown > 0 ? null : _sendCode,
-            icon: const Icon(Icons.send_outlined),
-            label: Text(_countdown > 0 ? '${_countdown}s 后可重新发送' : '发送验证码'),
-          ),
-          const SizedBox(height: 16),
-          TextFormField(
-            controller: _code,
-            enabled: !_busy,
-            keyboardType: TextInputType.number,
-            maxLength: 6,
-            textInputAction: TextInputAction.done,
-            onFieldSubmitted: (_) => _verifyCode(),
-            decoration: const InputDecoration(
-                labelText: '验证码', prefixIcon: Icon(Icons.password_outlined)),
-            validator: (value) => value?.trim().length == 6 ? null : '请输入6位验证码',
-          ),
-          const SizedBox(height: 8),
-          FilledButton(
-            onPressed: _busy ? null : _verifyCode,
-            style:
-                FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
-            child: _buttonContent('完成验证'),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -558,7 +618,9 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
         // A callback that cannot produce a valid direct session must leave the
         // next attempt in the same clean state as an explicit campus logout.
         try {
-          await auth.clearAccount();
+          await auth.clearAccount(
+            sessionExpired: await AcademicAccountStore().isSessionExpired(),
+          );
         } on Object catch (error, stackTrace) {
           if (kDebugMode) {
             debugPrint('[SHU_AUTH] failed-login cleanup failed: $error');
@@ -576,7 +638,10 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
       return;
     }
     if (widget.destination == NativeLoginDestination.academic) {
-      await AcademicAccountStore().saveStudentId(_studentId.text);
+      final studentId = weComRedeem != null
+          ? await AcademicProgressApiClient().fetchAuthenticatedStudentId()
+          : _studentId.text;
+      await AcademicAccountStore().saveStudentId(studentId);
     }
     if (mounted) Navigator.of(context).pop(NativeLoginResult.authenticated);
   }

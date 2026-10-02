@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuyo/data/models/academic_schedule.dart';
 import 'package:shuyo/data/repositories/academic_schedule_repository.dart';
 import 'package:shuyo/data/services/academic_auth_service.dart';
+import 'package:shuyo/data/services/academic_account_store.dart';
 import 'package:shuyo/data/services/academic_schedule_api_client.dart';
 import 'package:shuyo/data/services/academic_schedule_widget_service.dart';
 import 'package:timezone/data/latest.dart' as timezone_data;
@@ -77,6 +78,35 @@ void main() {
     }
   });
 
+  test(
+      'cached schedule remains after expiration and is hidden for another account',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repository = AcademicScheduleRepository();
+    final ownedSchedule = _schedule.copyWith(
+        term: const AcademicTerm(
+      yearCode: '2025',
+      termCode: '16',
+      academicYearName: '2025-2026',
+      termName: '春',
+      studentName: '',
+      studentId: 'A',
+      className: '',
+    ));
+    await repository.saveCachedSchedule(ownedSchedule);
+    final account = AcademicAccountStore();
+    await account.saveStudentId('A');
+    await account.clear(sessionExpired: true);
+    expect((await repository.loadCachedSchedule())?.term.studentId, 'A');
+    await account.saveStudentId('OTHER');
+    expect(await repository.loadCachedSchedule(), isNull);
+    await account.clear(sessionExpired: true);
+    expect(await repository.loadCachedSchedule(), isNull);
+    // With no known data owner, legacy anonymous fixtures remain readable.
+    SharedPreferences.setMockInitialValues({});
+    await repository.saveCachedSchedule(_schedule);
+    expect(await repository.loadCachedSchedule(), isNotNull);
+  });
   test('first schedule import starts at week one', () async {
     SharedPreferences.setMockInitialValues({
       'academic.schedule.anchorWeek': 7,
@@ -195,7 +225,7 @@ class _FakeAcademicScheduleApiClient extends AcademicScheduleApiClient {
 
 class _FakeAcademicAuthService implements AcademicAuthService {
   @override
-  Future<void> clearAccount() async {}
+  Future<void> clearAccount({bool sessionExpired = false}) async {}
 
   @override
   Future<Set<String>> clearCookies() async => {};

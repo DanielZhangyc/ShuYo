@@ -3,10 +3,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shuyo/features/home/home_dashboard_page.dart';
 
 void main() {
-  Widget page({required bool loggedIn, bool syncing = false}) => MaterialApp(
+  Widget page(
+          {required bool loggedIn,
+          bool syncing = false,
+          bool expired = false}) =>
+      MaterialApp(
         home: Scaffold(
           body: HomeDashboardPage(
             hasAcademicAccount: loggedIn,
+            academicSessionExpired: expired,
             academicStudentId: loggedIn ? '25120000' : null,
             isAcademicLoginCompleting: syncing,
             onLogin: () {},
@@ -34,5 +39,14 @@ void main() {
     await tester.pumpWidget(page(loggedIn: false));
     expect(find.text('立即登录'), findsOneWidget);
     expect(find.text('登录后同步个人数据'), findsOneWidget);
+  });
+
+  testWidgets(
+      'expired account invites reauthentication while retaining local data',
+      (tester) async {
+    await tester.pumpWidget(page(loggedIn: false, expired: true));
+    expect(find.text('重新登录'), findsOneWidget);
+    expect(find.text('登录已失效，本地数据仍可查看'), findsOneWidget);
+    expect(find.text('今日无课'), findsOneWidget);
   });
 }

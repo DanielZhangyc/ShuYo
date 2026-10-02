@@ -13,6 +13,8 @@ import '../data/demo/demo_data_bundle.dart';
 import '../data/demo/demo_repositories.dart';
 import '../data/models/client_backend.dart';
 import '../data/repositories/academic_schedule_repository.dart';
+import '../data/repositories/academic_progress_repository.dart';
+import '../data/repositories/academic_ranking_repository.dart';
 import '../data/repositories/announcement_repository.dart';
 import '../data/repositories/classroom_repository.dart';
 import '../data/repositories/client_backend_repository.dart';
@@ -27,6 +29,7 @@ import '../data/services/client_settings_service.dart';
 import '../data/services/webvpn_session_store.dart';
 import '../features/auth/native_login_page.dart';
 import '../features/home/academic_schedule_page.dart';
+import '../features/home/academic_progress_page.dart';
 import '../features/home/announcements_page.dart';
 import '../features/home/course_rating_page.dart';
 import '../features/home/empty_classroom_page.dart';
@@ -50,6 +53,11 @@ class AppShell extends StatefulWidget {
     required this.initialHasAcademicSession,
     required this.initialAcademicStudentId,
     required this.onboardingController,
+    this.initialAcademicSessionExpired = false,
+    this.scheduleRepository,
+    this.progressRepository,
+    this.rankingRepository,
+    this.academicAuthService,
     this.initialOpenSchedule = false,
     this.initialScheduleState,
     this.initialScheduleDisplayState,
@@ -68,6 +76,11 @@ class AppShell extends StatefulWidget {
   final bool initialHasAcademicSession;
   final String? initialAcademicStudentId;
   final StartupOnboardingController onboardingController;
+  final bool initialAcademicSessionExpired;
+  final AcademicScheduleRepository? scheduleRepository;
+  final AcademicProgressRepository? progressRepository;
+  final AcademicRankingRepository? rankingRepository;
+  final AcademicAuthService? academicAuthService;
   final bool initialOpenSchedule;
   final AcademicScheduleCacheState? initialScheduleState;
   final AcademicScheduleDisplayState? initialScheduleDisplayState;
@@ -86,11 +99,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   int _tabIndex = 0;
   bool _scheduleTabInitialized = false;
+  bool _progressTabInitialized = false;
+  int _progressDataRevision = 0;
   int _scheduleDataRevision = 0;
   late bool _webVpnEnabled = widget.initialWebVpnEnabled;
   late bool _hasAcademicSession = widget.initialHasAcademicSession;
   late String? _academicStudentId = widget.initialAcademicStudentId;
+  late bool _academicSessionExpired = widget.initialAcademicSessionExpired;
+  bool _handlingInvalidAcademicSession = false;
+  bool _completingAcademicLogin = false;
   bool _syncingAcademicSchedule = false;
+  bool _syncingAcademicExtras = false;
   bool _loadingScheduleSummary = false;
   bool _loadingAnnouncementSummary = false;
   bool _checkingClientBackendPrompts = false;
@@ -106,6 +125,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   StreamSubscription<Uri?>? _widgetClickSubscription;
 
   late final AcademicScheduleRepository _scheduleRepository;
+  late final AcademicProgressRepository _progressRepository;
+  late final AcademicRankingRepository _rankingRepository;
+  late final AcademicAuthService _academicAuthService =
+      widget.academicAuthService ?? AcademicAuthService();
   late final AcademicScheduleNotificationService _scheduleNotificationService;
   late final AcademicScheduleWidgetService _scheduleWidgetService;
   late final AnnouncementRepository _announcementRepository;
@@ -123,9 +146,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _scheduleTabInitialized = true;
     }
     final demo = widget.demoData;
-    _scheduleRepository = widget.isDemo && demo != null
-        ? DemoAcademicScheduleRepository(demo.schedule)
-        : AcademicScheduleRepository();
+    _scheduleRepository = widget.scheduleRepository ??
+        (widget.isDemo && demo != null
+            ? DemoAcademicScheduleRepository(demo.schedule)
+            : AcademicScheduleRepository());
+    _progressRepository = widget.progressRepository ??
+        (widget.isDemo
+            ? DemoAcademicProgressRepository()
+            : AcademicProgressRepository());
+    _rankingRepository = widget.rankingRepository ??
+        (widget.isDemo
+            ? DemoAcademicRankingRepository()
+            : AcademicRankingRepository());
     _scheduleNotificationService =
         AcademicScheduleNotificationService(repository: _scheduleRepository);
     _scheduleWidgetService =
@@ -212,7 +244,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    const titles = ['首页', '评教', '地图', '日程'];
+    const titles = ['首页', '评教', '学业', '日程'];
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -222,7 +254,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         body: SafeArea(
           child: Column(
             children: [
-              if (_tabIndex != 3)
+              if (_tabIndex != 2 && _tabIndex != 3)
                 AppHeader(
                   title: titles[_tabIndex],
                   showSettings: true,
@@ -235,7 +267,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   children: [
                     _homeBody(),
                     const SizedBox.expand(),
-                    const SizedBox.expand(),
+                    _progressTabInitialized
+                        ? AcademicProgressPage(
+                            key: ValueKey(_progressDataRevision),
+                            repository: _progressRepository,
+                            rankingRepository: _rankingRepository,
+                            onLoginRequired: _handleInvalidAcademicSession,
+                          )
+                        : const SizedBox.expand(),
                     _scheduleTabInitialized
                         ? AcademicSchedulePage(
                             key: ValueKey(_scheduleDataRevision),
@@ -272,7 +311,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             BottomNavigationBarItem(
                 icon: Icon(Icons.rate_review_outlined), label: '评教'),
             BottomNavigationBarItem(
-                icon: Icon(Icons.map_outlined), label: '地图'),
+                icon: Icon(Icons.school_outlined), label: '学业'),
             BottomNavigationBarItem(
                 icon: Icon(Icons.calendar_month), label: '日程'),
           ],
@@ -296,6 +335,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _selectTab(int index) {
     setState(() {
       _tabIndex = index;
+      if (index == 2) _progressTabInitialized = true;
       if (index == 3) _scheduleTabInitialized = true;
     });
     if (index == 0) {
@@ -306,6 +346,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   Widget _homeBody() => HomeDashboardPage(
         hasAcademicAccount: _hasAcademicSession,
+        academicSessionExpired: _academicSessionExpired,
         academicStudentId: _academicStudentId,
         isAcademicLoginCompleting: _syncingAcademicSchedule,
         onLogin: _openAccountManager,
@@ -338,6 +379,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     widget.onboardingController.openAccountManager(
       academicLoggedIn: _hasAcademicSession,
+      academicSessionExpired: _academicSessionExpired,
       webVpnEnabled: _webVpnEnabled,
       webVpnServiceStatus: _webVpnServiceStatus,
     );
@@ -349,6 +391,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       if (!mounted) return;
       widget.onboardingController.updateAccountStatus(
         academicLoggedIn: _hasAcademicSession,
+        academicSessionExpired: _academicSessionExpired,
         webVpnEnabled: _webVpnEnabled,
         webVpnServiceStatus: _webVpnServiceStatus,
       );
@@ -356,18 +399,86 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Future<void> _finishAcademicLogin() async {
-    if (widget.isDemo) return;
-    setState(() => _hasAcademicSession = true);
-    await _loadAcademicStudentId();
-    _syncOnboardingAccountStatus();
+    if (widget.isDemo || _completingAcademicLogin) return;
+    _completingAcademicLogin = true;
     try {
-      final auth = AcademicAuthService();
-      await auth.markLoggedIn();
-      await auth.cookieHeader();
-    } on Object {
-      // The login succeeded; a temporary WebView cookie delay is recoverable.
+      await _loadAcademicStudentId();
+      if (!mounted || _academicStudentId == null) return;
+      final firstLogin =
+          await AcademicAccountStore().takeInitialSync(_academicStudentId!);
+      if (!mounted) return;
+      setState(() {
+        _hasAcademicSession = true;
+        _academicSessionExpired = false;
+        // Reload account-scoped caches without making network requests.
+        _progressDataRevision++;
+        _scheduleDataRevision++;
+      });
+      _syncOnboardingAccountStatus();
+      try {
+        await _academicAuthService.markLoggedIn();
+        await _academicAuthService.cookieHeader();
+      } on Object {
+        // A temporary WebView cookie delay can recover on a manual refresh.
+      }
+      await _refreshScheduleSummaryQuietly();
+      try {
+        await _scheduleNotificationService.syncScheduleReminders();
+      } on Object {
+        // Reminder availability must not block authentication or initial sync.
+      }
+      if (!mounted) return;
+      if (!firstLogin) {
+        _showSnack('登录已恢复，请再次点击刷新更新数据');
+        return;
+      }
+      await _syncScheduleAfterAcademicLogin();
+      if (!mounted || !_hasAcademicSession) return;
+      unawaited(_syncAcademicExtrasAfterLogin());
+    } finally {
+      _completingAcademicLogin = false;
     }
-    await _syncScheduleAfterAcademicLogin();
+  }
+
+  Future<void> _syncAcademicExtrasAfterLogin() async {
+    if (widget.isDemo || _syncingAcademicExtras) return;
+    _syncingAcademicExtras = true;
+    Future<bool> syncProgress() async {
+      try {
+        final progress = await _progressRepository.refreshProgress();
+        if (progress.studentId.isNotEmpty && mounted && _hasAcademicSession) {
+          await AcademicAccountStore().saveStudentId(progress.studentId);
+          await _loadAcademicStudentId();
+        }
+        return true;
+      } on Object {
+        return false;
+      }
+    }
+
+    Future<bool> syncRanking() async {
+      try {
+        await _rankingRepository.refreshRanking();
+        return true;
+      } on Object {
+        return false;
+      }
+    }
+
+    try {
+      final results = await Future.wait([syncProgress(), syncRanking()]);
+      if (!mounted || !_hasAcademicSession) return;
+      setState(() => _progressDataRevision++);
+      if (results.every((success) => success)) {
+        _showSnack('学业情况已同步');
+      } else if (results.any((success) => success)) {
+        _showSnack('部分学业信息同步失败，可在学业页刷新');
+      } else {
+        _showSnack('学业情况同步失败，可在学业页刷新');
+      }
+    } finally {
+      _syncingAcademicExtras = false;
+    }
   }
 
   Future<void> _loadAcademicStudentId() async {
@@ -401,10 +512,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       }
       return true;
     } on AcademicAuthException {
-      await AcademicAuthService().clearAccount();
+      await _academicAuthService.clearAccount(sessionExpired: true);
       if (mounted) {
         setState(() {
           _hasAcademicSession = false;
+          _academicSessionExpired = true;
           _academicStudentId = null;
         });
         _syncOnboardingAccountStatus();
@@ -468,15 +580,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Future<void> _handleInvalidAcademicSession() async {
-    await AcademicAuthService().clearAccount();
-    if (!mounted) return;
-    setState(() {
-      _hasAcademicSession = false;
-      _academicStudentId = null;
-    });
-    _syncOnboardingAccountStatus();
-    _showSnack('校园账户登录已失效，请重新登录');
-    await _openAcademicLogin();
+    if (_handlingInvalidAcademicSession) return;
+    _handlingInvalidAcademicSession = true;
+    try {
+      await _academicAuthService.clearAccount(sessionExpired: true);
+      if (!mounted) return;
+      setState(() {
+        _hasAcademicSession = false;
+        _academicSessionExpired = true;
+        _academicStudentId = null;
+      });
+      _syncOnboardingAccountStatus();
+      _showSnack('校园账户登录已失效，请重新登录');
+      await _openAcademicLogin();
+    } finally {
+      _handlingInvalidAcademicSession = false;
+    }
   }
 
   Future<void> _openAcademicLogin() async {
@@ -545,10 +664,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   Future<bool> _logoutAcademicAccount() async {
     try {
-      await AcademicAuthService().clearAccount();
+      await _academicAuthService.clearAccount();
       if (!mounted) return false;
       setState(() {
         _hasAcademicSession = false;
+        _academicSessionExpired = false;
         _academicStudentId = null;
       });
       _syncOnboardingAccountStatus();

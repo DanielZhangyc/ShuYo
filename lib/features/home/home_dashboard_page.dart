@@ -10,6 +10,7 @@ class HomeDashboardPage extends StatelessWidget {
   const HomeDashboardPage({
     super.key,
     required this.hasAcademicAccount,
+    this.academicSessionExpired = false,
     this.academicStudentId,
     required this.isAcademicLoginCompleting,
     required this.onLogin,
@@ -23,6 +24,7 @@ class HomeDashboardPage extends StatelessWidget {
   });
 
   final bool hasAcademicAccount;
+  final bool academicSessionExpired;
   final String? academicStudentId;
   final bool isAcademicLoginCompleting;
   final VoidCallback onLogin;
@@ -66,12 +68,16 @@ class HomeDashboardPage extends StatelessWidget {
                   ? academicStudentId?.isNotEmpty == true
                       ? '你好，$academicStudentId！'
                       : '你好！'
-                  : '立即登录',
+                  : academicSessionExpired
+                      ? '重新登录'
+                      : '立即登录',
           content: isAcademicLoginCompleting
               ? '正在获取课表...'
               : hasAcademicAccount
                   ? _greeting()
-                  : '登录后同步个人数据',
+                  : academicSessionExpired
+                      ? '登录已失效，本地数据仍可查看'
+                      : '登录后同步个人数据',
           trailing: isAcademicLoginCompleting
               ? const SizedBox(
                   width: 20,

@@ -35,9 +35,10 @@ class ClassroomBuilding {
       id: intValue(json['id']),
       name: stringValue(json['name']),
       campusId: campusId,
-      campusName: stringValue(
-        json['campusName'],
-        _campusNameFromFullName(fullName, campusId),
+      campusName: _campusName(
+        campusId,
+        fullName,
+        stringValue(json['campusName']),
       ),
       fullName: fullName,
       code: stringValue(json['code'] ?? json['roomCode']),
@@ -303,16 +304,23 @@ class CourseLocationMatch {
   final ClassroomCourse course;
 }
 
-String _campusNameFromFullName(String fullName, int campusId) {
-  final parts = fullName.split('/').where((part) => part.isNotEmpty).toList();
-  if (parts.length >= 2) {
-    return parts[1].replaceAll('校区', '');
-  }
-  return switch (campusId) {
+String _campusName(int campusId, String fullName, String cachedName) {
+  final knownName = switch (campusId) {
     3 => '宝山',
     398 => '延长',
     475 => '宝山东区',
     574 => '嘉定',
-    _ => '其它',
+    _ => null,
   };
+  if (knownName != null) {
+    return knownName;
+  }
+  if (cachedName.isNotEmpty) {
+    return cachedName;
+  }
+  final parts = fullName.split('/').where((part) => part.isNotEmpty).toList();
+  if (parts.length >= 2) {
+    return parts[1].replaceAll('校区', '');
+  }
+  return '其它';
 }

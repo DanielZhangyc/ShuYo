@@ -9,6 +9,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/academic_url_resolver.dart';
 import '../../core/client_user_agent.dart';
 import 'academic_auth_service.dart';
+import 'academic_account_store.dart';
 import 'http_timeout.dart';
 import 'webvpn_session_store.dart';
 
@@ -120,7 +121,9 @@ class AcademicNativeAuthService {
       // an explicit logout. This removes an expired root-path JSESSIONID before
       // the callback creates its fresh /jwglxt session, while leaving WebVPN cookies untouched. Fresh cookies collected above are installed
       // immediately afterwards.
-      await AcademicAuthService().clearAccount();
+      await AcademicAuthService().clearAccount(
+        sessionExpired: await AcademicAccountStore().isSessionExpired(),
+      );
     } else if (_target == _NativeAuthTarget.webVpn) {
       await WebVpnSessionStore().clearCachedCookiesForReauthentication();
       await _clearWebVpnAuthCookies(manager);

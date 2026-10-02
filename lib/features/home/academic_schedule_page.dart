@@ -319,7 +319,6 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     if (!mounted) {
       return;
     }
-    _showSnack('校园账户登录信息已过期，请重新登录');
     await widget.onLoginRequired();
     if (!mounted) {
       return;

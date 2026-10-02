@@ -5,6 +5,51 @@ import 'package:shuyo/data/services/academic_account_store.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  test('first login is recorded per student before any data is fetched',
+      () async {
+    final store = AcademicAccountStore();
+    await store.saveStudentId(' A ');
+    expect(await store.takeInitialSync('A'), isTrue);
+    await store.clear(sessionExpired: true);
+    expect(await store.loadStudentId(), isNull);
+    expect(await store.loadDataStudentId(), 'A');
+    expect(await store.isSessionExpired(), isTrue);
+    await store.saveStudentId('A');
+    expect(await store.isSessionExpired(), isFalse);
+    expect(await store.takeInitialSync('A'), isFalse);
+    await store.clear();
+    expect(await store.isSessionExpired(), isFalse);
+    await store.saveStudentId('B');
+    expect(await store.takeInitialSync('B'), isTrue);
+    await store.saveStudentId('A');
+    expect(await store.takeInitialSync('A'), isFalse);
+  });
+
+  test('upgrade recognizes an active account without a data cache', () async {
+    SharedPreferences.setMockInitialValues({
+      AcademicAccountStore.studentIdKey: 'A',
+    });
+    final store = AcademicAccountStore();
+    await store.rememberExistingAccounts();
+    expect(await store.takeInitialSync('A'), isFalse);
+    expect(await store.takeInitialSync('B'), isTrue);
+  });
+
+  test(
+      'upgrade recognizes cached accounts after the active identity was cleared',
+      () async {
+    SharedPreferences.setMockInitialValues({
+      'academic.schedule.cache': '{"term":{"studentId":"A"}}',
+      'academic.progress.cache': '{"studentId":"B"}',
+      'academic.ranking.cache': 'damaged cache',
+    });
+    final store = AcademicAccountStore();
+    await store.rememberExistingAccounts();
+    expect(await store.takeInitialSync('A'), isFalse);
+    expect(await store.takeInitialSync('B'), isFalse);
+    expect(await store.takeInitialSync('C'), isTrue);
+  });
+
   test('saving an account removes the legacy expiration marker', () async {
     SharedPreferences.setMockInitialValues({
       AcademicAccountStore.legacySessionExpiredKey: true,
