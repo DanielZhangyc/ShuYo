@@ -13,6 +13,7 @@ import '../data/demo/demo_data_bundle.dart';
 import '../data/demo/demo_repositories.dart';
 import '../data/models/client_backend.dart';
 import '../data/repositories/academic_schedule_repository.dart';
+import '../data/repositories/academic_progress_repository.dart';
 import '../data/repositories/announcement_repository.dart';
 import '../data/repositories/classroom_repository.dart';
 import '../data/repositories/client_backend_repository.dart';
@@ -27,6 +28,7 @@ import '../data/services/client_settings_service.dart';
 import '../data/services/webvpn_session_store.dart';
 import '../features/auth/native_login_page.dart';
 import '../features/home/academic_schedule_page.dart';
+import '../features/home/academic_progress_page.dart';
 import '../features/home/announcements_page.dart';
 import '../features/home/course_rating_page.dart';
 import '../features/home/empty_classroom_page.dart';
@@ -86,6 +88,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   int _tabIndex = 0;
   bool _scheduleTabInitialized = false;
+  bool _progressTabInitialized = false;
+  int _progressDataRevision = 0;
   int _scheduleDataRevision = 0;
   late bool _webVpnEnabled = widget.initialWebVpnEnabled;
   late bool _hasAcademicSession = widget.initialHasAcademicSession;
@@ -106,6 +110,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   StreamSubscription<Uri?>? _widgetClickSubscription;
 
   late final AcademicScheduleRepository _scheduleRepository;
+  late final AcademicProgressRepository _progressRepository;
   late final AcademicScheduleNotificationService _scheduleNotificationService;
   late final AcademicScheduleWidgetService _scheduleWidgetService;
   late final AnnouncementRepository _announcementRepository;
@@ -126,6 +131,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _scheduleRepository = widget.isDemo && demo != null
         ? DemoAcademicScheduleRepository(demo.schedule)
         : AcademicScheduleRepository();
+    _progressRepository = widget.isDemo
+        ? DemoAcademicProgressRepository()
+        : AcademicProgressRepository();
     _scheduleNotificationService =
         AcademicScheduleNotificationService(repository: _scheduleRepository);
     _scheduleWidgetService =
@@ -212,7 +220,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    const titles = ['首页', '评教', '地图', '日程'];
+    const titles = ['首页', '评教', '学业', '日程'];
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -222,7 +230,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         body: SafeArea(
           child: Column(
             children: [
-              if (_tabIndex != 3)
+              if (_tabIndex != 2 && _tabIndex != 3)
                 AppHeader(
                   title: titles[_tabIndex],
                   showSettings: true,
@@ -235,7 +243,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   children: [
                     _homeBody(),
                     const SizedBox.expand(),
-                    const SizedBox.expand(),
+                    _progressTabInitialized
+                        ? AcademicProgressPage(
+                            key: ValueKey(_progressDataRevision),
+                            repository: _progressRepository,
+                            onLoginRequired: _handleInvalidAcademicSession,
+                          )
+                        : const SizedBox.expand(),
                     _scheduleTabInitialized
                         ? AcademicSchedulePage(
                             key: ValueKey(_scheduleDataRevision),
@@ -272,7 +286,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             BottomNavigationBarItem(
                 icon: Icon(Icons.rate_review_outlined), label: '评教'),
             BottomNavigationBarItem(
-                icon: Icon(Icons.map_outlined), label: '地图'),
+                icon: Icon(Icons.school_outlined), label: '学业'),
             BottomNavigationBarItem(
                 icon: Icon(Icons.calendar_month), label: '日程'),
           ],
@@ -296,6 +310,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _selectTab(int index) {
     setState(() {
       _tabIndex = index;
+      if (index == 2) _progressTabInitialized = true;
       if (index == 3) _scheduleTabInitialized = true;
     });
     if (index == 0) {
@@ -367,7 +382,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     } on Object {
       // The login succeeded; a temporary WebView cookie delay is recoverable.
     }
-    await _syncScheduleAfterAcademicLogin();
+    final scheduleSynced = await _syncScheduleAfterAcademicLogin();
+    if (mounted && scheduleSynced) {
+      setState(() => _progressDataRevision++);
+    }
   }
 
   Future<void> _loadAcademicStudentId() async {
