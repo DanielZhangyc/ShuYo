@@ -1,10 +1,12 @@
 import '../models/academic_schedule.dart';
 import '../models/academic_progress.dart';
+import '../models/academic_ranking.dart';
 import '../models/announcement.dart';
 import '../models/classroom.dart';
 import '../models/course_rating.dart';
 import '../repositories/academic_schedule_repository.dart';
 import '../repositories/academic_progress_repository.dart';
+import '../repositories/academic_ranking_repository.dart';
 import '../repositories/announcement_repository.dart';
 import '../repositories/classroom_repository.dart';
 import '../repositories/course_rating_repository.dart';
@@ -125,6 +127,30 @@ class DemoAcademicProgressRepository extends AcademicProgressRepository {
 
   @override
   Future<AcademicProgress> refreshProgress() async => progress;
+}
+
+class DemoAcademicRankingRepository extends AcademicRankingRepository {
+  DemoAcademicRankingRepository()
+      : ranking = AcademicRanking(
+          studentId: 'DEMO0001',
+          academicYear: '2026-2027',
+          term: '秋',
+          collegeName: '示例学院',
+          majorName: '示例专业',
+          collegeRank: 42,
+          collegeCount: 260,
+          majorRank: 12,
+          majorCount: 80,
+          fetchedAt: DateTime(2026, 9, 1),
+        );
+
+  final AcademicRanking ranking;
+
+  @override
+  Future<AcademicRanking?> loadCachedRanking() async => ranking;
+
+  @override
+  Future<AcademicRanking> refreshRanking() async => ranking;
 }
 
 class DemoAnnouncementRepository extends AnnouncementRepository {

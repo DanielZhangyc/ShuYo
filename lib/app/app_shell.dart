@@ -14,6 +14,7 @@ import '../data/demo/demo_repositories.dart';
 import '../data/models/client_backend.dart';
 import '../data/repositories/academic_schedule_repository.dart';
 import '../data/repositories/academic_progress_repository.dart';
+import '../data/repositories/academic_ranking_repository.dart';
 import '../data/repositories/announcement_repository.dart';
 import '../data/repositories/classroom_repository.dart';
 import '../data/repositories/client_backend_repository.dart';
@@ -95,6 +96,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late bool _hasAcademicSession = widget.initialHasAcademicSession;
   late String? _academicStudentId = widget.initialAcademicStudentId;
   bool _syncingAcademicSchedule = false;
+  bool _syncingAcademicExtras = false;
   bool _loadingScheduleSummary = false;
   bool _loadingAnnouncementSummary = false;
   bool _checkingClientBackendPrompts = false;
@@ -111,6 +113,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   late final AcademicScheduleRepository _scheduleRepository;
   late final AcademicProgressRepository _progressRepository;
+  late final AcademicRankingRepository _rankingRepository;
   late final AcademicScheduleNotificationService _scheduleNotificationService;
   late final AcademicScheduleWidgetService _scheduleWidgetService;
   late final AnnouncementRepository _announcementRepository;
@@ -134,6 +137,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _progressRepository = widget.isDemo
         ? DemoAcademicProgressRepository()
         : AcademicProgressRepository();
+    _rankingRepository = widget.isDemo
+        ? DemoAcademicRankingRepository()
+        : AcademicRankingRepository();
     _scheduleNotificationService =
         AcademicScheduleNotificationService(repository: _scheduleRepository);
     _scheduleWidgetService =
@@ -247,6 +253,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         ? AcademicProgressPage(
                             key: ValueKey(_progressDataRevision),
                             repository: _progressRepository,
+                            rankingRepository: _rankingRepository,
                             onLoginRequired: _handleInvalidAcademicSession,
                           )
                         : const SizedBox.expand(),
@@ -382,9 +389,50 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     } on Object {
       // The login succeeded; a temporary WebView cookie delay is recoverable.
     }
-    final scheduleSynced = await _syncScheduleAfterAcademicLogin();
-    if (mounted && scheduleSynced) {
+    await _syncScheduleAfterAcademicLogin();
+    if (!mounted || !_hasAcademicSession) return;
+    setState(() => _progressDataRevision++);
+    unawaited(_syncAcademicExtrasAfterLogin());
+  }
+
+  Future<void> _syncAcademicExtrasAfterLogin() async {
+    if (widget.isDemo || _syncingAcademicExtras) return;
+    _syncingAcademicExtras = true;
+    Future<bool> syncProgress() async {
+      try {
+        final progress = await _progressRepository.refreshProgress();
+        if (progress.studentId.isNotEmpty && mounted && _hasAcademicSession) {
+          await AcademicAccountStore().saveStudentId(progress.studentId);
+          await _loadAcademicStudentId();
+        }
+        return true;
+      } on Object {
+        return false;
+      }
+    }
+
+    Future<bool> syncRanking() async {
+      try {
+        await _rankingRepository.refreshRanking();
+        return true;
+      } on Object {
+        return false;
+      }
+    }
+
+    try {
+      final results = await Future.wait([syncProgress(), syncRanking()]);
+      if (!mounted || !_hasAcademicSession) return;
       setState(() => _progressDataRevision++);
+      if (results.every((success) => success)) {
+        _showSnack('学业情况和排名已同步');
+      } else if (results.any((success) => success)) {
+        _showSnack('部分学业信息同步失败，可在学业页刷新');
+      } else {
+        _showSnack('学业情况和排名同步失败，可在学业页刷新');
+      }
+    } finally {
+      _syncingAcademicExtras = false;
     }
   }
 

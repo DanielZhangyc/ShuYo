@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../data/models/academic_progress.dart';
+import '../../data/models/academic_ranking.dart';
 import '../../data/repositories/academic_progress_repository.dart';
+import '../../data/repositories/academic_ranking_repository.dart';
 import '../../data/services/academic_progress_display_settings_service.dart';
 import '../../data/services/academic_schedule_api_client.dart';
 import '../../shared/theme/shuyo_theme.dart';
@@ -14,9 +16,11 @@ class AcademicProgressPage extends StatefulWidget {
     super.key,
     required this.repository,
     required this.onLoginRequired,
+    this.rankingRepository,
   });
 
   final AcademicProgressRepository repository;
+  final AcademicRankingRepository? rankingRepository;
   final Future<void> Function() onLoginRequired;
 
   @override
@@ -34,26 +38,50 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
   static const _courseTapExtension = 8.0;
 
   AcademicProgress? _progress;
+  AcademicRanking? _ranking;
   final Set<String> _expandedNodes = {};
   bool _loading = true;
   bool _refreshing = false;
   bool _showGpa = false;
+  bool _showRanking = false;
+  bool _showCollegeRanking = true;
+  bool _rankingLoading = false;
+  String? _rankingError;
   String? _loadError;
   final _displaySettingsService = AcademicProgressDisplaySettingsService();
+  late final AcademicRankingRepository _rankingRepository =
+      widget.rankingRepository ?? AcademicRankingRepository();
 
   @override
   void initState() {
     super.initState();
     unawaited(_loadCached());
-    unawaited(_loadDisplaySettings());
+    unawaited(_loadRankingAndDisplaySettings());
   }
 
-  Future<void> _loadDisplaySettings() async {
+  Future<void> _loadRankingAndDisplaySettings() async {
+    var showGpa = false;
+    var showRanking = false;
     try {
-      final showGpa = await _displaySettingsService.loadShowGpa();
-      if (mounted) setState(() => _showGpa = showGpa);
+      showGpa = await _displaySettingsService.loadShowGpa();
+      showRanking = await _displaySettingsService.loadShowRanking();
     } on Object {
       // Display settings should not prevent cached academic data from loading.
+    }
+    AcademicRanking? ranking;
+    try {
+      ranking = await _rankingRepository.loadCachedRanking();
+    } on Object {
+      // A corrupt ranking cache should not prevent academic data from loading.
+    }
+    if (!mounted) return;
+    setState(() {
+      _showGpa = showGpa;
+      _showRanking = showRanking;
+      _ranking = ranking;
+    });
+    if (showRanking && ranking == null) {
+      unawaited(_refreshRanking());
     }
   }
 
@@ -82,6 +110,7 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
   Future<void> _refresh() async {
     if (_refreshing) return;
     setState(() => _refreshing = true);
+    var loginRequired = false;
     try {
       await _fetchAndShow();
     } on AcademicAuthException {
@@ -91,6 +120,7 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
       try {
         await _fetchAndShow();
       } on AcademicAuthException {
+        loginRequired = true;
         if (mounted) _showSnack('请先登录上大校园账户后再刷新');
       } on Object catch (error) {
         if (mounted) _showSnack('学业信息同步失败：$error');
@@ -99,7 +129,34 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
       if (!mounted) return;
       _showSnack('学业信息同步失败：$error');
     } finally {
+      if (mounted && _showRanking && !loginRequired) {
+        await _refreshRanking(notifyOnFailure: true);
+      }
       if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
+  Future<void> _refreshRanking({bool notifyOnFailure = false}) async {
+    if (_rankingLoading) return;
+    setState(() {
+      _rankingLoading = true;
+      _rankingError = null;
+    });
+    try {
+      final ranking = await _rankingRepository.refreshRanking();
+      if (mounted) setState(() => _ranking = ranking);
+    } on AcademicAuthException {
+      if (!mounted) return;
+      setState(() => _rankingError = '登录已失效');
+      if (notifyOnFailure) _showSnack('教务登录已失效，排名未同步');
+    } on Object {
+      if (!mounted) return;
+      setState(() => _rankingError = '获取失败');
+      if (notifyOnFailure) {
+        _showSnack(_ranking == null ? '排名获取失败，可点击排名区域重试' : '排名同步失败，已保留上次的数据');
+      }
+    } finally {
+      if (mounted) setState(() => _rankingLoading = false);
     }
   }
 
@@ -187,15 +244,29 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
   }
 
   Future<void> _openDisplaySettings() async {
-    final showGpa = await showModalBottomSheet<bool>(
+    final settings =
+        await showModalBottomSheet<({bool showGpa, bool showRanking})>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (context) => _ProgressDisplaySettingsSheet(initial: _showGpa),
+      builder: (context) => _ProgressDisplaySettingsSheet(
+        showGpa: _showGpa,
+        showRanking: _showRanking,
+      ),
     );
-    if (!mounted || showGpa == null) return;
+    if (!mounted || settings == null) return;
     try {
-      await _displaySettingsService.saveShowGpa(showGpa);
-      if (mounted) setState(() => _showGpa = showGpa);
+      await _displaySettingsService.saveShowGpa(settings.showGpa);
+      await _displaySettingsService.saveShowRanking(settings.showRanking);
+      if (!mounted) return;
+      final rankingJustEnabled = settings.showRanking && !_showRanking;
+      setState(() {
+        _showGpa = settings.showGpa;
+        _showRanking = settings.showRanking;
+        if (rankingJustEnabled) _showCollegeRanking = true;
+      });
+      if (settings.showRanking && _ranking == null) {
+        unawaited(_refreshRanking(notifyOnFailure: true));
+      }
     } on Object {
       if (mounted) _showSnack('显示设置保存失败，请重试');
     }
@@ -635,12 +706,14 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
                   child: _metric(
                       '要求学分', required == null ? '—' : _number(required)),
                 ),
-                Expanded(
-                  child: _showGpa
-                      ? _metric(
-                          '平均绩点', progress.gpa.isEmpty ? '—' : progress.gpa)
-                      : const SizedBox.shrink(),
-                ),
+                if (_showGpa)
+                  Expanded(
+                    child: _metric(
+                        '平均绩点', progress.gpa.isEmpty ? '—' : progress.gpa),
+                  )
+                else if (!_showRanking)
+                  const Expanded(child: SizedBox.shrink()),
+                if (_showRanking) Expanded(child: _rankingMetric()),
               ],
             ),
             if (earned != null && required != null && required > 0) ...[
@@ -680,6 +753,83 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
           Text(value, style: Theme.of(context).textTheme.headlineSmall),
         ],
       );
+
+  Widget _rankingMetric() {
+    final colors = context.shuyoColors;
+    final ranking = _ranking;
+    final college = _showCollegeRanking;
+    final rank = college ? ranking?.collegeRank : ranking?.majorRank;
+    final count = college ? ranking?.collegeCount : ranking?.majorCount;
+    final label = college ? '学院排名' : '专业排名';
+    final value = rank == null
+        ? '—'
+        : count == null
+            ? '$rank'
+            : '$rank/$count';
+    final headlineStyle = Theme.of(context).textTheme.headlineSmall;
+    final valueHeight =
+        (headlineStyle?.fontSize ?? 24) * (headlineStyle?.height ?? 1.3);
+    final status = _rankingLoading && ranking == null
+        ? '获取中'
+        : _rankingError != null
+            ? ranking == null
+                ? '获取失败'
+                : '旧数据'
+            : rank == null
+                ? '暂无排名'
+                : '';
+    return Semantics(
+      button: true,
+      label: '$label${rank == null ? '' : '第$rank名'}'
+          '${count == null ? '' : '，共$count人'}',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          if (_rankingError != null && ranking == null) {
+            unawaited(_refreshRanking(notifyOnFailure: true));
+          } else {
+            setState(() => _showCollegeRanking = !_showCollegeRanking);
+          }
+        },
+        child: Tooltip(
+          message: ranking == null
+              ? _rankingError == null
+                  ? '点击切换学院和专业排名'
+                  : '点击重试获取排名'
+              : '${ranking.academicYear} ${ranking.term} · '
+                  '同步于 ${_dateText(ranking.fetchedAt)}',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 4),
+              SizedBox(
+                width: double.infinity,
+                height: valueHeight,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(value, style: headlineStyle),
+                ),
+              ),
+              if (status.isNotEmpty)
+                Text(status,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: _rankingError == null
+                              ? colors.textSecondary
+                              : colors.warning,
+                        )),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Future<void> _showCourseDetails(AcademicProgressCourse course) =>
       showModalBottomSheet<void>(
@@ -813,9 +963,13 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
 enum _ProgressMenuAction { displaySettings, refreshProgress }
 
 class _ProgressDisplaySettingsSheet extends StatefulWidget {
-  const _ProgressDisplaySettingsSheet({required this.initial});
+  const _ProgressDisplaySettingsSheet({
+    required this.showGpa,
+    required this.showRanking,
+  });
 
-  final bool initial;
+  final bool showGpa;
+  final bool showRanking;
 
   @override
   State<_ProgressDisplaySettingsSheet> createState() =>
@@ -825,11 +979,13 @@ class _ProgressDisplaySettingsSheet extends StatefulWidget {
 class _ProgressDisplaySettingsSheetState
     extends State<_ProgressDisplaySettingsSheet> {
   late bool _showGpa;
+  late bool _showRanking;
 
   @override
   void initState() {
     super.initState();
-    _showGpa = widget.initial;
+    _showGpa = widget.showGpa;
+    _showRanking = widget.showRanking;
   }
 
   @override
@@ -876,12 +1032,27 @@ class _ProgressDisplaySettingsSheetState
                   onChanged: (value) => setState(() => _showGpa = value),
                 ),
               ),
+              Theme(
+                data: Theme.of(context).copyWith(
+                  splashColor: Colors.transparent,
+                  highlightColor: Colors.transparent,
+                ),
+                child: SwitchListTile(
+                  title: const Text('显示排名'),
+                  value: _showRanking,
+                  overlayColor:
+                      const WidgetStatePropertyAll<Color?>(Colors.transparent),
+                  onChanged: (value) => setState(() => _showRanking = value),
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
                 child: SizedBox(
                   width: double.infinity,
                   child: FilledButton(
-                    onPressed: () => Navigator.of(context).pop(_showGpa),
+                    onPressed: () => Navigator.of(context).pop(
+                      (showGpa: _showGpa, showRanking: _showRanking),
+                    ),
                     child: const Text('完成'),
                   ),
                 ),

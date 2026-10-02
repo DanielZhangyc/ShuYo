@@ -7,12 +7,15 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuyo/data/demo/demo_repositories.dart';
 import 'package:shuyo/data/models/academic_progress.dart';
+import 'package:shuyo/data/models/academic_ranking.dart';
 import 'package:shuyo/data/repositories/academic_progress_repository.dart';
+import 'package:shuyo/data/repositories/academic_ranking_repository.dart';
 import 'package:shuyo/data/services/academic_account_store.dart';
 import 'package:shuyo/data/services/academic_auth_service.dart';
 import 'package:shuyo/data/services/academic_progress_api_client.dart';
 import 'package:shuyo/data/services/academic_progress_display_settings_service.dart';
 import 'package:shuyo/data/services/academic_progress_parser.dart';
+import 'package:shuyo/data/services/academic_schedule_api_client.dart';
 import 'package:shuyo/features/home/academic_progress_page.dart';
 import 'package:shuyo/shared/theme/shuyo_theme.dart';
 
@@ -84,6 +87,19 @@ class _DeepProgressRepository extends AcademicProgressRepository {
   Future<AcademicProgress> refreshProgress() async => progress;
 }
 
+class _FailingRankingRepository extends AcademicRankingRepository {
+  _FailingRankingRepository({this.cached});
+
+  final AcademicRanking? cached;
+
+  @override
+  Future<AcademicRanking?> loadCachedRanking() async => cached;
+
+  @override
+  Future<AcademicRanking> refreshRanking() async =>
+      throw const AcademicApiException('ranking unavailable');
+}
+
 const _index = '''
 <html><body>
 <form id="form">
@@ -112,8 +128,11 @@ void main() {
   test('GPA display setting defaults off and is stored', () async {
     final service = AcademicProgressDisplaySettingsService();
     expect(await service.loadShowGpa(), isFalse);
+    expect(await service.loadShowRanking(), isFalse);
     await service.saveShowGpa(true);
+    await service.saveShowRanking(true);
     expect(await service.loadShowGpa(), isTrue);
+    expect(await service.loadShowRanking(), isTrue);
   });
 
   test('parses tree, summary and course response', () {
@@ -331,6 +350,132 @@ void main() {
     await tester.tap(find.text('大学英语'));
     await tester.pumpAndSettle();
     expect(find.text('绩点'), findsOneWidget);
+  });
+
+  testWidgets(
+      'ranking starts with college, switches to major, and uses four slots',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: AcademicProgressPage(
+        repository: DemoAcademicProgressRepository(),
+        rankingRepository: DemoAcademicRankingRepository(),
+        onLoginRequired: () async {},
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('学院排名'), findsNothing);
+    final earnedX = tester.getTopLeft(find.text('已获学分')).dx;
+    final requiredX = tester.getTopLeft(find.text('要求学分')).dx;
+
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('显示设置'));
+    await tester.pumpAndSettle();
+    final rankingToggle = tester
+        .widget<SwitchListTile>(find.widgetWithText(SwitchListTile, '显示排名'));
+    expect(rankingToggle.value, isFalse);
+    await tester.tap(find.text('显示排名'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('完成'));
+    await tester.pumpAndSettle();
+    expect(find.text('学院排名'), findsOneWidget);
+    expect(find.text('42/260'), findsOneWidget);
+    expect(find.text('共260人'), findsNothing);
+    expect(tester.getTopLeft(find.text('已获学分')).dx, earnedX);
+    expect(tester.getTopLeft(find.text('要求学分')).dx, requiredX);
+    await tester.tap(find.text('学院排名'));
+    await tester.pumpAndSettle();
+    expect(find.text('专业排名'), findsOneWidget);
+    expect(find.text('12/80'), findsOneWidget);
+    expect(find.text('共80人'), findsNothing);
+
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('显示设置'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('显示绩点'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('完成'));
+    await tester.pumpAndSettle();
+    final positions = [
+      for (final label in ['已获学分', '要求学分', '平均绩点', '专业排名'])
+        tester.getTopLeft(find.text(label)).dx,
+    ];
+    expect(
+        positions[1] - positions[0], closeTo(positions[2] - positions[1], 1));
+    expect(
+        positions[2] - positions[1], closeTo(positions[3] - positions[2], 1));
+    expect(await AcademicProgressDisplaySettingsService().loadShowRanking(),
+        isTrue);
+  });
+
+  testWidgets('ranking failures keep academic progress and old ranking',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      AcademicProgressDisplaySettingsService.showRankingKey: true,
+    });
+    final ranking = DemoAcademicRankingRepository().ranking;
+    await tester.pumpWidget(MaterialApp(
+      home: AcademicProgressPage(
+        repository: DemoAcademicProgressRepository(),
+        rankingRepository: _FailingRankingRepository(cached: ranking),
+        onLoginRequired: () async {},
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('42/260'), findsOneWidget);
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('刷新学业信息'));
+    await tester.pumpAndSettle();
+    expect(find.text('学业总览'), findsOneWidget);
+    expect(find.text('42/260'), findsOneWidget);
+    expect(find.text('旧数据'), findsOneWidget);
+  });
+
+  testWidgets('ranking failure without cache shows a retry state',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      AcademicProgressDisplaySettingsService.showRankingKey: true,
+    });
+    await tester.pumpWidget(MaterialApp(
+      home: AcademicProgressPage(
+        repository: DemoAcademicProgressRepository(),
+        rankingRepository: _FailingRankingRepository(),
+        onLoginRequired: () async {},
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('学业总览'), findsOneWidget);
+    expect(find.text('学院排名'), findsOneWidget);
+    expect(find.text('获取失败'), findsOneWidget);
+    await tester.tap(find.text('学院排名'));
+    await tester.pumpAndSettle();
+    expect(find.text('获取失败'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('four overview metrics fit a narrow phone', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      AcademicProgressDisplaySettingsService.showGpaKey: true,
+      AcademicProgressDisplaySettingsService.showRankingKey: true,
+    });
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(
+      home: AcademicProgressPage(
+        repository: DemoAcademicProgressRepository(),
+        rankingRepository: DemoAcademicRankingRepository(),
+        onLoginRequired: () async {},
+      ),
+    ));
+    await tester.pumpAndSettle();
+    for (final label in ['已获学分', '要求学分', '平均绩点', '学院排名']) {
+      expect(find.text(label), findsOneWidget);
+    }
+    expect(tester.takeException(), isNull);
   });
 
   test('does not show another account’s cached progress', () async {
