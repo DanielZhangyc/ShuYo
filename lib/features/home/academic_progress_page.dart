@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/models/academic_progress.dart';
 import '../../data/repositories/academic_progress_repository.dart';
+import '../../data/services/academic_progress_display_settings_service.dart';
 import '../../data/services/academic_schedule_api_client.dart';
 import '../../shared/theme/shuyo_theme.dart';
 import '../../shared/widgets/empty_state.dart';
@@ -23,16 +24,37 @@ class AcademicProgressPage extends StatefulWidget {
 }
 
 class _AcademicProgressPageState extends State<AcademicProgressPage> {
+  static const _rootDotX = 10.0;
+  static const _nestedDotX = 25.0;
+  static const _courseBadgeWidth = 40.0;
+  static const _courseInset = 2.0;
+  static const _courseTopInset = 9.0;
+  static const _courseTitleLineHeight = 24.0;
+  // Extend the course ripple left without moving the dot or course text.
+  static const _courseTapExtension = 8.0;
+
   AcademicProgress? _progress;
   final Set<String> _expandedNodes = {};
   bool _loading = true;
   bool _refreshing = false;
+  bool _showGpa = false;
   String? _loadError;
+  final _displaySettingsService = AcademicProgressDisplaySettingsService();
 
   @override
   void initState() {
     super.initState();
     unawaited(_loadCached());
+    unawaited(_loadDisplaySettings());
+  }
+
+  Future<void> _loadDisplaySettings() async {
+    try {
+      final showGpa = await _displaySettingsService.loadShowGpa();
+      if (mounted) setState(() => _showGpa = showGpa);
+    } on Object {
+      // Display settings should not prevent cached academic data from loading.
+    }
   }
 
   Future<void> _loadCached() async {
@@ -103,7 +125,7 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
   }
 
   Future<void> _openMoreMenu() async {
-    final action = await showModalBottomSheet<bool>(
+    final action = await showModalBottomSheet<_ProgressMenuAction>(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) {
@@ -121,24 +143,62 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
             ),
             child: Material(
               type: MaterialType.transparency,
-              child: ListTile(
-                leading: _refreshing
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(strokeWidth: 3),
-                      )
-                    : const Icon(Icons.refresh),
-                title: const Text('刷新学业信息'),
-                enabled: !_refreshing,
-                onTap: () => Navigator.of(context).pop(true),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => Navigator.of(context)
+                        .pop(_ProgressMenuAction.displaySettings),
+                    child: const ListTile(
+                      leading: Icon(Icons.palette_outlined),
+                      title: Text('显示设置'),
+                    ),
+                  ),
+                  ListTile(
+                    leading: _refreshing
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 3),
+                          )
+                        : const Icon(Icons.refresh),
+                    title: const Text('刷新学业信息'),
+                    enabled: !_refreshing,
+                    onTap: () => Navigator.of(context)
+                        .pop(_ProgressMenuAction.refreshProgress),
+                  ),
+                ],
               ),
             ),
           ),
         );
       },
     );
-    if (action == true && mounted) await _refresh();
+    if (!mounted) return;
+    switch (action) {
+      case _ProgressMenuAction.displaySettings:
+        await _openDisplaySettings();
+      case _ProgressMenuAction.refreshProgress:
+        await _refresh();
+      case null:
+        break;
+    }
+  }
+
+  Future<void> _openDisplaySettings() async {
+    final showGpa = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _ProgressDisplaySettingsSheet(initial: _showGpa),
+    );
+    if (!mounted || showGpa == null) return;
+    try {
+      await _displaySettingsService.saveShowGpa(showGpa);
+      if (mounted) setState(() => _showGpa = showGpa);
+    } on Object {
+      if (mounted) _showSnack('显示设置保存失败，请重试');
+    }
   }
 
   @override
@@ -184,7 +244,7 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
         const SizedBox(height: 22),
         Padding(
           padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
-          child: Text('学业结构', style: Theme.of(context).textTheme.titleMedium),
+          child: Text('修读情况', style: Theme.of(context).textTheme.titleMedium),
         ),
         ..._treeRows(progress, '', 0),
       ],
@@ -192,45 +252,38 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
   }
 
   List<Widget> _treeRows(
-      AcademicProgress progress, String parentId, int depth) {
-    final rows = <Widget>[];
-    for (final node in progress.childrenOf(parentId)) {
-      rows.add(_nodeRow(node, depth));
-      if (!_expandedNodes.contains(node.id)) continue;
-      if (node.id == 'zgzsxx') {
-        if (progress.certificates.isEmpty) {
-          rows.add(_emptyRow('暂无资格证书信息', depth + 1));
-        } else {
-          for (final certificate in progress.certificates) {
-            rows.add(_certificateRow(certificate, depth + 1));
-          }
-        }
-      } else if (node.isLeaf) {
-        if (node.courses.isEmpty) {
-          rows.add(_emptyRow('该分类暂无课程', depth + 1));
-        } else {
-          for (final course in node.courses) {
-            rows.add(_courseRow(course, depth + 1));
-          }
-        }
-      } else {
-        rows.addAll(_treeRows(progress, node.id, depth + 1));
-      }
-    }
-    return rows;
-  }
+          AcademicProgress progress, String parentId, int depth) =>
+      [
+        for (final node in progress.childrenOf(parentId))
+          _treeNode(progress, node, depth),
+      ];
 
-  Widget _nodeRow(AcademicProgressNode node, int depth) {
+  Widget _treeNode(
+      AcademicProgress progress, AcademicProgressNode node, int depth,
+      {bool isLastSibling = false}) {
     final colors = context.shuyoColors;
     final expanded = _expandedNodes.contains(node.id);
+    final completed = node.passed == true;
     final credits = _creditsText(node);
-    return Padding(
-      padding: EdgeInsets.only(left: _indent(depth)),
-      child: Material(
-        color: expanded ? colors.accentSoft : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
+    final dotX = depth > 0 ? _nestedDotX : _rootDotX;
+    final dotSize = depth == 0 ? 13.0 : 10.0;
+    final titleStyle = (depth == 0
+            ? Theme.of(context).textTheme.bodyLarge
+            : Theme.of(context).textTheme.bodyMedium)
+        ?.copyWith(
+      fontWeight: depth == 0
+          ? FontWeight.w600
+          : depth == 1
+              ? FontWeight.w500
+              : FontWeight.w400,
+      color: depth >= 2 ? colors.textSecondary : colors.textPrimary,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GestureDetector(
+          key: ValueKey('progress-node-${node.id}'),
+          behavior: HitTestBehavior.opaque,
           onTap: () => setState(() {
             if (expanded) {
               _expandedNodes.remove(node.id);
@@ -238,148 +291,271 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
               _expandedNodes.add(node.id);
             }
           }),
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 58),
-            decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: colors.border)),
+          child: CustomPaint(
+            painter: _TreeConnectorPainter(
+              color: colors.borderStrong,
+              horizontalEnd: depth > 0 ? dotX : null,
+              verticalX: expanded ? dotX : null,
+              verticalFromCenter: true,
+              incomingRailX: depth > 0 ? 0 : null,
+              incomingRailStopsAtJunction: isLastSibling,
             ),
-            padding: const EdgeInsets.fromLTRB(10, 9, 8, 9),
-            child: Row(
-              children: [
-                Icon(
-                  expanded ? Icons.keyboard_arrow_down : Icons.chevron_right,
-                  size: 22,
-                  color: expanded ? colors.accent : colors.textSecondary,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(node.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style:
-                              Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                    fontWeight: depth == 0
-                                        ? FontWeight.w700
-                                        : FontWeight.w600,
-                                  )),
-                      if (credits != null) ...[
-                        const SizedBox(height: 3),
-                        Text(credits,
-                            style:
-                                Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: colors.textSecondary,
-                                    )),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 11),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: dotX + 10,
+                    height: 20,
+                    child: Stack(
+                      children: [
+                        Positioned(
+                          left: dotX - dotSize / 2,
+                          top: 10 - dotSize / 2,
+                          child: AnimatedContainer(
+                            key: ValueKey('progress-node-dot-${node.id}'),
+                            duration: const Duration(milliseconds: 220),
+                            width: dotSize,
+                            height: dotSize,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: completed
+                                  ? colors.success
+                                  : expanded
+                                      ? colors.accent
+                                      : colors.surface,
+                              border: Border.all(
+                                color: completed
+                                    ? colors.success
+                                    : expanded
+                                        ? colors.accent
+                                        : colors.borderStrong,
+                                width: 1.5,
+                              ),
+                            ),
+                          ),
+                        ),
                       ],
-                    ],
+                    ),
                   ),
-                ),
-                if (node.passed != null)
-                  Icon(
-                    node.passed!
-                        ? Icons.check_circle_rounded
-                        : Icons.circle_outlined,
-                    size: 16,
-                    color: node.passed! ? colors.success : colors.textMuted,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(node.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: titleStyle),
+                        if (credits != null) ...[
+                          const SizedBox(height: 2),
+                          Text(credits,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: colors.textTertiary,
+                                  )),
+                        ],
+                      ],
+                    ),
                   ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _courseRow(AcademicProgressCourse course, int depth) {
-    final colors = context.shuyoColors;
-    final statusColor = _courseStatusColor(course, colors);
-    return Padding(
-      padding: EdgeInsets.only(left: _indent(depth)),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () => _showCourseDetails(course),
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 58),
-            padding: const EdgeInsets.fromLTRB(12, 9, 10, 9),
-            decoration: BoxDecoration(
-              border: Border(
-                left: BorderSide(color: colors.border, width: 2),
-                bottom: BorderSide(color: colors.border),
+                  if (completed)
+                    Icon(Icons.check_circle_rounded,
+                        size: 15, color: colors.success),
+                  const SizedBox(width: 4),
+                  AnimatedRotation(
+                    turns: expanded ? 0.25 : 0,
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    child: Icon(Icons.chevron_right,
+                        size: 20, color: colors.textMuted),
+                  ),
+                ],
               ),
             ),
-            child: Row(
-              children: [
-                Column(
-                  children: [
-                    Container(
-                      width: 9,
-                      height: 9,
-                      decoration: BoxDecoration(
-                        color: statusColor,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(course.statusLabel,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: statusColor,
-                              fontSize: 10,
-                            )),
-                  ],
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(course.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style:
-                              Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  )),
-                      const SizedBox(height: 3),
-                      Text(
-                        [
-                          if (course.nature.isNotEmpty) course.nature,
-                          if (course.credits.isNotEmpty) '${course.credits} 学分',
-                        ].join(' · '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: colors.textSecondary,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Icon(Icons.chevron_right, size: 18, color: colors.textMuted),
-              ],
-            ),
           ),
         ),
+        CustomPaint(
+          painter: _TreeConnectorPainter(
+            color: colors.borderStrong,
+            verticalX: depth > 0 && !isLastSibling ? 0 : null,
+          ),
+          child: _AnimatedProgressBranch(
+            key: ValueKey('progress-branch-${node.id}'),
+            expanded: expanded,
+            child: expanded
+                ? _branchChildren(progress, node, depth + 1, railOffset: dotX)
+                : null,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _branchChildren(
+      AcademicProgress progress, AcademicProgressNode node, int depth,
+      {required double railOffset}) {
+    final children = <Widget>[];
+    if (node.id == 'zgzsxx') {
+      if (progress.certificates.isEmpty) {
+        children.add(_emptyRow('暂无资格证书信息', isLastSibling: true));
+      } else {
+        for (var i = 0; i < progress.certificates.length; i++) {
+          children.add(_certificateRow(progress.certificates[i],
+              isLastSibling: i == progress.certificates.length - 1));
+        }
+      }
+    } else if (node.isLeaf) {
+      if (node.courses.isEmpty) {
+        children.add(_emptyRow('该分类暂无课程', isLastSibling: true));
+      } else {
+        for (var i = 0; i < node.courses.length; i++) {
+          children.add(_courseRow(node.courses[i],
+              isLastSibling: i == node.courses.length - 1));
+        }
+      }
+    } else {
+      final nodes = progress.childrenOf(node.id);
+      for (var i = 0; i < nodes.length; i++) {
+        children.add(_treeNode(progress, nodes[i], depth,
+            isLastSibling: i == nodes.length - 1));
+      }
+    }
+    return Container(
+      margin: EdgeInsets.only(left: railOffset),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
       ),
     );
   }
 
-  Widget _certificateRow(AcademicCertificate certificate, int depth) {
+  Widget _courseRow(AcademicProgressCourse course,
+      {required bool isLastSibling}) {
     final colors = context.shuyoColors;
-    return Padding(
-      padding: EdgeInsets.only(left: _indent(depth)),
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 52),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          border: Border(
-            left: BorderSide(color: colors.border, width: 2),
-            bottom: BorderSide(color: colors.border),
+    final statusColor = _courseStatusColor(course, colors);
+    return CustomPaint(
+      painter: _TreeConnectorPainter(
+        color: colors.borderStrong,
+        horizontalEnd: _courseInset + _courseBadgeWidth / 2,
+        horizontalY: _courseTopInset + _courseTitleLineHeight / 2,
+        incomingRailX: 0,
+        incomingRailStopsAtJunction: isLastSibling,
+      ),
+      child: Stack(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(
+                  width: _courseInset +
+                      _courseBadgeWidth +
+                      3 -
+                      _courseTapExtension),
+              Expanded(
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: InkWell(
+                    key: ValueKey('progress-course-${course.id}'),
+                    onTap: () => _showCourseDetails(course),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(6 + _courseTapExtension,
+                          _courseTopInset + 2, 4, _courseTopInset + 4),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(course.name,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                            fontWeight: FontWeight.w400)),
+                                const SizedBox(height: 2),
+                                Text(
+                                  [
+                                    if (course.nature.isNotEmpty) course.nature,
+                                    if (course.credits.isNotEmpty)
+                                      '${course.credits} 学分',
+                                  ].join(' · '),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(color: colors.textTertiary),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.chevron_right,
+                              size: 17, color: colors.textMuted),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ),
+          Positioned(
+            left: _courseInset,
+            top: _courseTopInset,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _showCourseDetails(course),
+              child: SizedBox(
+                width: _courseBadgeWidth,
+                child: Column(
+                  children: [
+                    SizedBox(
+                      height: _courseTitleLineHeight,
+                      child: Center(
+                        child: Container(
+                          key: ValueKey('progress-course-dot-${course.id}'),
+                          width: 9,
+                          height: 9,
+                          decoration: BoxDecoration(
+                              color: statusColor, shape: BoxShape.circle),
+                        ),
+                      ),
+                    ),
+                    Text(_compactStatusLabel(course),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context)
+                            .textTheme
+                            .labelSmall
+                            ?.copyWith(color: statusColor, fontSize: 10)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _certificateRow(AcademicCertificate certificate,
+      {required bool isLastSibling}) {
+    final colors = context.shuyoColors;
+    return CustomPaint(
+      painter: _TreeConnectorPainter(
+        color: colors.borderStrong,
+        horizontalEnd: 22,
+        horizontalY: 22,
+        incomingRailX: 0,
+        incomingRailStopsAtJunction: isLastSibling,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 2, 12),
         child: Row(
           children: [
             Icon(Icons.workspace_premium_outlined,
@@ -395,15 +571,18 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
     );
   }
 
-  Widget _emptyRow(String message, int depth) {
+  Widget _emptyRow(String message, {required bool isLastSibling}) {
     final colors = context.shuyoColors;
-    return Padding(
-      padding: EdgeInsets.only(left: _indent(depth)),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
-        decoration: BoxDecoration(
-          border: Border(left: BorderSide(color: colors.border, width: 2)),
-        ),
+    return CustomPaint(
+      painter: _TreeConnectorPainter(
+        color: colors.borderStrong,
+        horizontalEnd: 14,
+        horizontalY: 22,
+        incomingRailX: 0,
+        incomingRailStopsAtJunction: isLastSibling,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 2, 14),
         child: Text(message,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: colors.textSecondary,
@@ -412,8 +591,6 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
     );
   }
 
-  double _indent(int depth) => 12.0 * depth.clamp(0, 4);
-
   Color _courseStatusColor(AcademicProgressCourse course, ShuYoColors colors) =>
       switch (course.status) {
         '4' || '21' => colors.success,
@@ -421,6 +598,13 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
         '2' => colors.danger,
         '3' => colors.textMuted,
         _ => colors.warning,
+      };
+
+  String _compactStatusLabel(AcademicProgressCourse course) =>
+      switch (course.status) {
+        '5' || '6' || '7' || '8' || '9' => '认定',
+        '1' || '2' || '3' || '4' || '21' => course.statusLabel,
+        _ => '其他',
       };
 
   Widget _overview(AcademicProgress progress) {
@@ -452,8 +636,10 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
                       '要求学分', required == null ? '—' : _number(required)),
                 ),
                 Expanded(
-                  child: _metric(
-                      '平均绩点', progress.gpa.isEmpty ? '—' : progress.gpa),
+                  child: _showGpa
+                      ? _metric(
+                          '平均绩点', progress.gpa.isEmpty ? '—' : progress.gpa)
+                      : const SizedBox.shrink(),
                 ),
               ],
             ),
@@ -499,31 +685,85 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
       showModalBottomSheet<void>(
         context: context,
         isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width),
         builder: (context) => SafeArea(
           top: false,
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(course.name,
-                      style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 14),
-                  _detail('课程号', course.code),
-                  _detail('修读状态', course.statusLabel),
-                  _detail('学分', course.credits),
-                  _detail('成绩', course.grade),
-                  _detail('绩点', course.gradePoint),
-                  _detail(
-                      '成绩学年学期', '${course.academicYear} ${course.term}'.trim()),
-                  _detail('建议修读',
-                      '${course.suggestedYear} ${course.suggestedTerm}'.trim()),
-                  _detail('课程性质', course.nature),
-                  _detail('课程类别', course.category),
-                  _detail('学时', course.hours),
-                ],
+          child: Container(
+            key: const ValueKey('progress-course-sheet'),
+            width: double.infinity,
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+            ),
+            decoration: BoxDecoration(
+              color: context.shuyoColors.surface,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(20),
+              ),
+            ),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(22, 10, 22, 28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: context.shuyoColors.borderStrong,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(course.name,
+                        style: Theme.of(context).textTheme.titleLarge),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color:
+                                _courseStatusColor(course, context.shuyoColors),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 7),
+                        Text(course.statusLabel,
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: _courseStatusColor(
+                                          course, context.shuyoColors),
+                                    )),
+                        if (course.credits.isNotEmpty) ...[
+                          const SizedBox(width: 14),
+                          Text('${course.credits} 学分',
+                              style: Theme.of(context).textTheme.bodySmall),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    Divider(color: context.shuyoColors.border),
+                    const SizedBox(height: 12),
+                    _detail('课程号', course.code),
+                    _detail('课程性质', course.nature),
+                    _detail('课程类别', course.category),
+                    _detail('学时', course.hours),
+                    _detail('成绩', course.grade),
+                    _detail('绩点', course.gradePoint),
+                    _detail('成绩学年学期',
+                        '${course.academicYear} ${course.term}'.trim()),
+                    _detail(
+                        '建议修读',
+                        '${course.suggestedYear} ${course.suggestedTerm}'
+                            .trim()),
+                  ],
+                ),
               ),
             ),
           ),
@@ -533,8 +773,21 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
   Widget _detail(String label, String value) {
     if (value.isEmpty) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text('$label：$value'),
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          SizedBox(
+            width: 96,
+            child: Text(label,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: context.shuyoColors.textSecondary,
+                    )),
+          ),
+          Expanded(child: Text(value)),
+        ],
+      ),
     );
   }
 
@@ -555,4 +808,237 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
     return '${date.year}-${two(date.month)}-${two(date.day)} '
         '${two(date.hour)}:${two(date.minute)}';
   }
+}
+
+enum _ProgressMenuAction { displaySettings, refreshProgress }
+
+class _ProgressDisplaySettingsSheet extends StatefulWidget {
+  const _ProgressDisplaySettingsSheet({required this.initial});
+
+  final bool initial;
+
+  @override
+  State<_ProgressDisplaySettingsSheet> createState() =>
+      _ProgressDisplaySettingsSheetState();
+}
+
+class _ProgressDisplaySettingsSheetState
+    extends State<_ProgressDisplaySettingsSheet> {
+  late bool _showGpa;
+
+  @override
+  void initState() {
+    super.initState();
+    _showGpa = widget.initial;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.shuyoColors;
+    final bottomPadding = MediaQuery.of(context).viewPadding.bottom;
+    return SafeArea(
+      top: false,
+      bottom: false,
+      child: Container(
+        width: double.infinity,
+        padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + bottomPadding),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+        ),
+        child: Material(
+          type: MaterialType.transparency,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+                child: Text(
+                  '显示设置',
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontSize: 16.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Theme(
+                data: Theme.of(context).copyWith(
+                  splashColor: Colors.transparent,
+                  highlightColor: Colors.transparent,
+                ),
+                child: SwitchListTile(
+                  title: const Text('显示绩点'),
+                  value: _showGpa,
+                  overlayColor:
+                      const WidgetStatePropertyAll<Color?>(Colors.transparent),
+                  onChanged: (value) => setState(() => _showGpa = value),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(context).pop(_showGpa),
+                    child: const Text('完成'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AnimatedProgressBranch extends StatefulWidget {
+  const _AnimatedProgressBranch({
+    super.key,
+    required this.expanded,
+    required this.child,
+  });
+
+  final bool expanded;
+  final Widget? child;
+
+  @override
+  State<_AnimatedProgressBranch> createState() =>
+      _AnimatedProgressBranchState();
+}
+
+class _AnimatedProgressBranchState extends State<_AnimatedProgressBranch>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final CurvedAnimation _progress;
+  Widget? _content;
+
+  @override
+  void initState() {
+    super.initState();
+    _content = widget.child;
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+      value: widget.expanded ? 1 : 0,
+    )..addStatusListener((status) {
+        if (status == AnimationStatus.dismissed && mounted) {
+          setState(() => _content = null);
+        }
+      });
+    _progress = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _AnimatedProgressBranch oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.child != null) _content = widget.child;
+    if (widget.expanded == oldWidget.expanded) return;
+    if (widget.expanded) {
+      _controller.forward();
+    } else {
+      _controller.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _progress.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _progress,
+      builder: (context, _) {
+        final content = _content;
+        if (content == null || _controller.isDismissed) {
+          return const SizedBox(width: double.infinity);
+        }
+        final value = _progress.value;
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.topCenter,
+            heightFactor: value,
+            child: Opacity(
+              opacity: value,
+              child: Transform.translate(
+                offset: Offset(0, 8 * (1 - value)),
+                child: content,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _TreeConnectorPainter extends CustomPainter {
+  const _TreeConnectorPainter({
+    required this.color,
+    this.horizontalEnd,
+    this.horizontalY,
+    this.verticalX,
+    this.verticalFromCenter = false,
+    this.incomingRailX,
+    this.incomingRailStopsAtJunction = false,
+  });
+
+  final Color color;
+  final double? horizontalEnd;
+  final double? horizontalY;
+  final double? verticalX;
+  final bool verticalFromCenter;
+  final double? incomingRailX;
+  final bool incomingRailStopsAtJunction;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final pen = Paint()
+      ..color = color
+      ..strokeWidth = 1.3
+      ..strokeCap = StrokeCap.round;
+    final end = horizontalEnd;
+    if (end != null) {
+      final y = horizontalY ?? size.height / 2;
+      canvas.drawLine(Offset(0, y), Offset(end, y), pen);
+    }
+    final incomingX = incomingRailX;
+    if (incomingX != null) {
+      final junctionY = horizontalY ?? size.height / 2;
+      canvas.drawLine(
+        Offset(incomingX, 0),
+        Offset(
+            incomingX, incomingRailStopsAtJunction ? junctionY : size.height),
+        pen,
+      );
+    }
+    final x = verticalX;
+    if (x != null) {
+      canvas.drawLine(
+        Offset(x, verticalFromCenter ? size.height / 2 : 0),
+        Offset(x, size.height),
+        pen,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _TreeConnectorPainter oldDelegate) =>
+      color != oldDelegate.color ||
+      horizontalEnd != oldDelegate.horizontalEnd ||
+      horizontalY != oldDelegate.horizontalY ||
+      verticalX != oldDelegate.verticalX ||
+      verticalFromCenter != oldDelegate.verticalFromCenter ||
+      incomingRailX != oldDelegate.incomingRailX ||
+      incomingRailStopsAtJunction != oldDelegate.incomingRailStopsAtJunction;
 }

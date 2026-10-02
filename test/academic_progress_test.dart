@@ -11,8 +11,10 @@ import 'package:shuyo/data/repositories/academic_progress_repository.dart';
 import 'package:shuyo/data/services/academic_account_store.dart';
 import 'package:shuyo/data/services/academic_auth_service.dart';
 import 'package:shuyo/data/services/academic_progress_api_client.dart';
+import 'package:shuyo/data/services/academic_progress_display_settings_service.dart';
 import 'package:shuyo/data/services/academic_progress_parser.dart';
 import 'package:shuyo/features/home/academic_progress_page.dart';
+import 'package:shuyo/shared/theme/shuyo_theme.dart';
 
 class _AuthWithCookie extends AcademicAuthService {
   _AuthWithCookie()
@@ -23,6 +25,63 @@ class _AuthWithCookie extends AcademicAuthService {
 
   @override
   Future<String?> cookieHeader({Uri? targetUri}) async => 'JSESSIONID=test';
+}
+
+class _DeepProgressRepository extends AcademicProgressRepository {
+  _DeepProgressRepository() {
+    final sample = DemoAcademicProgressRepository().progress;
+    progress = AcademicProgress(
+      studentId: sample.studentId,
+      gpa: sample.gpa,
+      plannedCourses: sample.plannedCourses,
+      passedCourses: sample.passedCourses,
+      ongoingCourses: sample.ongoingCourses,
+      notTakenCourses: sample.notTakenCourses,
+      fetchedAt: sample.fetchedAt,
+      nodes: [
+        sample.nodes.first,
+        const AcademicProgressNode(
+          id: 'level-1',
+          parentId: 'demo-main',
+          name: '专业课程',
+          requiredCredits: 90,
+          earnedCredits: 30,
+          passed: true,
+          courseKind: '',
+          isLeaf: false,
+        ),
+        const AcademicProgressNode(
+          id: 'level-2',
+          parentId: 'level-1',
+          name: '专业选修',
+          requiredCredits: 30,
+          earnedCredits: 8,
+          passed: false,
+          courseKind: '',
+          isLeaf: false,
+        ),
+        AcademicProgressNode(
+          id: 'level-3',
+          parentId: 'level-2',
+          name: '软件工程方向',
+          requiredCredits: 15,
+          earnedCredits: 3,
+          passed: false,
+          courseKind: '1',
+          isLeaf: true,
+          courses: [sample.nodes[1].courses.first],
+        ),
+      ],
+    );
+  }
+
+  late final AcademicProgress progress;
+
+  @override
+  Future<AcademicProgress?> loadCachedProgress() async => progress;
+
+  @override
+  Future<AcademicProgress> refreshProgress() async => progress;
 }
 
 const _index = '''
@@ -48,6 +107,15 @@ const _index = '''
 ''';
 
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  test('GPA display setting defaults off and is stored', () async {
+    final service = AcademicProgressDisplaySettingsService();
+    expect(await service.loadShowGpa(), isFalse);
+    await service.saveShowGpa(true);
+    expect(await service.loadShowGpa(), isTrue);
+  });
+
   test('parses tree, summary and course response', () {
     final index = AcademicProgressParser.parseIndex(_index);
     expect(index.nodes.map((node) => node.name), [
@@ -145,18 +213,57 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(find.text('学业总览'), findsOneWidget);
+    expect(find.text('平均绩点'), findsNothing);
     expect(find.text('公共基础课程'), findsOneWidget);
     await tester.tap(find.text('公共基础课程'));
     await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('progress-node-demo-basic')),
+        matching: find.byType(InkWell),
+      ),
+      findsNothing,
+    );
     expect(find.text('大学英语'), findsOneWidget);
     expect(find.text('已修'), findsOneWidget);
     expect(find.text('在修'), findsOneWidget);
     expect(find.text('待修'), findsOneWidget);
     expect(find.text('公共基础课 · 2.0 学分'), findsOneWidget);
+    final statusRect = tester.getRect(find.text('已修'));
+    final dotRect = tester
+        .getRect(find.byKey(const ValueKey('progress-course-dot-DEMO101')));
+    final courseNameRect = tester.getRect(find.text('大学英语'));
+    expect((dotRect.center.dy - courseNameRect.center.dy).abs(), lessThan(3));
+    final courseTapRect =
+        tester.getRect(find.byKey(const ValueKey('progress-course-DEMO101')));
+    final nextCourseTapRect =
+        tester.getRect(find.byKey(const ValueKey('progress-course-DEMO102')));
+    expect(courseTapRect.bottom, closeTo(nextCourseTapRect.top, 0.01));
+    expect(courseNameRect.left - dotRect.center.dx, closeTo(29, 0.01));
+    expect(courseTapRect.left,
+        closeTo((dotRect.center.dx + courseNameRect.left) / 2, 1));
+    expect(courseTapRect.left, greaterThan(dotRect.right));
+    expect(courseTapRect.left - dotRect.right, lessThan(20));
+    expect(courseTapRect.left, greaterThan(statusRect.right));
+    expect(
+      find.ancestor(of: find.text('已修'), matching: find.byType(InkWell)),
+      findsNothing,
+    );
+    await tester.tap(find.text('已修'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('progress-course-sheet')), findsOneWidget);
+    Navigator.of(
+            tester.element(find.byKey(const ValueKey('progress-course-sheet'))))
+        .pop();
+    await tester.pumpAndSettle();
     await tester.tap(find.text('大学英语'));
     await tester.pumpAndSettle();
-    expect(find.text('成绩：88'), findsOneWidget);
-    Navigator.of(tester.element(find.text('成绩：88'))).pop();
+    expect(find.text('成绩'), findsOneWidget);
+    expect(find.text('88'), findsOneWidget);
+    final sheet = find.byKey(const ValueKey('progress-course-sheet'));
+    expect(tester.getSize(sheet).width,
+        tester.view.physicalSize.width / tester.view.devicePixelRatio);
+    Navigator.of(tester.element(find.text('88'))).pop();
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('资格证书信息'), 250,
         scrollable: find.byType(Scrollable).first);
@@ -166,11 +273,64 @@ void main() {
     expect(find.text('暂无资格证书信息'), findsOneWidget);
     await tester.tap(find.byTooltip('更多'));
     await tester.pumpAndSettle();
+    expect(find.text('显示设置'), findsOneWidget);
     expect(find.text('刷新学业信息'), findsOneWidget);
+    expect(tester.getTopLeft(find.text('显示设置')).dy,
+        lessThan(tester.getTopLeft(find.text('刷新学业信息')).dy));
     await tester.tap(find.text('刷新学业信息'));
     await tester.pumpAndSettle();
     expect(find.text('学业总览'), findsOneWidget);
     expect(find.text('暂无资格证书信息'), findsOneWidget);
+  });
+
+  testWidgets('display settings control GPA only in the overview',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: AcademicProgressPage(
+        repository: DemoAcademicProgressRepository(),
+        onLoginRequired: () async {},
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('平均绩点'), findsNothing);
+    final earnedX = tester.getTopLeft(find.text('已获学分')).dx;
+    final requiredX = tester.getTopLeft(find.text('要求学分')).dx;
+    await tester.tap(find.text('公共基础课程'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('大学英语'));
+    await tester.pumpAndSettle();
+    expect(find.text('绩点'), findsOneWidget);
+    Navigator.of(
+            tester.element(find.byKey(const ValueKey('progress-course-sheet'))))
+        .pop();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<ListTile>(find.widgetWithText(ListTile, '显示设置')).onTap,
+      isNull,
+    );
+    await tester.tap(find.text('显示设置'));
+    await tester.pumpAndSettle();
+    final toggle = tester
+        .widget<SwitchListTile>(find.widgetWithText(SwitchListTile, '显示绩点'));
+    expect(toggle.value, isFalse);
+    expect(toggle.overlayColor?.resolve({WidgetState.pressed}),
+        Colors.transparent);
+    await tester.tap(find.text('显示绩点'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('完成'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('平均绩点'), findsOneWidget);
+    expect(tester.getTopLeft(find.text('已获学分')).dx, earnedX);
+    expect(tester.getTopLeft(find.text('要求学分')).dx, requiredX);
+    expect(
+        await AcademicProgressDisplaySettingsService().loadShowGpa(), isTrue);
+    await tester.tap(find.text('大学英语'));
+    await tester.pumpAndSettle();
+    expect(find.text('绩点'), findsOneWidget);
   });
 
   test('does not show another account’s cached progress', () async {
@@ -212,5 +372,59 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('大学英语'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('nested branches expand on a narrow phone', (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(
+      home: AcademicProgressPage(
+        repository: _DeepProgressRepository(),
+        onLoginRequired: () async {},
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final completedDot =
+        find.byKey(const ValueKey('progress-node-dot-level-1'));
+    final expectedGreen =
+        ShuYoThemes.byId(ShuYoThemes.defaultId).colors.success;
+    expect(
+        (tester.widget<AnimatedContainer>(completedDot).decoration
+                as BoxDecoration)
+            .color,
+        expectedGreen);
+    for (final title in ['专业课程', '专业选修', '软件工程方向']) {
+      await tester.ensureVisible(find.text(title));
+      await tester.tap(find.text(title));
+      await tester.pumpAndSettle();
+    }
+    expect(
+        (tester.widget<AnimatedContainer>(completedDot).decoration
+                as BoxDecoration)
+            .color,
+        expectedGreen);
+    expect(find.text('大学英语'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('collapsing a branch retracts its connected children',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: AcademicProgressPage(
+        repository: DemoAcademicProgressRepository(),
+        onLoginRequired: () async {},
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('公共基础课程'));
+    await tester.pumpAndSettle();
+    expect(find.text('大学英语'), findsOneWidget);
+    await tester.tap(find.text('公共基础课程'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('大学英语'), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.text('大学英语'), findsNothing);
   });
 }
