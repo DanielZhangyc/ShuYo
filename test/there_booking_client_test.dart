@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuyo/data/services/there_booking_client.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 void main() {
   late HttpServer server;
@@ -19,6 +20,8 @@ void main() {
   var redirectLocation = '/login?code=SECRET_AUTH_CODE';
   var weChatRedirectForMarked = false;
   var weChatRedirectForAll = false;
+  var weChatRedirectHost = 'open.weixin.qq.com';
+  var redirectToWebVpnPortal = false;
 
   setUp(() async {
     seen.clear();
@@ -30,6 +33,8 @@ void main() {
     redirectLocation = '/login?code=SECRET_AUTH_CODE';
     weChatRedirectForMarked = false;
     weChatRedirectForAll = false;
+    weChatRedirectHost = 'open.weixin.qq.com';
+    redirectToWebVpnPortal = false;
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     requests = server.listen((request) async {
       final path = request.uri.path;
@@ -56,13 +61,20 @@ void main() {
       } else if (path == '/web') {
         response = '<html>空间预约</html>';
       } else if (path == '/mobile/libseat' || path == '/mobile/seat2021') {
+        if (redirectToWebVpnPortal) {
+          request.response.statusCode = 302;
+          request.response.headers
+              .set(HttpHeaders.locationHeader, 'https://webvpn.shu.edu.cn/');
+          await request.response.close();
+          return;
+        }
         final marked =
             request.headers.value('x-requested-with') == 'com.tencent.wework';
         mobileModes.add(marked ? 'wework-header' : 'plain');
         if (weChatRedirectForAll || (weChatRedirectForMarked && marked)) {
           request.response.statusCode = 302;
           request.response.headers.set(HttpHeaders.locationHeader,
-              'https://open.weixin.qq.com/connect/oauth2/authorize?code=SECRET_AUTH_CODE');
+              'https://$weChatRedirectHost/connect/oauth2/authorize?code=SECRET_AUTH_CODE');
           await request.response.close();
           return;
         }
@@ -163,6 +175,17 @@ void main() {
     expect(seen, contains('GET /api/v3/my/profile STATION SESSION_24H'));
   });
 
+  test('an active venue reuses its mobile session within the client', () async {
+    await client.selectVenue(BookingVenue.library);
+    await client.selectVenue(BookingVenue.library);
+    await client.profile();
+    expect(
+      seen.where((entry) => entry.startsWith('GET /mobile/libseat')),
+      hasLength(1),
+    );
+    expect(seen, contains('GET /api/v3/my/profile LIB_SEAT SESSION_LIB'));
+  });
+
   test('create rechecks the seat and cancel checks detail ability', () async {
     await client.selectVenue(BookingVenue.library);
     final id = await client.create(
@@ -220,6 +243,10 @@ void main() {
         Uri.parse('http://127.0.0.1:${server.port}/login-oauth2?code=ONCE'));
     expect(requestCookies['/login-oauth2'], contains('SPHYS_SESSION=prewarm'));
     expect(requestCookies['/web'], contains('SPHYS_SESSION=authenticated'));
+    expect(
+      seen.where((entry) => entry.startsWith('GET /api/v3/my/profile')),
+      isEmpty,
+    );
     expect(await client.profile(), containsPair('id', 'USER_1'));
   });
 
@@ -248,6 +275,72 @@ void main() {
     );
   });
 
+  test('proxied there uses portal token without copying direct cookies',
+      () async {
+    final proxyClient = ThereBookingClient(
+      serviceUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      useWebVpn: true,
+      cookieLoader: (uri) async => uri.host == 'webvpn.shu.edu.cn'
+          ? [
+              WebViewCookie(
+                name: 'webvpn-token',
+                value: 'GATEWAY_TOKEN',
+                domain: 'webvpn.shu.edu.cn',
+              ),
+            ]
+          : [],
+      cookieSetter: (_) async {},
+    );
+    addTearDown(proxyClient.dispose);
+    await proxyClient.selectVenue(BookingVenue.library);
+    expect(requestCookies['/mobile/libseat'],
+        contains('webvpn-token=GATEWAY_TOKEN'));
+    expect(requestCookies['/mobile/libseat'], isNot(contains('SPHYS_SESSION')));
+    await proxyClient.prepareOAuth();
+    await proxyClient.completeOAuth(
+        Uri.parse('https://there.shu.edu.cn/login-oauth2?code=ONCE'));
+    expect(await proxyClient.profile(), containsPair('id', 'USER_1'));
+  });
+
+  test('proxy mode keeps there landing on the proxy HTTPS host', () {
+    final proxyClient = ThereBookingClient(
+      useWebVpn: true,
+      cookieLoader: (_) async => [],
+      cookieSetter: (_) async {},
+    );
+    addTearDown(proxyClient.dispose);
+    final landing = proxyClient.normalizeServiceRedirect(Uri.parse(
+      'http://there.shu.edu.cn/web?authJump=SECRET_TOKEN',
+    ));
+    expect(landing?.host, 'https-there-shu-edu-cn-443.webvpn.shu.edu.cn');
+    expect(landing?.scheme, 'https');
+    expect(landing?.queryParameters['authJump'], 'SECRET_TOKEN');
+    expect(
+      proxyClient
+          .normalizeServiceRedirect(Uri.parse('http://other.shu.edu.cn/web')),
+      isNull,
+    );
+  });
+
+  test('proxy portal redirect is reported as WebVPN login required', () async {
+    redirectToWebVpnPortal = true;
+    final proxyClient = ThereBookingClient(
+      serviceUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      useWebVpn: true,
+      cookieLoader: (_) async => [],
+      cookieSetter: (_) async {},
+    );
+    addTearDown(proxyClient.dispose);
+    await expectLater(
+      proxyClient.selectVenue(BookingVenue.library),
+      throwsA(isA<ThereBookingException>().having(
+        (error) => error.kind,
+        'kind',
+        ThereFailureKind.webVpnLoginRequired,
+      )),
+    );
+  });
+
   test('there callback diagnostics redact the code and landing token',
       () async {
     final logs = <String>[];
@@ -260,7 +353,7 @@ void main() {
     await client.completeOAuth(Uri.parse(
         'http://127.0.0.1:${server.port}/login-oauth2?code=SECRET_CODE'));
     final log = logs.join('\n');
-    expect(log, contains('oauth-stage path=/login-oauth2 status=302'));
+    expect(log, contains('path=/login-oauth2 status=302'));
     expect(log, isNot(contains('SECRET_CODE')));
     expect(log, isNot(contains('authJump=token')));
   });
@@ -275,6 +368,19 @@ void main() {
       ThereBookingClient.matchesAccount(
           {'loginName': 'ANOTHER', 'jobNumber': 'OTHER'}, 'STUDENT_1'),
       isFalse,
+    );
+  });
+
+  test('API timing route names omit area and booking identifiers', () {
+    expect(
+      ThereBookingClient.routeForLog(
+          '/api/v3/booking-status/areas/SECRET_AREA_ID'),
+      '/api/v3/booking-status/areas/{areaId}',
+    );
+    expect(
+      ThereBookingClient.routeForLog(
+          '/api/v3/bookings/SECRET_BOOKING_ID/cancel'),
+      '/api/v3/bookings/{bookingId}/cancel',
     );
   });
 
@@ -296,6 +402,43 @@ void main() {
     weChatRedirectForMarked = true;
     await client.selectVenue(BookingVenue.library);
     expect(await client.profile(), containsPair('id', 'USER_1'));
+    expect(mobileModes, ['wework-header', 'plain']);
+  });
+
+  test('proxied WeChat redirect uses the same plain retry', () async {
+    weChatRedirectForMarked = true;
+    weChatRedirectHost = 'https-open-weixin-qq-com-443.webvpn.shu.edu.cn';
+    final proxyClient = ThereBookingClient(
+      serviceUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      useWebVpn: true,
+      cookieLoader: (_) async => [],
+      cookieSetter: (_) async {},
+    );
+    addTearDown(proxyClient.dispose);
+    await proxyClient.selectVenue(BookingVenue.library);
+    expect(await proxyClient.profile(), containsPair('id', 'USER_1'));
+    expect(mobileModes, ['wework-header', 'plain']);
+  });
+
+  test('persistent proxied WeChat redirect first requests there login',
+      () async {
+    weChatRedirectForAll = true;
+    weChatRedirectHost = 'https-open-weixin-qq-com-443.webvpn.shu.edu.cn';
+    final proxyClient = ThereBookingClient(
+      serviceUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      useWebVpn: true,
+      cookieLoader: (_) async => [],
+      cookieSetter: (_) async {},
+    );
+    addTearDown(proxyClient.dispose);
+    await expectLater(
+      proxyClient.selectVenue(BookingVenue.library),
+      throwsA(isA<ThereBookingException>().having(
+        (error) => error.kind,
+        'kind',
+        ThereFailureKind.loginRequired,
+      )),
+    );
     expect(mobileModes, ['wework-header', 'plain']);
   });
 

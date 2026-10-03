@@ -126,6 +126,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _loadingAnnouncementSummary = false;
   bool _checkingClientBackendPrompts = false;
   bool _refreshingWebVpnStatus = false;
+  bool _openingLibraryBooking = false;
+  ThereBookingClient? _directBookingClient;
+  ThereBookingClient? _webVpnBookingClient;
   Future<WebVpnRecoveryOutcome>? _webVpnRecoveryTask;
   Future<void>? _thereRecoveryTask;
   String _scheduleSummaryText = '正在读取课表...';
@@ -253,6 +256,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _scheduleSummaryTimer?.cancel();
     _announcementSummaryTimer?.cancel();
     _widgetClickSubscription?.cancel();
+    _directBookingClient?.dispose();
+    _webVpnBookingClient?.dispose();
     widget.onboardingController.setWebVpnChangeHandler(null);
     widget.onboardingController.setAccountLogoutHandlers();
     super.dispose();
@@ -429,6 +434,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // WebVPN obtains its own business session from the same SSO account.
       // It is independent of the first-use data sync below.
       if (connectWebVpn) {
+        _directBookingClient?.resetSession();
+        _webVpnBookingClient?.resetSession();
         unawaited(_recoverWebVpn());
         final task = _establishThereInBackground();
         _thereRecoveryTask = task;
@@ -713,17 +720,31 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Future<void> _openLibraryBooking() async {
+    if (_openingLibraryBooking) return;
     if (widget.isDemo) {
       _showSnack('演示模式暂不支持图书馆预约');
       return;
     }
-    await Navigator.of(context).push<void>(
-      shuyoRoute(
-        builder: (_) => LibraryBookingPage(
-          accountService: _unifiedAccountService,
+    _openingLibraryBooking = true;
+    try {
+      final useWebVpn = _webVpnEnabled;
+      final client = useWebVpn
+          ? (_webVpnBookingClient ??= ThereBookingClient(useWebVpn: true))
+          : (_directBookingClient ??= ThereBookingClient());
+      await Navigator.of(context).push<void>(
+        shuyoRoute(
+          builder: (_) => LibraryBookingPage(
+            accountService: _unifiedAccountService,
+            client: client,
+            useWebVpn: useWebVpn,
+            onWebVpnSessionRequired: () =>
+                _changeWebVpnFromAccountManager(true),
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      _openingLibraryBooking = false;
+    }
   }
 
   Future<void> _establishThereInBackground() async {
@@ -812,13 +833,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     } on Object {
       failed = true;
     }
-    final there = ThereBookingClient();
     try {
-      await there.clearSession();
+      await _clearThereSession(useWebVpn: false);
     } on Object {
       failed = true;
-    } finally {
-      there.dispose();
+    }
+    try {
+      await _clearProxiedThereSession();
+    } on Object {
+      failed = true;
     }
     try {
       await _unifiedAccountService.clearSsoSession();
@@ -853,6 +876,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<bool> _logoutWebVpnSession() async {
     try {
       await WebVpnSessionStore().clearSession();
+      await _clearProxiedThereSession();
       await _unifiedAccountService.setWebVpnPendingRecovery(false);
       if (mounted) {
         setState(() {
@@ -865,6 +889,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     } on Object {
       _showSnack('WebVPN退出失败');
       return false;
+    }
+  }
+
+  Future<void> _clearProxiedThereSession() async {
+    await _clearThereSession(useWebVpn: true);
+  }
+
+  Future<void> _clearThereSession({required bool useWebVpn}) async {
+    final existing = useWebVpn ? _webVpnBookingClient : _directBookingClient;
+    final client = existing ?? ThereBookingClient(useWebVpn: useWebVpn);
+    try {
+      await client.clearSession();
+    } finally {
+      if (existing == null) client.dispose();
     }
   }
 

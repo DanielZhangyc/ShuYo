@@ -118,6 +118,21 @@ class _UnreachableBookingClient extends _BookingClient {
       );
 }
 
+class _GatewayRecoveryClient extends _BookingClient {
+  bool gatewayLoginRequired = true;
+
+  @override
+  Future<void> selectVenue(BookingVenue venue) async {
+    if (gatewayLoginRequired) {
+      throw const ThereBookingException(
+        ThereFailureKind.webVpnLoginRequired,
+        'WebVPN登录已失效',
+      );
+    }
+    await super.selectVenue(venue);
+  }
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
@@ -172,5 +187,27 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('请连接校园网、学校VPN，或开启WebVPN后重试'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
+  });
+
+  testWidgets('proxy page restores gateway before reading bookings',
+      (tester) async {
+    final client = _GatewayRecoveryClient();
+    addTearDown(client.dispose);
+    var recoveries = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: LibraryBookingPage(
+        accountService: UnifiedAccountService(),
+        client: client,
+        useWebVpn: true,
+        onWebVpnSessionRequired: () async {
+          recoveries++;
+          client.gatewayLoginRequired = false;
+          return true;
+        },
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(recoveries, 1);
+    expect(find.text('预约座位'), findsOneWidget);
   });
 }

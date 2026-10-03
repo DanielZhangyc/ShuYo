@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/client_user_agent.dart';
+import '../../core/webvpn_urls.dart';
 import 'academic_native_auth_service.dart';
 import 'http_timeout.dart';
 
@@ -24,7 +25,13 @@ enum BookingVenue {
   final bool showChecks;
 }
 
-enum ThereFailureKind { loginRequired, unreachable, business, uncertain }
+enum ThereFailureKind {
+  loginRequired,
+  webVpnLoginRequired,
+  unreachable,
+  business,
+  uncertain,
+}
 
 class ThereBookingException implements Exception {
   const ThereBookingException(this.kind, this.message);
@@ -41,20 +48,26 @@ class ThereBookingClient {
     HttpClient? httpClient,
     WebViewCookieManager? cookieManager,
     Uri? serviceUri,
+    this.useWebVpn = false,
     Future<List<WebViewCookie>> Function(Uri)? cookieLoader,
     Future<void> Function(WebViewCookie)? cookieSetter,
   })  : _http = httpClient ?? HttpClient(),
         _cookieManagerInstance = cookieManager,
-        baseUri = serviceUri ?? Uri.parse('https://there.shu.edu.cn'),
+        baseUri = serviceUri ??
+            Uri.parse(useWebVpn
+                ? 'https://https-there-shu-edu-cn-443.webvpn.shu.edu.cn'
+                : 'https://there.shu.edu.cn'),
         _cookieLoader = cookieLoader,
         _cookieSetter = cookieSetter {
     _http.connectionTimeout = HttpTimeout.connect;
   }
 
   static const _submitInterval = Duration(seconds: 10);
+  static final directUri = Uri.parse('https://there.shu.edu.cn');
 
   final HttpClient _http;
   final Uri baseUri;
+  final bool useWebVpn;
   final Future<List<WebViewCookie>> Function(Uri)? _cookieLoader;
   final Future<void> Function(WebViewCookie)? _cookieSetter;
   WebViewCookieManager? _cookieManagerInstance;
@@ -62,6 +75,7 @@ class ThereBookingClient {
       _cookieManagerInstance ??= WebViewCookieManager();
   AcademicSessionCookieStore _cookies = AcademicSessionCookieStore();
   bool _browserCookiesLoaded = false;
+  String? _portalWebVpnToken;
   bool _oauthCompleted = false;
   BookingVenue? _venue;
   String? _sessionId;
@@ -76,6 +90,7 @@ class ThereBookingClient {
   void resetSession() {
     _cookies = AcademicSessionCookieStore();
     _browserCookiesLoaded = false;
+    _portalWebVpnToken = null;
     _oauthCompleted = false;
     _sessionId = null;
     _venue = null;
@@ -358,7 +373,8 @@ class ThereBookingClient {
     Uri callback, {
     Iterable<({Cookie cookie, String domain, String path})> cookies = const [],
   }) async {
-    if (callback.origin != baseUri.origin ||
+    final expectedCallback = useWebVpn ? directUri : baseUri;
+    if (callback.origin != expectedCallback.origin ||
         callback.path != '/login-oauth2' ||
         string(callback.queryParameters['code']) == null) {
       throw const ThereBookingException(
@@ -415,7 +431,6 @@ class ThereBookingClient {
     }
     _oauthCompleted = true;
     await selectVenue(BookingVenue.library);
-    await profile();
   }
 
   /// there currently issues an HTTP Location for /web after an HTTPS OAuth
@@ -423,12 +438,32 @@ class ThereBookingClient {
   /// The client's cookies are never sent to the HTTP URL.
   @visibleForTesting
   Uri? normalizeServiceRedirect(Uri? location) {
-    if (location == null ||
-        location.host != baseUri.host ||
-        location.userInfo.isNotEmpty) {
+    if (location == null || location.userInfo.isNotEmpty) {
       return null;
     }
     if (location.origin == baseUri.origin) return location;
+    final directHost = directUri.host;
+    final allowedOriginalHost = location.host == directHost &&
+        ((location.scheme == 'https' && location.port == 443) ||
+            (location.scheme == 'http' && location.port == 80));
+    if (useWebVpn && allowedOriginalHost) {
+      return baseUri.replace(
+        path: location.path,
+        queryParameters: location.queryParameters,
+        fragment: '',
+      );
+    }
+    if (useWebVpn &&
+        location.scheme == 'https' &&
+        location.port == 443 &&
+        location.host == 'http-there-shu-edu-cn-80.webvpn.shu.edu.cn') {
+      return baseUri.replace(
+        path: location.path,
+        queryParameters: location.queryParameters,
+        fragment: '',
+      );
+    }
+    if (location.host != baseUri.host) return null;
     if (baseUri.scheme == 'https' &&
         baseUri.port == 443 &&
         location.scheme == 'http' &&
@@ -528,6 +563,7 @@ class ThereBookingClient {
     Map<String, dynamic>? body,
     bool createRequest = false,
   }) async {
+    final timer = Stopwatch()..start();
     await _loadBrowserCookies();
     final uri =
         Uri.parse('${baseUri.origin}$path').replace(queryParameters: query);
@@ -543,8 +579,20 @@ class ThereBookingClient {
         request.headers.set(entry.key, entry.value);
       }
       final cookieHeader = _cookies.headerFor(uri);
-      if (cookieHeader.isNotEmpty) {
-        request.headers.set(HttpHeaders.cookieHeader, cookieHeader);
+      final hasTargetWebVpnToken = cookieHeader.split(';').any(
+            (part) => part.trimLeft().startsWith('webvpn-token='),
+          );
+      final gatewayCookie = useWebVpn &&
+              !hasTargetWebVpnToken &&
+              _portalWebVpnToken?.isNotEmpty == true
+          ? 'webvpn-token=$_portalWebVpnToken'
+          : '';
+      final combinedCookies = [
+        if (gatewayCookie.isNotEmpty) gatewayCookie,
+        if (cookieHeader.isNotEmpty) cookieHeader,
+      ].join('; ');
+      if (combinedCookies.isNotEmpty) {
+        request.headers.set(HttpHeaders.cookieHeader, combinedCookies);
       }
       if (body != null) {
         request.headers.contentType = ContentType.json;
@@ -560,8 +608,15 @@ class ThereBookingClient {
           // An unrelated malformed cookie must not hide a usable session.
         }
       }
-      _cookies.save(uri, responseCookies);
-      for (final cookie in responseCookies) {
+      final scopedCookies = responseCookies.map((cookie) {
+        if (!useWebVpn ||
+            cookie.domain?.replaceFirst(RegExp(r'^\.'), '') != directUri.host) {
+          return cookie;
+        }
+        return cookie..domain = baseUri.host;
+      }).toList();
+      _cookies.save(uri, scopedCookies);
+      for (final cookie in scopedCookies) {
         if (cookie.name.isEmpty || cookie.value.isEmpty) continue;
         final webCookie = WebViewCookie(
           name: cookie.name,
@@ -582,11 +637,13 @@ class ThereBookingClient {
         debugPrint(
           '[THERE_BOOKING] mobile-entry '
           'venue=${_venue?.roomType ?? '-'} '
+          'transport=${useWebVpn ? 'webvpn' : 'direct'} '
           'mode=$mode '
           'status=${response.statusCode} '
           'contentType=${response.headers.contentType?.mimeType ?? '-'} '
           'redirect=${_safeRedirect(redirect)} '
-          'bodyChars=${text.length}',
+          'bodyChars=${text.length} '
+          'durationMs=${timer.elapsedMilliseconds}',
         );
       }
       if (kDebugMode &&
@@ -596,10 +653,33 @@ class ThereBookingClient {
             responseCookies.map((cookie) => cookie.name).toList()..sort();
         debugPrint(
           '[THERE_BOOKING] oauth-stage '
+          'transport=${useWebVpn ? 'webvpn' : 'direct'} '
           'path=$path '
           'status=${response.statusCode} '
           'redirect=${_safeRedirect(redirect)} '
-          'cookieNames=$cookieNames',
+          'cookieNames=$cookieNames '
+          'durationMs=${timer.elapsedMilliseconds}',
+        );
+      }
+      if (kDebugMode && path.startsWith('/api/v3/')) {
+        debugPrint(
+          '[THERE_BOOKING] api '
+          'transport=${useWebVpn ? 'webvpn' : 'direct'} '
+          'method=$method route=${routeForLog(path)} '
+          'query=${_queryShape(query)} '
+          'status=${response.statusCode} '
+          'bodyChars=${text.length} '
+          'durationMs=${timer.elapsedMilliseconds}',
+        );
+      }
+      final redirect = location == null ? null : uri.resolve(location);
+      if (useWebVpn &&
+          response.statusCode >= 300 &&
+          response.statusCode < 400 &&
+          redirect?.host == Uri.parse(WebVpnUrls.portal).host) {
+        throw const ThereBookingException(
+          ThereFailureKind.webVpnLoginRequired,
+          'WebVPN登录已失效，请在账号管理恢复后重试',
         );
       }
       return _ThereResponse(
@@ -608,7 +688,7 @@ class ThereBookingClient {
         location == null ? null : uri.resolve(location),
       );
     } on TimeoutException {
-      _logTransportFailure(path, 'timeout');
+      _logTransportFailure(path, 'timeout', timer.elapsedMilliseconds);
       throw ThereBookingException(
         createRequest
             ? ThereFailureKind.uncertain
@@ -618,7 +698,7 @@ class ThereBookingClient {
             : '暂时无法访问预约系统。请连接校园网、学校VPN，或开启WebVPN后重试。',
       );
     } on SocketException {
-      _logTransportFailure(path, 'socket');
+      _logTransportFailure(path, 'socket', timer.elapsedMilliseconds);
       throw ThereBookingException(
         createRequest
             ? ThereFailureKind.uncertain
@@ -628,7 +708,7 @@ class ThereBookingClient {
             : '暂时无法访问预约系统。请连接校园网、学校VPN，或开启WebVPN后重试。',
       );
     } on HandshakeException {
-      _logTransportFailure(path, 'tls');
+      _logTransportFailure(path, 'tls', timer.elapsedMilliseconds);
       throw const ThereBookingException(
         ThereFailureKind.unreachable,
         '暂时无法连接预约系统，请检查网络后重试',
@@ -636,16 +716,56 @@ class ThereBookingClient {
     }
   }
 
-  void _logTransportFailure(String path, String kind) {
+  void _logTransportFailure(String path, String kind, int durationMs) {
     if (!kDebugMode) return;
     if (path.startsWith('/mobile/')) {
       debugPrint(
         '[THERE_BOOKING] mobile-entry '
-        'venue=${_venue?.roomType ?? '-'} transport=$kind',
+        'venue=${_venue?.roomType ?? '-'} transport=$kind '
+        'durationMs=$durationMs',
       );
     } else if (path == '/login' || path == '/login-oauth2' || path == '/web') {
-      debugPrint('[THERE_BOOKING] oauth-stage path=$path transport=$kind');
+      debugPrint('[THERE_BOOKING] oauth-stage path=$path transport=$kind '
+          'durationMs=$durationMs');
+    } else if (path.startsWith('/api/v3/')) {
+      debugPrint('[THERE_BOOKING] api route=${routeForLog(path)} '
+          'transport=$kind durationMs=$durationMs');
     }
+  }
+
+  @visibleForTesting
+  static String routeForLog(String path) {
+    if (path == '/api/v3/my/profile' ||
+        path == '/api/v3/my/bookings/recent' ||
+        path == '/api/v3/booking-status/overview' ||
+        path == '/api/v3/booking-status/areas' ||
+        path == '/api/v3/bookings') {
+      return path;
+    }
+    if (path.startsWith('/api/v3/booking-status/areas/')) {
+      return '/api/v3/booking-status/areas/{areaId}';
+    }
+    if (path.startsWith('/api/v3/bookings/')) {
+      final suffix = path.endsWith('/cancel')
+          ? '/cancel'
+          : path.endsWith('/finish')
+              ? '/finish'
+              : '';
+      return '/api/v3/bookings/{bookingId}$suffix';
+    }
+    return '/api/v3/{other}';
+  }
+
+  String _queryShape(Map<String, String>? query) {
+    if (query == null || query.isEmpty) return '-';
+    if (query.containsKey('begin') && query.containsKey('end')) {
+      return query['begin']?.length == 10 && query['end']?.length == 10
+          ? 'day'
+          : 'interval';
+    }
+    if (query.containsKey('day')) return 'day';
+    if (query.containsKey('showChecks')) return 'detail';
+    return 'other';
   }
 
   String _safeRedirect(Uri? uri) {
@@ -669,13 +789,25 @@ class ThereBookingClient {
     return '${uri.scheme}://${uri.host}$path';
   }
 
-  bool _isWeChatRedirect(_ThereResponse response) =>
-      response.status >= 300 &&
-      response.status < 400 &&
-      response.location?.host == 'open.weixin.qq.com';
+  bool _isWeChatRedirect(_ThereResponse response) {
+    if (response.status < 300 || response.status >= 400) return false;
+    final host = response.location?.host;
+    return host == 'open.weixin.qq.com' ||
+        (useWebVpn && host == 'https-open-weixin-qq-com-443.webvpn.shu.edu.cn');
+  }
 
   Future<void> _loadBrowserCookies() async {
     if (_browserCookiesLoaded) return;
+    if (useWebVpn) {
+      final portal = Uri.parse(WebVpnUrls.portal);
+      final portalCookies = await (_cookieLoader?.call(portal) ??
+          _cookieManager.getCookies(domain: portal));
+      _portalWebVpnToken = [
+        for (final cookie in portalCookies)
+          if (cookie.name == 'webvpn-token' && cookie.value.isNotEmpty)
+            cookie.value,
+      ].lastOrNull;
+    }
     final values = await (_cookieLoader?.call(baseUri) ??
         _cookieManager.getCookies(domain: baseUri));
     for (final value in values) {

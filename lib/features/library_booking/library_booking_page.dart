@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/services/academic_account_store.dart';
@@ -13,17 +14,22 @@ class LibraryBookingPage extends StatefulWidget {
     super.key,
     required this.accountService,
     this.client,
+    this.useWebVpn = false,
+    this.onWebVpnSessionRequired,
   });
 
   final UnifiedAccountService accountService;
   final ThereBookingClient? client;
+  final bool useWebVpn;
+  final Future<bool> Function()? onWebVpnSessionRequired;
 
   @override
   State<LibraryBookingPage> createState() => _LibraryBookingPageState();
 }
 
 class _LibraryBookingPageState extends State<LibraryBookingPage> {
-  late final ThereBookingClient _client = widget.client ?? ThereBookingClient();
+  late final ThereBookingClient _client =
+      widget.client ?? ThereBookingClient(useWebVpn: widget.useWebVpn);
   BookingVenue _venue = BookingVenue.library;
   String _day = ThereBookingClient.schoolDay();
   List<String> _days = [];
@@ -331,17 +337,23 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
 
   Future<void> _loadVenue() async {
     if (!mounted) return;
+    final timer = Stopwatch()..start();
     final generation = ++_generation;
+    if (kDebugMode) {
+      debugPrint('[THERE_BOOKING] page-load-start '
+          'venue=${_venue.roomType} '
+          'transport=${widget.useWebVpn ? 'webvpn' : 'direct'}');
+    }
     setState(() {
       _loading = true;
       _error = null;
       _selectedRoomId = null;
     });
     try {
-      _profile = await _read(() async {
+      _profile = await _read<Map<String, dynamic>>(() async {
         await _client.selectVenue(_venue);
         return _client.profile();
-      });
+      }, validateAfterRecovery: _checkAccount);
       await _checkAccount(_profile!);
       final recent = await _read(_client.recent);
       var overview = await _read(() => _client.overview(_day));
@@ -374,7 +386,17 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         _rooms = [];
         _loading = false;
       });
+      if (kDebugMode) {
+        debugPrint('[THERE_BOOKING] page-summary-ready '
+            'venue=${_venue.roomType} durationMs=${timer.elapsedMilliseconds}');
+      }
       if (selected != null) await _loadArea();
+      if (kDebugMode && mounted) {
+        debugPrint('[THERE_BOOKING] page-load-finished '
+            'venue=${_venue.roomType} '
+            'areas=${_areas.length} seats=${_rooms.length} '
+            'durationMs=${timer.elapsedMilliseconds}');
+      }
       try {
         await widget.accountService.setTherePendingRecovery(false);
       } on Object {
@@ -382,6 +404,14 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       }
     } on Object catch (error) {
       if (!mounted || generation != _generation) return;
+      if (kDebugMode) {
+        final kind = error is ThereBookingException
+            ? error.kind.name
+            : error.runtimeType.toString();
+        debugPrint('[THERE_BOOKING] page-load-failed '
+            'venue=${_venue.roomType} kind=$kind '
+            'durationMs=${timer.elapsedMilliseconds}');
+      }
       try {
         await widget.accountService.setTherePendingRecovery(true);
       } on Object {
@@ -401,6 +431,12 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       await _client.completeOAuth(callback);
       return true;
     }
+    if (widget.useWebVpn) {
+      throw const ThereBookingException(
+        ThereFailureKind.loginRequired,
+        '统一认证会话已失效，请先在账号管理恢复WebVPN登录后重试',
+      );
+    }
     if (!mounted) return false;
     final result = await Navigator.of(context).push<NativeLoginResult>(
       MaterialPageRoute(builder: (_) => const NativeLoginPage.there()),
@@ -412,10 +448,20 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     return false;
   }
 
-  Future<T> _read<T>(Future<T> Function() operation) async {
+  Future<T> _read<T>(
+    Future<T> Function() operation, {
+    Future<void> Function(T)? validateAfterRecovery,
+  }) async {
     try {
       return await operation();
     } on ThereBookingException catch (error) {
+      if (error.kind == ThereFailureKind.webVpnLoginRequired &&
+          widget.useWebVpn) {
+        final restored = await widget.onWebVpnSessionRequired?.call() ?? false;
+        if (!restored) rethrow;
+        _client.resetSession();
+        return _readAfterRecovery(operation, validateAfterRecovery);
+      }
       if (error.kind != ThereFailureKind.loginRequired) rethrow;
     }
     final authenticated = await _authenticate();
@@ -425,7 +471,19 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         '请先登录图书馆预约',
       );
     }
+    return _readAfterRecovery(operation, validateAfterRecovery);
+  }
+
+  Future<T> _readAfterRecovery<T>(
+    Future<T> Function() operation,
+    Future<void> Function(T)? validateAfterRecovery,
+  ) async {
     await _client.selectVenue(_venue);
+    if (validateAfterRecovery != null) {
+      final result = await operation();
+      await validateAfterRecovery(result);
+      return result;
+    }
     await _checkAccount(await _client.profile());
     return operation();
   }
@@ -578,8 +636,11 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           // Keep the uncertain result; a new create request is not automatic.
         }
       }
-      if (error.kind == ThereFailureKind.loginRequired) {
-        await _recoverAfterWrite();
+      if (error.kind == ThereFailureKind.loginRequired ||
+          error.kind == ThereFailureKind.webVpnLoginRequired) {
+        await _recoverAfterWrite(
+          webVpn: error.kind == ThereFailureKind.webVpnLoginRequired,
+        );
         return;
       }
       if (mounted) _showMessage(error.message);
@@ -683,8 +744,11 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       await _client.cancel(id);
       cancelled = true;
     } on ThereBookingException catch (error) {
-      if (error.kind == ThereFailureKind.loginRequired) {
-        await _recoverAfterWrite();
+      if (error.kind == ThereFailureKind.loginRequired ||
+          error.kind == ThereFailureKind.webVpnLoginRequired) {
+        await _recoverAfterWrite(
+          webVpn: error.kind == ThereFailureKind.webVpnLoginRequired,
+        );
       } else if (mounted) {
         _showMessage(error.message);
       }
@@ -731,8 +795,11 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       await _client.finish(id);
       finished = true;
     } on ThereBookingException catch (error) {
-      if (error.kind == ThereFailureKind.loginRequired) {
-        await _recoverAfterWrite();
+      if (error.kind == ThereFailureKind.loginRequired ||
+          error.kind == ThereFailureKind.webVpnLoginRequired) {
+        await _recoverAfterWrite(
+          webVpn: error.kind == ThereFailureKind.webVpnLoginRequired,
+        );
       } else if (mounted) {
         _showMessage(error.message);
       }
@@ -753,9 +820,13 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     }
   }
 
-  Future<void> _recoverAfterWrite() async {
+  Future<void> _recoverAfterWrite({bool webVpn = false}) async {
     try {
-      if (!await _authenticate() || !mounted) return;
+      final recovered = webVpn
+          ? await widget.onWebVpnSessionRequired?.call() ?? false
+          : await _authenticate();
+      if (!recovered || !mounted) return;
+      if (webVpn) _client.resetSession();
       await _loadVenue();
       if (mounted) _showMessage('登录已恢复，请重新确认操作');
     } on Object catch (error) {

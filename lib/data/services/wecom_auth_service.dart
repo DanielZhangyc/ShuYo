@@ -817,6 +817,7 @@ class WeComAuthService {
     String? origin,
     Duration timeout = HttpTimeout.normal,
   }) async {
+    final timer = Stopwatch()..start();
     final request = await _client.getUrl(uri).timeout(HttpTimeout.connect);
     request.followRedirects = false;
     request.headers
@@ -853,7 +854,8 @@ class WeComAuthService {
       response = await request.close().timeout(timeout);
     } on Object catch (error) {
       _debug('request-failed ${describeUrlForLog(uri)} '
-          'type=${error.runtimeType}');
+          'type=${error.runtimeType} '
+          'durationMs=${timer.elapsedMilliseconds}');
       rethrow;
     }
     // 在这里统一收下所有响应（包括 redeem）下发的 Set-Cookie，
@@ -862,7 +864,8 @@ class WeComAuthService {
     final location = response.headers.value(HttpHeaders.locationHeader);
     _debug('response ${describeUrlForLog(uri)} status=${response.statusCode} '
         'location=${location == null ? '-' : describeUrlForLog(uri.resolve(location))} '
-        'cookies=${cookies.map((c) => c.name).toList()}');
+        'cookies=${cookies.map((c) => c.name).toList()} '
+        'durationMs=${timer.elapsedMilliseconds}');
     _cookies.save(uri, cookies);
     return response;
   }
