@@ -16,6 +16,7 @@ import 'package:shuyo/data/repositories/academic_schedule_repository.dart';
 import 'package:shuyo/data/services/academic_account_store.dart';
 import 'package:shuyo/data/services/academic_auth_service.dart';
 import 'package:shuyo/data/services/academic_schedule_api_client.dart';
+import 'package:shuyo/data/services/unified_account_service.dart';
 import 'package:shuyo/features/auth/native_login_page.dart';
 import 'package:shuyo/features/onboarding/startup_onboarding.dart';
 
@@ -89,6 +90,15 @@ class _LocalAuth extends AcademicAuthService {
   Future<String?> cookieHeader({Uri? targetUri}) async => 'JSESSIONID=test';
 }
 
+class _LocalUnifiedAccount extends UnifiedAccountService {
+  @override
+  Future<WebVpnRecoveryOutcome> recoverWebVpn() async =>
+      WebVpnRecoveryOutcome.unavailable;
+
+  @override
+  Future<Uri?> authorizeAcademic() async => null;
+}
+
 class _StubNotifications extends FlutterLocalNotificationsPlatform {
   @override
   Future<List<PendingNotificationRequest>>
@@ -148,6 +158,7 @@ void main() {
           progressRepository: progress,
           rankingRepository: ranking,
           academicAuthService: auth,
+          unifiedAccountService: _LocalUnifiedAccount(),
         ),
       );
 

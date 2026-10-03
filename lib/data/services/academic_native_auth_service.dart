@@ -74,6 +74,7 @@ class AcademicNativeAuthService {
   }
 
   static const _newssoPathMarker = '/oauth2/login/';
+  static const _tenantId = '上海大学';
   static Uri get _academicEntry => AcademicUrlResolver.entryUri;
   static const _webVpnPortal = 'https://webvpn.shu.edu.cn';
   static const _webVpnHost = 'webvpn.shu.edu.cn';
@@ -345,6 +346,7 @@ class AcademicNativeAuthService {
       body: {
         'username': username,
         'password': encryptedPassword,
+        'tenantId': _tenantId,
         'params': params,
       },
       referer: loginUri,
@@ -382,7 +384,7 @@ class AcademicNativeAuthService {
         '登录成功，但学校未返回授权地址',
       );
     }
-    final callbackUri = loginUri.resolve(redirect);
+    final callbackUri = canonicalSsoUri(loginUri.resolve(redirect));
     _validateUri(callbackUri);
     _clearChallenge();
     return AcademicLoginResult(callbackUri: callbackUri);
@@ -429,6 +431,7 @@ class AcademicNativeAuthService {
       body: {
         'username': _username,
         'password': _encryptedPassword,
+        'tenantId': _tenantId,
         'params': _params,
         'code': code,
         'method': method.name,
@@ -443,7 +446,7 @@ class AcademicNativeAuthService {
         '验证成功，但学校未返回授权地址',
       );
     }
-    final callbackUri = loginUri.resolve(redirect);
+    final callbackUri = canonicalSsoUri(loginUri.resolve(redirect));
     _validateUri(callbackUri);
     _clearChallenge();
     return callbackUri;
@@ -467,17 +470,20 @@ class AcademicNativeAuthService {
       final next = _redirectTarget(response, uri);
       await response.drain<void>().timeout(HttpTimeout.normal);
       if (next == null) {
-        if (uri.path.contains(_newssoPathMarker)) return uri;
+        if (uri.path.contains(_newssoPathMarker)) {
+          return canonicalSsoUri(uri);
+        }
         throw const AcademicNativeAuthException(
           'loginPageNotFound',
           '无法取得该服务的统一认证入口',
         );
       }
       if (next.path.contains(_newssoPathMarker)) {
-        final loginPage = await _request('GET', next);
-        final loginRedirect = _redirectTarget(loginPage, next);
+        final directLogin = canonicalSsoUri(next);
+        final loginPage = await _request('GET', directLogin);
+        final loginRedirect = _redirectTarget(loginPage, directLogin);
         await loginPage.drain<void>().timeout(HttpTimeout.normal);
-        return loginRedirect ?? next;
+        return canonicalSsoUri(loginRedirect ?? directLogin);
       }
       uri = next;
     }
@@ -571,7 +577,8 @@ class AcademicNativeAuthService {
     final startData = startResponse['data'];
     final action = startData is Map ? startData['action'] : null;
     final loginUrl = action is Map ? action['login_url']?.toString() : null;
-    final loginUri = loginUrl == null ? null : Uri.tryParse(loginUrl);
+    final rawLoginUri = loginUrl == null ? null : Uri.tryParse(loginUrl);
+    final loginUri = rawLoginUri == null ? null : canonicalSsoUri(rawLoginUri);
     if (loginUri == null) {
       throw const AcademicNativeAuthException(
         'webVpnLoginUrlMissing',
@@ -603,6 +610,19 @@ class AcademicNativeAuthService {
     return uri.host == _webVpnHost &&
         uri.path == '/callback/oauth2' &&
         uri.queryParameters.containsKey('code');
+  }
+
+  /// The gateway and some business entries point at a different SSO host.
+  /// A host-scoped SHU_OAUTH2 cookie can be reused only on newsso itself.
+  @visibleForTesting
+  static Uri canonicalSsoUri(Uri uri) {
+    const newsso = 'newsso.shu.edu.cn';
+    const proxy = 'https-newsso-shu-edu-cn-443.webvpn.shu.edu.cn';
+    if ((uri.host == 'oauth.shu.edu.cn' || uri.host == proxy) &&
+        (uri.path.startsWith('/oauth/') || uri.path.startsWith('/oauth2/'))) {
+      return uri.replace(scheme: 'https', host: newsso);
+    }
+    return uri;
   }
 
   Future<HttpClientResponse> _request(

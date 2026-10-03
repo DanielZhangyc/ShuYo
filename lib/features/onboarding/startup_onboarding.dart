@@ -16,6 +16,8 @@ class StartupOnboardingController extends ChangeNotifier {
   Future<bool> Function()? _onAcademicLogout;
   Future<bool> Function(bool enabled)? _onWebVpnChanged;
   bool _webVpnEnabled = false;
+  bool _webVpnPendingRecovery = false;
+  bool _webVpnSessionReady = false;
   WebVpnServiceStatus _webVpnServiceStatus =
       const WebVpnServiceStatus.unknown();
   int _openRequest = 0;
@@ -28,18 +30,24 @@ class StartupOnboardingController extends ChangeNotifier {
   int get openRequest => _openRequest;
   bool get accountManagerOpen => _accountManagerOpen;
   bool get webVpnEnabled => _webVpnEnabled;
+  bool get webVpnPendingRecovery => _webVpnPendingRecovery;
+  bool get webVpnSessionReady => _webVpnSessionReady;
   WebVpnServiceStatus get webVpnServiceStatus => _webVpnServiceStatus;
 
   void openAccountManager({
     required bool academicLoggedIn,
     bool academicSessionExpired = false,
     bool webVpnEnabled = false,
+    bool webVpnPendingRecovery = false,
+    bool webVpnSessionReady = false,
     WebVpnServiceStatus webVpnServiceStatus =
         const WebVpnServiceStatus.unknown(),
   }) {
     _academicLoggedIn = academicLoggedIn;
     _academicSessionExpired = !academicLoggedIn && academicSessionExpired;
     _webVpnEnabled = webVpnEnabled;
+    _webVpnPendingRecovery = webVpnPendingRecovery;
+    _webVpnSessionReady = webVpnSessionReady;
     _webVpnServiceStatus = webVpnServiceStatus;
     _openRequest++;
     _accountManagerOpen = true;
@@ -62,20 +70,28 @@ class StartupOnboardingController extends ChangeNotifier {
     required bool academicLoggedIn,
     bool academicSessionExpired = false,
     bool? webVpnEnabled,
+    bool? webVpnPendingRecovery,
+    bool? webVpnSessionReady,
     WebVpnServiceStatus? webVpnServiceStatus,
   }) {
     final nextEnabled = webVpnEnabled ?? _webVpnEnabled;
+    final nextPendingRecovery = webVpnPendingRecovery ?? _webVpnPendingRecovery;
+    final nextSessionReady = webVpnSessionReady ?? _webVpnSessionReady;
     final nextStatus = webVpnServiceStatus ?? _webVpnServiceStatus;
     if (_academicLoggedIn == academicLoggedIn &&
         _academicSessionExpired ==
             (!academicLoggedIn && academicSessionExpired) &&
         _webVpnEnabled == nextEnabled &&
+        _webVpnPendingRecovery == nextPendingRecovery &&
+        _webVpnSessionReady == nextSessionReady &&
         identical(_webVpnServiceStatus, nextStatus)) {
       return;
     }
     _academicLoggedIn = academicLoggedIn;
     _academicSessionExpired = !academicLoggedIn && academicSessionExpired;
     _webVpnEnabled = nextEnabled;
+    _webVpnPendingRecovery = nextPendingRecovery;
+    _webVpnSessionReady = nextSessionReady;
     _webVpnServiceStatus = nextStatus;
     _notifyListenersSafely();
   }
@@ -170,6 +186,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
   late bool _academicLoggedIn = widget.initialAcademicLoggedIn;
   late bool _academicSessionExpired = widget.initialAcademicSessionExpired;
   late bool _webVpnEnabled = widget.controller.webVpnEnabled;
+  late bool _webVpnPendingRecovery = widget.controller.webVpnPendingRecovery;
   late WebVpnServiceStatus _webVpnServiceStatus =
       widget.controller.webVpnServiceStatus;
   late int _handledOpenRequest;
@@ -233,6 +250,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
         _academicLoggedIn = widget.controller.academicLoggedIn;
         _academicSessionExpired = widget.controller.academicSessionExpired;
         _webVpnEnabled = widget.controller.webVpnEnabled;
+        _webVpnPendingRecovery = widget.controller.webVpnPendingRecovery;
         _webVpnServiceStatus = widget.controller.webVpnServiceStatus;
       });
       return;
@@ -245,6 +263,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
       _academicLoggedIn = widget.controller.academicLoggedIn;
       _academicSessionExpired = widget.controller.academicSessionExpired;
       _webVpnEnabled = widget.controller.webVpnEnabled;
+      _webVpnPendingRecovery = widget.controller.webVpnPendingRecovery;
       _webVpnServiceStatus = widget.controller.webVpnServiceStatus;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -344,7 +363,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
         widget.onAcademicLogout ?? widget.controller.logoutAcademic;
     final confirmed = await _confirmLogout(
       title: '退出上大校园账户？',
-      message: '退出后课表需要重新登录教务系统。',
+      message: '将退出统一认证、教务和WebVPN。已保存的课表与学业数据会保留。',
     );
     if (!confirmed || !mounted) return;
     final loggedOut = await callback();
@@ -730,7 +749,8 @@ class _StartupOnboardingState extends State<StartupOnboarding>
         children: [
           ListTile(
             contentPadding: const EdgeInsets.only(left: 56, right: 4),
-            title: const Text('使用WebVPN连接'),
+            title: Text(
+                _webVpnPendingRecovery ? '使用WebVPN连接 · 登录待恢复' : '使用WebVPN连接'),
             trailing: Icon(
               _webVpnExpanded ? Icons.expand_less : Icons.expand_more,
             ),
@@ -752,7 +772,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
                     children: [
                       Expanded(
                         child: Text(
-                          '若使用WebVPN代理，你需要完成上海大学统一认证，完成后可通过校外网络直接访问校内服务，但需注意该服务可能不稳定。',
+                          '启用WebVPN后，可使用外部网络访问校内服务',
                           style: TextStyle(
                             color: colors.onSurfaceVariant,
                             height: 1.45,
@@ -774,6 +794,16 @@ class _StartupOnboardingState extends State<StartupOnboarding>
                       ),
                     ],
                   ),
+                  if (_webVpnPendingRecovery)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed:
+                            _changingWebVpn ? null : () => _changeWebVpn(true),
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('恢复WebVPN登录'),
+                      ),
+                    ),
                   const SizedBox(height: 12),
                   Row(
                     children: [

@@ -440,6 +440,16 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
     if (!mounted) return;
     setState(() => _busy = true);
     try {
+      if (widget.destination == NativeLoginDestination.webVpn) {
+        final currentStudentId = await AcademicAccountStore().loadStudentId();
+        if (!mounted) return;
+        if (currentStudentId != null &&
+            currentStudentId.toLowerCase() !=
+                _studentId.text.trim().toLowerCase()) {
+          _showError('WebVPN账号须与当前校园账户一致');
+          return;
+        }
+      }
       final result = await _authService.login(
           username: _studentId.text.trim(), password: _password.text);
       _password.clear();
@@ -583,6 +593,17 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
     Uri callbackUri, {
     WeComRedeemResult? weComRedeem,
   }) async {
+    if (widget.destination == NativeLoginDestination.webVpn &&
+        weComRedeem?.accountName?.trim().isNotEmpty == true) {
+      final currentStudentId = await AcademicAccountStore().loadStudentId();
+      if (!mounted) return;
+      if (currentStudentId != null &&
+          currentStudentId.toLowerCase() !=
+              weComRedeem!.accountName!.trim().toLowerCase()) {
+        _showError('WebVPN账号与当前校园账户不一致');
+        return;
+      }
+    }
     if (weComRedeem != null) {
       _authService.adoptSessionCookies(
         weComRedeem.sessionCookies.map(

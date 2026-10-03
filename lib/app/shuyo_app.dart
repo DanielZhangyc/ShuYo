@@ -15,6 +15,8 @@ import '../data/services/academic_auth_service.dart';
 import '../data/services/academic_schedule_display_settings_service.dart';
 import '../data/services/app_data_migration_service.dart';
 import '../data/services/client_settings_service.dart';
+import '../data/services/unified_account_service.dart';
+import '../data/services/webvpn_session_store.dart';
 import 'app_shell.dart';
 import '../features/onboarding/startup_onboarding.dart';
 import '../shared/theme/shuyo_theme.dart';
@@ -117,6 +119,9 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
             child: AppShell(
               key: ValueKey('app-shell-${demo ? 'demo' : 'normal'}'),
               initialWebVpnEnabled: demo ? false : data.webVpnEnabled,
+              initialWebVpnPendingRecovery:
+                  demo ? false : data.webVpnPendingRecovery,
+              initialWebVpnSessionReady: demo ? false : data.webVpnSessionReady,
               selectedThemeId: theme.id,
               followSystemTheme: _followSystemTheme,
               onThemeChanged: _changeTheme,
@@ -184,6 +189,9 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
         : const _InitialScheduleLoad();
     return _StartupData(
       webVpnEnabled: networkSettings.webVpnEnabled,
+      webVpnPendingRecovery:
+          await UnifiedAccountService().isWebVpnPendingRecovery(),
+      webVpnSessionReady: await _hasStoredWebVpnSession(),
       hasAcademicSession: academicStudentId != null,
       academicSessionExpired: await academicAccountStore.isSessionExpired(),
       academicStudentId: academicStudentId,
@@ -194,6 +202,14 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
       initialScheduleDisplayState: initialScheduleLoad.displayState,
       initialScheduleLoadError: initialScheduleLoad.error,
     );
+  }
+
+  Future<bool> _hasStoredWebVpnSession() async {
+    try {
+      return await WebVpnSessionStore().hasStoredSession();
+    } on Object {
+      return false;
+    }
   }
 
   Future<_StartupData> _loadDemoStartup({
@@ -329,6 +345,8 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
 class _StartupData {
   const _StartupData({
     required this.webVpnEnabled,
+    this.webVpnPendingRecovery = false,
+    this.webVpnSessionReady = false,
     required this.hasAcademicSession,
     this.academicSessionExpired = false,
     required this.academicStudentId,
@@ -341,6 +359,8 @@ class _StartupData {
   });
 
   final bool webVpnEnabled;
+  final bool webVpnPendingRecovery;
+  final bool webVpnSessionReady;
   final bool hasAcademicSession;
   final bool academicSessionExpired;
   final String? academicStudentId;

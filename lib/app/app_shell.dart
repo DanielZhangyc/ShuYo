@@ -26,8 +26,10 @@ import '../data/services/academic_schedule_display_settings_service.dart';
 import '../data/services/academic_schedule_notification_service.dart';
 import '../data/services/academic_schedule_widget_service.dart';
 import '../data/services/client_settings_service.dart';
+import '../data/services/unified_account_service.dart';
 import '../data/services/webvpn_session_store.dart';
 import '../features/auth/native_login_page.dart';
+import '../features/auth/webvpn_oauth_completion_page.dart';
 import '../features/home/academic_schedule_page.dart';
 import '../features/home/academic_progress_page.dart';
 import '../features/home/announcements_page.dart';
@@ -45,6 +47,8 @@ class AppShell extends StatefulWidget {
   const AppShell({
     super.key,
     required this.initialWebVpnEnabled,
+    this.initialWebVpnPendingRecovery = false,
+    this.initialWebVpnSessionReady = false,
     required this.selectedThemeId,
     required this.followSystemTheme,
     required this.onThemeChanged,
@@ -58,6 +62,7 @@ class AppShell extends StatefulWidget {
     this.progressRepository,
     this.rankingRepository,
     this.academicAuthService,
+    this.unifiedAccountService,
     this.initialOpenSchedule = false,
     this.initialScheduleState,
     this.initialScheduleDisplayState,
@@ -68,6 +73,8 @@ class AppShell extends StatefulWidget {
   });
 
   final bool initialWebVpnEnabled;
+  final bool initialWebVpnPendingRecovery;
+  final bool initialWebVpnSessionReady;
   final String selectedThemeId;
   final bool followSystemTheme;
   final Future<void> Function(String) onThemeChanged;
@@ -81,6 +88,7 @@ class AppShell extends StatefulWidget {
   final AcademicProgressRepository? progressRepository;
   final AcademicRankingRepository? rankingRepository;
   final AcademicAuthService? academicAuthService;
+  final UnifiedAccountService? unifiedAccountService;
   final bool initialOpenSchedule;
   final AcademicScheduleCacheState? initialScheduleState;
   final AcademicScheduleDisplayState? initialScheduleDisplayState;
@@ -103,6 +111,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   int _progressDataRevision = 0;
   int _scheduleDataRevision = 0;
   late bool _webVpnEnabled = widget.initialWebVpnEnabled;
+  late bool _webVpnPendingRecovery = widget.initialWebVpnPendingRecovery;
+  late bool _webVpnSessionReady = widget.initialWebVpnSessionReady;
   late bool _hasAcademicSession = widget.initialHasAcademicSession;
   late String? _academicStudentId = widget.initialAcademicStudentId;
   late bool _academicSessionExpired = widget.initialAcademicSessionExpired;
@@ -114,6 +124,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _loadingAnnouncementSummary = false;
   bool _checkingClientBackendPrompts = false;
   bool _refreshingWebVpnStatus = false;
+  Future<WebVpnRecoveryOutcome>? _webVpnRecoveryTask;
   String _scheduleSummaryText = '正在读取课表...';
   String _announcementSummaryText = '正在读取通知公告...';
   DateTime? _lastWebVpnStatusFetchAttempt;
@@ -135,6 +146,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late ClassroomRepository _classroomRepository;
   late final CourseRatingRepository _courseRatingRepository;
   final _clientSettingsService = ClientSettingsService();
+  late final UnifiedAccountService _unifiedAccountService =
+      widget.unifiedAccountService ?? UnifiedAccountService();
   final _clientBackendRepository = ClientBackendRepository();
 
   @override
@@ -381,6 +394,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       academicLoggedIn: _hasAcademicSession,
       academicSessionExpired: _academicSessionExpired,
       webVpnEnabled: _webVpnEnabled,
+      webVpnPendingRecovery: _webVpnPendingRecovery,
+      webVpnSessionReady: _webVpnSessionReady,
       webVpnServiceStatus: _webVpnServiceStatus,
     );
     unawaited(_refreshWebVpnStatus());
@@ -393,18 +408,26 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         academicLoggedIn: _hasAcademicSession,
         academicSessionExpired: _academicSessionExpired,
         webVpnEnabled: _webVpnEnabled,
+        webVpnPendingRecovery: _webVpnPendingRecovery,
+        webVpnSessionReady: _webVpnSessionReady,
         webVpnServiceStatus: _webVpnServiceStatus,
       );
     });
   }
 
-  Future<void> _finishAcademicLogin() async {
+  Future<void> _finishAcademicLogin({
+    bool connectWebVpn = true,
+    bool allowInitialSync = true,
+  }) async {
     if (widget.isDemo || _completingAcademicLogin) return;
     _completingAcademicLogin = true;
     try {
+      // WebVPN obtains its own business session from the same SSO account.
+      // It is independent of the first-use data sync below.
+      if (connectWebVpn) unawaited(_recoverWebVpn());
       await _loadAcademicStudentId();
       if (!mounted || _academicStudentId == null) return;
-      final firstLogin =
+      final firstLogin = allowInitialSync &&
           await AcademicAccountStore().takeInitialSync(_academicStudentId!);
       if (!mounted) return;
       setState(() {
@@ -583,23 +606,74 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (_handlingInvalidAcademicSession) return;
     _handlingInvalidAcademicSession = true;
     try {
-      await _academicAuthService.clearAccount(sessionExpired: true);
-      if (!mounted) return;
+      final recovered = await _recoverAcademicWithSso();
+      if (!mounted || recovered == true) return;
       setState(() {
         _hasAcademicSession = false;
         _academicSessionExpired = true;
-        _academicStudentId = null;
       });
       _syncOnboardingAccountStatus();
-      _showSnack('校园账户登录已失效，请重新登录');
-      await _openAcademicLogin();
+      if (recovered == null) return;
+      await _academicAuthService.clearAccount(sessionExpired: true);
+      if (!mounted) return;
+      _showSnack('统一认证需要重新登录');
+      await _openAcademicLogin(trySso: false);
     } finally {
       _handlingInvalidAcademicSession = false;
     }
   }
 
-  Future<void> _openAcademicLogin() async {
+  /// true: recovered; false: SSO explicitly needs authentication;
+  /// null: transport or business result is uncertain, so retain credentials.
+  Future<bool?> _recoverAcademicWithSso() async {
+    Uri? callback;
+    try {
+      callback = await _unifiedAccountService.authorizeAcademic();
+    } on Object {
+      if (mounted) _showSnack('暂时无法恢复教务登录，请稍后重试');
+      return null;
+    }
+    if (callback == null) return false;
+    if (!mounted) return null;
+    final completed = await Navigator.of(context).push<bool>(
+      shuyoRoute(
+        builder: (_) => WebVpnOAuthCompletionPage(callbackUri: callback!),
+      ),
+    );
+    if (completed != true || !mounted) {
+      if (mounted) _showSnack('教务会话兑换失败，请稍后重试');
+      return null;
+    }
+    final WebVpnSessionStatus status;
+    try {
+      status = await _academicAuthService.validateDirectAcademicSession();
+    } on Object {
+      if (mounted) _showSnack('暂时无法验证教务登录，请稍后重试');
+      return null;
+    }
+    if (status != WebVpnSessionStatus.valid) {
+      if (mounted) {
+        _showSnack(status == WebVpnSessionStatus.unavailable
+            ? '暂时无法验证教务登录，请稍后重试'
+            : '教务会话兑换失败，请稍后重试');
+      }
+      return null;
+    }
+    await _academicAuthService.markLoggedIn();
+    if (!mounted) return null;
+    await _finishAcademicLogin(
+      connectWebVpn: false,
+      allowInitialSync: false,
+    );
+    return true;
+  }
+
+  Future<void> _openAcademicLogin({bool trySso = true}) async {
     if (widget.isDemo) return;
+    if (trySso && _academicSessionExpired) {
+      final recovered = await _recoverAcademicWithSso();
+      if (recovered == true || recovered == null || !mounted) return;
+    }
     final result = await Navigator.of(context).push<NativeLoginResult>(
       shuyoRoute(builder: (_) => const NativeLoginPage()),
     );
@@ -663,25 +737,63 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Future<bool> _logoutAcademicAccount() async {
+    // Let an in-flight recovery finish before deleting credentials, so it
+    // cannot install a fresh WebVPN token after the user signs out.
+    try {
+      await _webVpnRecoveryTask;
+    } on Object {
+      // Continue clearing every local credential.
+    }
+    var failed = false;
     try {
       await _academicAuthService.clearAccount();
-      if (!mounted) return false;
+    } on Object {
+      failed = true;
+    }
+    try {
+      await WebVpnSessionStore().clearSession();
+    } on Object {
+      failed = true;
+    }
+    try {
+      await _unifiedAccountService.clearSsoSession();
+    } on Object {
+      failed = true;
+    }
+    try {
+      await _unifiedAccountService.setWebVpnPendingRecovery(false);
+    } on Object {
+      failed = true;
+    }
+    try {
+      await _setWebVpnEnabled(false);
+    } on Object {
+      failed = true;
+    }
+    if (mounted) {
       setState(() {
         _hasAcademicSession = false;
         _academicSessionExpired = false;
         _academicStudentId = null;
+        _webVpnPendingRecovery = false;
+        _webVpnSessionReady = false;
       });
       _syncOnboardingAccountStatus();
-      return true;
-    } on Object {
-      _showSnack('校园账户退出失败');
-      return false;
+      if (failed) _showSnack('部分登录状态清除失败，请重试退出');
     }
+    return !failed;
   }
 
   Future<bool> _logoutWebVpnSession() async {
     try {
       await WebVpnSessionStore().clearSession();
+      await _unifiedAccountService.setWebVpnPendingRecovery(false);
+      if (mounted) {
+        setState(() {
+          _webVpnPendingRecovery = false;
+          _webVpnSessionReady = false;
+        });
+      }
       await _setWebVpnEnabled(false);
       return true;
     } on Object {
@@ -692,9 +804,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   Future<void> _handleWebVpnExpired() async {
     if (!mounted) return;
-    await WebVpnSessionStore().clearSession();
-    await _setWebVpnEnabled(false);
-    _showSnack('WebVPN已失效，需要重新登录');
+    final outcome = await _recoverWebVpn();
+    if (!mounted) return;
+    switch (outcome) {
+      case WebVpnRecoveryOutcome.alreadyValid:
+      case WebVpnRecoveryOutcome.recovered:
+        _showSnack('WebVPN连接已恢复，请重试刚才的操作');
+      case WebVpnRecoveryOutcome.needsAuthentication:
+        await _setWebVpnEnabled(false);
+        _showSnack('统一认证已失效，请重新登录WebVPN');
+      case WebVpnRecoveryOutcome.unavailable:
+        _showSnack('暂时无法确认WebVPN连接，请稍后重试');
+      case WebVpnRecoveryOutcome.businessFailure:
+        await _setWebVpnEnabled(false);
+        _showSnack(_unifiedAccountService.lastWebVpnFailureMessage ??
+            'WebVPN会话恢复失败，请稍后重试');
+    }
   }
 
   Future<void> _setWebVpnEnabled(bool enabled) async {
@@ -716,19 +841,28 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<bool> _changeWebVpnFromAccountManager(bool enabled) async {
     if (widget.isDemo || !mounted) return false;
     if (enabled) {
-      final status = await AcademicAuthService().validateWebVpnSession();
+      final outcome = await _recoverWebVpn();
       if (!mounted) return false;
-      if (status == WebVpnSessionStatus.unavailable) {
+      if (outcome == WebVpnRecoveryOutcome.unavailable) {
         _showSnack('暂时无法验证WebVPN连接，请稍后重试');
         return false;
       }
-      if (status == WebVpnSessionStatus.loginRequired) {
-        await WebVpnSessionStore().clearSession();
-        if (!mounted) return false;
+      if (outcome == WebVpnRecoveryOutcome.businessFailure) {
+        _showSnack(_unifiedAccountService.lastWebVpnFailureMessage ??
+            'WebVPN会话恢复失败，请稍后重试');
+        return false;
+      }
+      if (outcome == WebVpnRecoveryOutcome.needsAuthentication) {
         final result = await Navigator.of(context).push<NativeLoginResult>(
           shuyoRoute(builder: (_) => const NativeLoginPage.webVpn()),
         );
         if (result != NativeLoginResult.authenticated || !mounted) return false;
+        await _unifiedAccountService.setWebVpnPendingRecovery(false);
+        setState(() {
+          _webVpnPendingRecovery = false;
+          _webVpnSessionReady = true;
+        });
+        _syncOnboardingAccountStatus();
       }
     }
     try {
@@ -737,6 +871,40 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     } on Object {
       _showSnack('WebVPN设置失败，请稍后重试');
       return false;
+    }
+  }
+
+  Future<WebVpnRecoveryOutcome> _recoverWebVpn() {
+    final running = _webVpnRecoveryTask;
+    if (running != null) return running;
+    final task = _runWebVpnRecovery();
+    _webVpnRecoveryTask = task;
+    return task;
+  }
+
+  Future<WebVpnRecoveryOutcome> _runWebVpnRecovery() async {
+    try {
+      final outcome = await _unifiedAccountService.recoverWebVpn();
+      if (mounted) {
+        setState(() {
+          _webVpnSessionReady = outcome == WebVpnRecoveryOutcome.alreadyValid ||
+              outcome == WebVpnRecoveryOutcome.recovered;
+          _webVpnPendingRecovery = !_webVpnSessionReady;
+        });
+        _syncOnboardingAccountStatus();
+      }
+      return outcome;
+    } on Object {
+      if (mounted) {
+        setState(() {
+          _webVpnPendingRecovery = true;
+          _webVpnSessionReady = false;
+        });
+        _syncOnboardingAccountStatus();
+      }
+      return WebVpnRecoveryOutcome.unavailable;
+    } finally {
+      _webVpnRecoveryTask = null;
     }
   }
 

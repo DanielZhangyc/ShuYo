@@ -103,10 +103,12 @@ class WeComRedeemResult {
   const WeComRedeemResult({
     required this.callbackUri,
     required this.sessionCookies,
+    this.accountName,
   });
 
   final Uri callbackUri;
   final List<WeComStoredCookie> sessionCookies;
+  final String? accountName;
 }
 
 /// 企业微信扫码登录错误。
@@ -171,6 +173,21 @@ class WeComAuthService {
             path: entry.path,
           ),
       ];
+
+  /// Imports a host-scoped SSO session established by the campus login flow.
+  /// Domain matching remains in AcademicSessionCookieStore, so it is only sent
+  /// to the original identity host.
+  void adoptSessionCookies(
+    Iterable<({Cookie cookie, String domain, String path})> cookies,
+  ) {
+    for (final entry in cookies) {
+      final uri = Uri(scheme: 'https', host: entry.domain);
+      final cookie = Cookie(entry.cookie.name, entry.cookie.value)
+        ..domain = entry.domain
+        ..path = entry.path;
+      _cookies.save(uri, [cookie]);
+    }
+  }
 
   static void _debug(String message) {
     if (kDebugMode) debugPrint('[SHU_WECOM] $message');
@@ -346,6 +363,19 @@ class WeComAuthService {
     }
     final callbackUri = uri.resolve(location);
     _validateRedirect(callbackUri, target.redirectUri);
+    final returnedState = callbackUri.queryParameters['state'];
+    if (returnedState != null && returnedState != state) {
+      throw const WeComAuthException(
+        'authorizationStateMismatch',
+        '统一认证授权状态校验失败',
+      );
+    }
+    if (callbackUri.queryParameters['code']?.isNotEmpty != true) {
+      throw const WeComAuthException(
+        'authorizationCodeMissing',
+        '统一认证未返回可用的授权码',
+      );
+    }
     _debug('authorizeTarget ok location=${callbackUri.host}${callbackUri.path} '
         'queryKeys=${callbackUri.queryParameters.keys.toList()..sort()}');
     return callbackUri;
@@ -354,8 +384,7 @@ class WeComAuthService {
   /// 使用当前企微扫码建立的临时 SSO 会话，独立完成 WebVPN
   /// `auth/start → authorize → auth/finish → user/info` 握手。
   ///
-  /// 返回的 Cookie 只包含 WebVPN 会话；`SHU_OAUTH2` 不会被安装到
-  /// WebView，因此不会变成其他业务系统可复用的全局登录。
+  /// 返回 WebVPN 会话及 newsso 会话，供统一账户复用。
   Future<WeComRedeemResult> completeWebVpnLogin() async {
     final portal = Uri.parse(WeComConstants.webVpnBase);
     final callback = Uri.parse(WeComConstants.webVpnCallback);
@@ -489,7 +518,18 @@ class WeComAuthService {
         'cookies=${webVpnCookies.map((entry) => entry.cookie.name).toSet().toList()}');
     return WeComRedeemResult(
       callbackUri: Uri.parse(WeComConstants.webVpnLanding),
-      sessionCookies: webVpnCookies,
+      sessionCookies: [
+        ...webVpnCookies,
+        for (final entry in _cookies.entries)
+          if (entry.domain == Uri.parse(WeComConstants.ssoBase).host &&
+              entry.cookie.name == WeComConstants.sessionCookieName)
+            WeComStoredCookie(
+              cookie: entry.cookie,
+              domain: entry.domain,
+              path: entry.path,
+            ),
+      ],
+      accountName: user is Map ? user['username']?.toString() : null,
     );
   }
 
