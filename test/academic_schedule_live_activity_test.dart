@@ -399,6 +399,50 @@ void main() {
     expect(settings.leadMinutes, 30);
   });
 
+  test('an old disallowed response cannot clear a newer live opt-in',
+      () async {
+    await enableBoth([_session()]);
+    final synchronizing = Completer<void>();
+    final releaseSync = Completer<void>();
+    final nativeSyncs = <Map<Object?, Object?>>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      final arguments = call.arguments as Map<Object?, Object?>;
+      nativeSyncs.add(arguments);
+      if (!synchronizing.isCompleted) {
+        synchronizing.complete();
+        await releaseSync.future;
+        return {'activitiesEnabled': false};
+      }
+      return {
+        'activitiesEnabled': true,
+        'scheduledOccurrenceIDs': [
+          for (final course in arguments['courses'] as List)
+            (course as Map)['occurrenceID'],
+        ],
+      };
+    });
+
+    final olderSync = notifications.syncScheduleReminders(now: now);
+    await synchronizing.future;
+    await notifications.saveSettings(
+      const AcademicScheduleNotificationSettings(
+        enabled: true,
+        liveActivityEnabled: true,
+        leadMinutes: 30,
+      ),
+    );
+    final newerSync = notifications.syncScheduleReminders(now: now);
+    releaseSync.complete();
+    await Future.wait([olderSync, newerSync]);
+
+    expect(nativeSyncs.last['enabled'], isTrue);
+    expect(nativeSyncs.last['courses'], hasLength(1));
+    final settings = await notifications.loadSettings();
+    expect(settings.enabled, isTrue);
+    expect(settings.liveActivityEnabled, isTrue);
+    expect(settings.leadMinutes, 30);
+  });
+
   testWidgets('saving after a failed support probe preserves live mode',
       (tester) async {
     await enableBoth([_session()]);

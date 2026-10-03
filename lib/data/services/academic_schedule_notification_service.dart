@@ -92,6 +92,7 @@ class AcademicScheduleNotificationService {
   final MethodChannel _alarmChannel;
   final MethodChannel _liveActivityChannel;
   bool _initialized = false;
+  int _settingsRevision = 0;
   Future<void> _reminderSync = Future<void>.value();
 
   Future<AcademicScheduleNotificationSettings> loadSettings() async {
@@ -109,6 +110,7 @@ class AcademicScheduleNotificationService {
   Future<AcademicScheduleNotificationSettings> saveSettings(
     AcademicScheduleNotificationSettings settings,
   ) async {
+    _settingsRevision++;
     final prefs = await _preferencesLoader();
     final normalized = settings.copyWith(
       leadMinutes: settings.leadMinutes.clamp(15, 120),
@@ -157,6 +159,7 @@ class AcademicScheduleNotificationService {
   }
 
   Future<Set<String>> _syncCourseLiveActivities(DateTime now) async {
+    final settingsRevision = _settingsRevision;
     final settings = await loadSettings();
     final enabled = settings.liveActivityEnabled;
     final supported = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
@@ -179,9 +182,12 @@ class AcademicScheduleNotificationService {
     // Unsupported platform, missing native implementation, and a disallowed
     // system all fall back to ordinary reminders through this single write.
     if (enabled && response?['activitiesEnabled'] != true) {
-      // Do not restore the old parent setting if it changed during native sync.
       final prefs = await _preferencesLoader();
-      await prefs.setBool(_liveActivityEnabledKey, false);
+      // An older native response must not overwrite settings saved while this
+      // sync was awaiting ActivityKit. The next queued sync uses those settings.
+      if (settingsRevision == _settingsRevision) {
+        await prefs.setBool(_liveActivityEnabledKey, false);
+      }
     }
     if (!enabled || response?['activitiesEnabled'] != true) {
       return const <String>{};
