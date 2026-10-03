@@ -94,6 +94,14 @@ class WeComOAuthTarget {
     redirectUri: WeComConstants.webVpnCallback,
   );
 
+  static const there = WeComOAuthTarget(
+    kind: WeComOAuthTargetKind.there,
+    clientId: 'eDrd-M0i0WoSWRxk7ShDC1n-fbS7jRvi',
+    clientName: '图书馆预约',
+    scope: '1',
+    redirectUri: 'https://there.shu.edu.cn/login-oauth2',
+  );
+
   final WeComOAuthTargetKind kind;
 
   final String clientId;
@@ -115,4 +123,4 @@ class WeComOAuthTarget {
       };
 }
 
-enum WeComOAuthTargetKind { academic, webVpn }
+enum WeComOAuthTargetKind { academic, webVpn, there }

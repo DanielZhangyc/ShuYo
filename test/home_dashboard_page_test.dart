@@ -31,6 +31,7 @@ void main() {
     expect(find.text('你好，25120000！'), findsOneWidget);
     expect(find.text('今日课程'), findsOneWidget);
     expect(find.text('空教室查询'), findsOneWidget);
+    expect(find.text('图书馆预约'), findsOneWidget);
     expect(find.text('课程评价'), findsOneWidget);
     expect(find.textContaining('论坛'), findsNothing);
   });

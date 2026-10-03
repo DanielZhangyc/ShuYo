@@ -193,6 +193,23 @@ class WeComAuthService {
     if (kDebugMode) debugPrint('[SHU_WECOM] $message');
   }
 
+  @visibleForTesting
+  static String describeUrlForLog(Uri uri) {
+    final path = switch (uri.path) {
+      '/oauth/authorize' => '/oauth/authorize',
+      '/oauth/wecom/qrcode' => '/oauth/wecom/qrcode',
+      '/login-oauth2' => '/login-oauth2',
+      '/callback/oauth2' => '/callback/oauth2',
+      '/sso/shulogin' => '/sso/shulogin',
+      '/wwopen/sso/qrConnect' => '/wwopen/sso/qrConnect',
+      '/wwopen/sso/l/qrConnect' => '/wwopen/sso/l/qrConnect',
+      _ when uri.path.startsWith('/oauth2/login/') => '/oauth2/login/{context}',
+      _ => '/{other:${uri.pathSegments.length}}',
+    };
+    final keys = uri.queryParameters.keys.toList()..sort();
+    return '${uri.host}$path queryKeys=$keys';
+  }
+
   /// 编码 OAuth 参数为 base64url 无填充字符串（与 `_extractParams` 格式一致）。
   ///
   /// 注意：必须使用 base64url 无 `=` 填充，否则企微/SSO 返回 `badRequestParams`。
@@ -234,7 +251,7 @@ class WeComAuthService {
       );
     }
     final key = match.group(1)!;
-    _debug('startQrSession key=${key.substring(0, 8)}…');
+    _debug('startQrSession keyReceived=true');
     final confirmUrl = '${WeComConstants.confirmBase}?k=$key&notretry=yes';
     return WeComQrSession(
       key: key,
@@ -284,7 +301,7 @@ class WeComAuthService {
   ///
   /// [state] 必须为 [weComRedeemState]（教务参数），且必须携带 `appid`。
   Future<WeComSessionResult> redeem(String authCode, String state) async {
-    _debug('redeem begin code=${authCode.substring(0, 6)}…');
+    _debug('redeem begin');
     final uri =
         Uri.parse('${WeComConstants.ssoBase}/oauth/wecom/qrcode').replace(
       queryParameters: {
@@ -376,8 +393,7 @@ class WeComAuthService {
         '统一认证未返回可用的授权码',
       );
     }
-    _debug('authorizeTarget ok location=${callbackUri.host}${callbackUri.path} '
-        'queryKeys=${callbackUri.queryParameters.keys.toList()..sort()}');
+    _debug('authorizeTarget ok location=${describeUrlForLog(callbackUri)}');
     return callbackUri;
   }
 
@@ -514,7 +530,7 @@ class WeComAuthService {
         'WebVPN 已认证但未返回服务会话，请重试',
       );
     }
-    _debug('webvpn ok userId=$userId '
+    _debug('webvpn ok userIdPresent=true '
         'cookies=${webVpnCookies.map((entry) => entry.cookie.name).toSet().toList()}');
     return WeComRedeemResult(
       callbackUri: Uri.parse(WeComConstants.webVpnLanding),
@@ -836,15 +852,16 @@ class WeComAuthService {
     try {
       response = await request.close().timeout(timeout);
     } on Object catch (error) {
-      _debug('request-failed ${uri.host}${uri.path} '
-          'type=${error.runtimeType} error=$error');
+      _debug('request-failed ${describeUrlForLog(uri)} '
+          'type=${error.runtimeType}');
       rethrow;
     }
     // 在这里统一收下所有响应（包括 redeem）下发的 Set-Cookie，
     // 模拟浏览器 Session 行为，共享同一个 Cookie 容器。
     final cookies = _parseCookies(response);
-    _debug('response ${uri.host}${uri.path} status=${response.statusCode} '
-        'location=${response.headers.value(HttpHeaders.locationHeader) ?? '-'} '
+    final location = response.headers.value(HttpHeaders.locationHeader);
+    _debug('response ${describeUrlForLog(uri)} status=${response.statusCode} '
+        'location=${location == null ? '-' : describeUrlForLog(uri.resolve(location))} '
         'cookies=${cookies.map((c) => c.name).toList()}');
     _cookies.save(uri, cookies);
     return response;
@@ -883,7 +900,7 @@ class WeComAuthService {
     }
     final expected = Uri.parse(expectedRedirect);
     if (uri.host != expected.host || uri.path != expected.path) {
-      _debug('redirect mismatch location=${uri.host}${uri.path} '
+      _debug('redirect mismatch location=${describeUrlForLog(uri)} '
           'expected=${expected.host}${expected.path}');
       throw const WeComAuthException(
         'unexpectedRedirect',

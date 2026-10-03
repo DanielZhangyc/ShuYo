@@ -8,6 +8,8 @@ import '../../data/services/academic_native_auth_service.dart';
 import '../../data/services/academic_account_store.dart';
 import '../../data/services/academic_auth_service.dart';
 import '../../data/services/academic_progress_api_client.dart';
+import '../../data/services/there_booking_client.dart';
+import '../../data/services/unified_account_service.dart';
 import '../../data/services/verification_delivery_service.dart';
 import '../../data/services/wecom_auth_service.dart';
 import '../../data/demo/demo_session.dart';
@@ -15,7 +17,7 @@ import '../../shared/theme/shuyo_theme.dart';
 import 'webvpn_oauth_completion_page.dart';
 import 'wecom_scan_page.dart';
 
-enum NativeLoginDestination { academic, webVpn }
+enum NativeLoginDestination { academic, webVpn, there }
 
 enum NativeLoginResult { authenticated, demo }
 
@@ -29,6 +31,10 @@ class NativeLoginPage extends StatefulWidget {
     super.key,
   }) : destination = NativeLoginDestination.webVpn;
 
+  const NativeLoginPage.there({
+    super.key,
+  }) : destination = NativeLoginDestination.there;
+
   final NativeLoginDestination destination;
 
   @override
@@ -41,6 +47,7 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
       _authServiceInstance ??= switch (widget.destination) {
         NativeLoginDestination.webVpn => AcademicNativeAuthService.forWebVpn(),
         NativeLoginDestination.academic => AcademicNativeAuthService(),
+        NativeLoginDestination.there => AcademicNativeAuthService.forThere(),
       };
   final _verificationDeliveryService = VerificationDeliveryService();
   final _weComAuthService = WeComAuthService();
@@ -105,6 +112,7 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
   Widget _credentials() {
     final colors = context.shuyoColors;
     final academic = widget.destination == NativeLoginDestination.academic;
+    final there = widget.destination == NativeLoginDestination.there;
     return Form(
       key: _credentialsKey,
       child: LayoutBuilder(
@@ -124,7 +132,11 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
-                        academic ? '上大校园账户' : 'WebVPN服务',
+                        academic
+                            ? '上大校园账户'
+                            : there
+                                ? '登录图书馆预约'
+                                : 'WebVPN服务',
                         textAlign: TextAlign.center,
                         style: Theme.of(context)
                             .textTheme
@@ -137,7 +149,9 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
                         child: Text(
                           academic
                               ? '使用上海大学统一认证账户来访问各类校园服务'
-                              : '使用上海大学统一认证账户来访问WebVPN服务',
+                              : there
+                                  ? '使用上海大学统一认证账户来访问图书馆预约'
+                                  : '使用上海大学统一认证账户来访问WebVPN服务',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: colors.textSecondary),
                         ),
@@ -433,20 +447,21 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
       return;
     }
     // 演示模式完全离线，在发起网络请求之前处理。
-    if (DemoSession.matchesCredentials(_studentId.text, _password.text)) {
+    if (widget.destination == NativeLoginDestination.academic &&
+        DemoSession.matchesCredentials(_studentId.text, _password.text)) {
       await _submitDemoLogin();
       return;
     }
     if (!mounted) return;
     setState(() => _busy = true);
     try {
-      if (widget.destination == NativeLoginDestination.webVpn) {
+      if (widget.destination != NativeLoginDestination.academic) {
         final currentStudentId = await AcademicAccountStore().loadStudentId();
         if (!mounted) return;
         if (currentStudentId != null &&
             currentStudentId.toLowerCase() !=
                 _studentId.text.trim().toLowerCase()) {
-          _showError('WebVPN账号须与当前校园账户一致');
+          _showError('登录账号须与当前校园账户一致');
           return;
         }
       }
@@ -506,6 +521,14 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
     if (!mounted) return;
     setState(() => _busy = true);
     try {
+      if (widget.destination == NativeLoginDestination.there) {
+        final client = ThereBookingClient();
+        try {
+          await client.prepareOAuth();
+        } finally {
+          client.dispose();
+        }
+      }
       final session = await _weComAuthService.startQrSession();
       if (!mounted) return;
       setState(() => _busy = false);
@@ -542,6 +565,7 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
   WeComOAuthTarget get _weComTarget => switch (widget.destination) {
         NativeLoginDestination.webVpn => WeComOAuthTarget.webVpn,
         NativeLoginDestination.academic => WeComOAuthTarget.academic,
+        NativeLoginDestination.there => WeComOAuthTarget.there,
       };
 
   Future<void> _sendCode() async {
@@ -617,6 +641,42 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
     }
     await _authService.installCookiesInWebView();
     if (!mounted) return;
+    if (widget.destination == NativeLoginDestination.there) {
+      final client = ThereBookingClient();
+      try {
+        final target = callbackUri.host == client.baseUri.host &&
+                callbackUri.path == '/login-oauth2' &&
+                callbackUri.queryParameters['code']?.isNotEmpty == true
+            ? callbackUri
+            : await UnifiedAccountService().authorizeThere();
+        if (target == null) {
+          _showError('统一认证未能授权图书馆预约，请重新登录');
+          return;
+        }
+        await client.completeOAuth(
+          target,
+          cookies: _authService.sessionCookies,
+        );
+        final profile = await client.profile();
+        final expected = await AcademicAccountStore().loadStudentId();
+        if (expected != null &&
+            !ThereBookingClient.matchesAccount(profile, expected)) {
+          await client.clearSession();
+          _showError('图书馆预约账号与当前校园账户不一致');
+          return;
+        }
+        if (mounted) {
+          Navigator.of(context).pop(NativeLoginResult.authenticated);
+        }
+      } on ThereBookingException catch (error) {
+        _showError(error.message);
+      } on Object {
+        _showError('图书馆预约登录失败，请稍后重试');
+      } finally {
+        client.dispose();
+      }
+      return;
+    }
     final completed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => WebVpnOAuthCompletionPage(

@@ -15,7 +15,7 @@ import 'webvpn_session_store.dart';
 
 enum AcademicVerificationMethod { wecom, sms }
 
-enum _NativeAuthTarget { academic, webVpn }
+enum _NativeAuthTarget { academic, webVpn, there }
 
 class AcademicLoginChallenge {
   const AcademicLoginChallenge({required this.methods});
@@ -73,11 +73,18 @@ class AcademicNativeAuthService {
     _client.connectionTimeout = HttpTimeout.connect;
   }
 
+  AcademicNativeAuthService.forThere({HttpClient? httpClient})
+      : _target = _NativeAuthTarget.there,
+        _client = httpClient ?? HttpClient() {
+    _client.connectionTimeout = HttpTimeout.connect;
+  }
+
   static const _newssoPathMarker = '/oauth2/login/';
   static const _tenantId = '上海大学';
   static Uri get _academicEntry => AcademicUrlResolver.entryUri;
   static const _webVpnPortal = 'https://webvpn.shu.edu.cn';
   static const _webVpnHost = 'webvpn.shu.edu.cn';
+  static const _thereEntry = 'https://there.shu.edu.cn/login?from=web';
   final _NativeAuthTarget _target;
   final HttpClient _client;
   final AcademicSessionCookieStore _cookieStore = AcademicSessionCookieStore();
@@ -88,6 +95,9 @@ class AcademicNativeAuthService {
   String? _encryptedPassword;
 
   void dispose() => _client.close(force: true);
+
+  List<({Cookie cookie, String domain, String path})> get sessionCookies =>
+      _cookieStore.entries;
 
   /// 把外部登录流程（如企业微信扫码）取得的会话 Cookie 并入本次认证会话。
   ///
@@ -456,7 +466,9 @@ class AcademicNativeAuthService {
     if (_target == _NativeAuthTarget.webVpn) {
       return _startWebVpnOAuth();
     }
-    var uri = _academicEntry;
+    var uri = _target == _NativeAuthTarget.there
+        ? Uri.parse(_thereEntry)
+        : _academicEntry;
     for (var redirects = 0; redirects < 16; redirects++) {
       final response = await _request('GET', uri);
       final location = response.headers.value(HttpHeaders.locationHeader);

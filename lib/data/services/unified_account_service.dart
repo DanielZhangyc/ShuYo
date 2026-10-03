@@ -36,6 +36,7 @@ class UnifiedAccountService {
             (() => AcademicNativeAuthService.forWebVpn());
 
   static const pendingWebVpnRecoveryKey = 'account.webvpn.pending_recovery';
+  static const pendingThereRecoveryKey = 'account.there.pending_recovery';
 
   ShuSsoSessionStore? _ssoSessionStoreInstance;
   ShuSsoSessionStore get _ssoSessionStore =>
@@ -59,6 +60,18 @@ class UnifiedAccountService {
       await prefs.setBool(pendingWebVpnRecoveryKey, true);
     } else {
       await prefs.remove(pendingWebVpnRecoveryKey);
+    }
+  }
+
+  Future<bool> isTherePendingRecovery() async =>
+      (await _preferencesLoader()).getBool(pendingThereRecoveryKey) ?? false;
+
+  Future<void> setTherePendingRecovery(bool pending) async {
+    final prefs = await _preferencesLoader();
+    if (pending) {
+      await prefs.setBool(pendingThereRecoveryKey, true);
+    } else {
+      await prefs.remove(pendingThereRecoveryKey);
     }
   }
 
@@ -148,6 +161,21 @@ class UnifiedAccountService {
     try {
       auth.adoptSessionCookies(cookies);
       return await auth.authorizeTarget(WeComOAuthTarget.academic);
+    } on WeComAuthException catch (error) {
+      if (error.code == 'sessionNotReused') return null;
+      rethrow;
+    } finally {
+      auth.dispose();
+    }
+  }
+
+  Future<Uri?> authorizeThere() async {
+    final cookies = await _ssoSessionStore.sessionCookies();
+    if (cookies.isEmpty) return null;
+    final auth = _weComAuthServiceFactory();
+    try {
+      auth.adoptSessionCookies(cookies);
+      return await auth.authorizeTarget(WeComOAuthTarget.there);
     } on WeComAuthException catch (error) {
       if (error.code == 'sessionNotReused') return null;
       rethrow;

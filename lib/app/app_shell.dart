@@ -27,6 +27,7 @@ import '../data/services/academic_schedule_notification_service.dart';
 import '../data/services/academic_schedule_widget_service.dart';
 import '../data/services/client_settings_service.dart';
 import '../data/services/unified_account_service.dart';
+import '../data/services/there_booking_client.dart';
 import '../data/services/webvpn_session_store.dart';
 import '../features/auth/native_login_page.dart';
 import '../features/auth/webvpn_oauth_completion_page.dart';
@@ -36,6 +37,7 @@ import '../features/home/announcements_page.dart';
 import '../features/home/course_rating_page.dart';
 import '../features/home/empty_classroom_page.dart';
 import '../features/home/home_dashboard_page.dart';
+import '../features/library_booking/library_booking_page.dart';
 import '../features/onboarding/startup_onboarding.dart';
 import '../features/settings/client_settings_page.dart';
 import '../shared/navigation/shuyo_route.dart';
@@ -125,6 +127,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _checkingClientBackendPrompts = false;
   bool _refreshingWebVpnStatus = false;
   Future<WebVpnRecoveryOutcome>? _webVpnRecoveryTask;
+  Future<void>? _thereRecoveryTask;
   String _scheduleSummaryText = '正在读取课表...';
   String _announcementSummaryText = '正在读取通知公告...';
   DateTime? _lastWebVpnStatusFetchAttempt;
@@ -369,6 +372,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         onOpenAnnouncements: () => unawaited(_openAnnouncements()),
         onOpenEmptyClassroom: () => unawaited(_openEmptyClassroom()),
         onOpenCourseRatings: () => unawaited(_openCourseRatings()),
+        onOpenLibraryBooking: () => unawaited(_openLibraryBooking()),
         todayCourseContent: _scheduleSummaryText,
         announcementContent: _announcementSummaryText,
         isDemo: widget.isDemo,
@@ -424,7 +428,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     try {
       // WebVPN obtains its own business session from the same SSO account.
       // It is independent of the first-use data sync below.
-      if (connectWebVpn) unawaited(_recoverWebVpn());
+      if (connectWebVpn) {
+        unawaited(_recoverWebVpn());
+        final task = _establishThereInBackground();
+        _thereRecoveryTask = task;
+        unawaited(task.whenComplete(() => _thereRecoveryTask = null));
+      }
       await _loadAcademicStudentId();
       if (!mounted || _academicStudentId == null) return;
       final firstLogin = allowInitialSync &&
@@ -703,6 +712,53 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _openLibraryBooking() async {
+    if (widget.isDemo) {
+      _showSnack('演示模式暂不支持图书馆预约');
+      return;
+    }
+    await Navigator.of(context).push<void>(
+      shuyoRoute(
+        builder: (_) => LibraryBookingPage(
+          accountService: _unifiedAccountService,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _establishThereInBackground() async {
+    final client = ThereBookingClient();
+    try {
+      try {
+        await client.selectVenue(BookingVenue.library);
+        await client.profile();
+      } on ThereBookingException catch (error) {
+        if (error.kind != ThereFailureKind.loginRequired) rethrow;
+        await client.prepareOAuth();
+        final callback = await _unifiedAccountService.authorizeThere();
+        if (callback == null) {
+          await _unifiedAccountService.setTherePendingRecovery(true);
+          return;
+        }
+        await client.completeOAuth(callback);
+      }
+      final profile = await client.profile();
+      final expected = await AcademicAccountStore().loadStudentId();
+      final mismatch = expected != null &&
+          !ThereBookingClient.matchesAccount(profile, expected);
+      if (mismatch) await client.clearSession();
+      await _unifiedAccountService.setTherePendingRecovery(mismatch);
+    } on Object {
+      try {
+        await _unifiedAccountService.setTherePendingRecovery(true);
+      } on Object {
+        // Keep campus login independent of this service.
+      }
+    } finally {
+      client.dispose();
+    }
+  }
+
   Future<void> _openCourseRatings() async {
     await Navigator.of(context).push<void>(
       shuyoRoute(
@@ -741,6 +797,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // cannot install a fresh WebVPN token after the user signs out.
     try {
       await _webVpnRecoveryTask;
+      await _thereRecoveryTask;
     } on Object {
       // Continue clearing every local credential.
     }
@@ -755,6 +812,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     } on Object {
       failed = true;
     }
+    final there = ThereBookingClient();
+    try {
+      await there.clearSession();
+    } on Object {
+      failed = true;
+    } finally {
+      there.dispose();
+    }
     try {
       await _unifiedAccountService.clearSsoSession();
     } on Object {
@@ -762,6 +827,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     try {
       await _unifiedAccountService.setWebVpnPendingRecovery(false);
+      await _unifiedAccountService.setTherePendingRecovery(false);
     } on Object {
       failed = true;
     }

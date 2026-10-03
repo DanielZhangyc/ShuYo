@@ -9,6 +9,23 @@ import 'package:shuyo/data/services/wecom_auth_service.dart';
 
 void main() {
   group('WeComAuthService', () {
+    test('OAuth redirect diagnostics never include authorization values', () {
+      final callback = Uri.parse(
+        'https://there.shu.edu.cn/login-oauth2?code=SECRET_CODE&state=SECRET_STATE',
+      );
+      final login = Uri.parse(
+        'https://newsso.shu.edu.cn/oauth2/login/SECRET_CONTEXT',
+      );
+      final callbackLog = WeComAuthService.describeUrlForLog(callback);
+      final loginLog = WeComAuthService.describeUrlForLog(login);
+      expect(callbackLog, contains('login-oauth2'));
+      expect(callbackLog, contains('queryKeys=[code, state]'));
+      expect(callbackLog, isNot(contains('SECRET_CODE')));
+      expect(callbackLog, isNot(contains('SECRET_STATE')));
+      expect(loginLog, contains('/oauth2/login/{context}'));
+      expect(loginLog, isNot(contains('SECRET_CONTEXT')));
+    });
+
     test('encodeOAuthParams produces base64url without padding', () {
       final encoded = WeComAuthService.encodeOAuthParams({
         'responseType': 'code',
