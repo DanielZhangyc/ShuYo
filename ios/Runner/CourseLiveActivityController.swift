@@ -51,13 +51,18 @@ final class CourseLiveActivityController {
   @available(iOS 26.0, *)
   private func reconcile(enabled: Bool, rawCourses: [[String: Any]]) async -> [String: Any] {
     let now = Date()
-    var requested = (defaults.dictionary(forKey: Self.requestedKey) as? [String: Double] ?? [:])
-      .filter { $0.value > now.timeIntervalSince1970 }
-    var existing = [String: Activity<CourseActivityAttributes>]()
     // Dart plans and limits the queue; it sends no courses when disabled.
     let desired = rawCourses.compactMap(CourseActivityRequest.init)
       .filter { $0.state.expiresAt > now }
     let desiredIDs = Set(desired.map(\.occurrenceID))
+    let desiredReservations = desired.reduce(into: [String: CourseActivityReservationLedger.Reservation]()) {
+      $0[$1.occurrenceID] = .init(visibleFrom: $1.state.visibleFrom, expiresAt: $1.state.expiresAt)
+    }
+    var ledger = CourseActivityReservationLedger(
+      stored: defaults.dictionary(forKey: Self.requestedKey) ?? [:],
+      legacyReservations: desiredReservations
+    )
+    var existing = [String: Activity<CourseActivityAttributes>]()
 
     for activity in Activity<CourseActivityAttributes>.activities {
       let id = activity.attributes.occurrenceID
@@ -65,26 +70,30 @@ final class CourseLiveActivityController {
       if !desiredIDs.contains(id) || activity.content.state.expiresAt <= now
         || existing[id] != nil {
         await activity.end(nil, dismissalPolicy: .immediate)
-        if existing[id] == nil { requested.removeValue(forKey: id) }
+        if existing[id] == nil { ledger.remove(id) }
       } else {
         existing[id] = activity
       }
     }
 
-    guard enabled, ActivityAuthorizationInfo().areActivitiesEnabled else {
+    let activitiesEnabled = ActivityAuthorizationInfo().areActivitiesEnabled
+    ledger.reconcile(
+      enabled: enabled && activitiesEnabled, desiredIDs: desiredIDs,
+      existingIDs: Set(existing.keys), now: now
+    )
+    guard enabled, activitiesEnabled else {
       for activity in existing.values {
         await activity.end(nil, dismissalPolicy: .immediate)
-        requested.removeValue(forKey: activity.attributes.occurrenceID)
       }
-      // Retain history for activities the user dismissed, but allow cancelled reservations to rearm.
-      defaults.set(requested, forKey: Self.requestedKey)
-      return ["scheduledOccurrenceIDs": [], "activitiesEnabled": ActivityAuthorizationInfo().areActivitiesEnabled]
+      defaults.set(ledger.storedValues, forKey: Self.requestedKey)
+      return ["scheduledOccurrenceIDs": [], "activitiesEnabled": activitiesEnabled]
     }
 
     for course in desired {
       let id = course.occurrenceID
       // Trigger the "class started" presentation even if the host is suspended.
-      // expiresAt separately controls retention; staleDate does not end the activity.
+      // expiresAt is cleaned up on the next reconcile; it does not schedule a
+      // background end. Likewise, staleDate changes presentation without ending it.
       let content = ActivityContent(state: course.state, staleDate: course.state.startsAt)
       let alert = AlertConfiguration(
         title: LocalizedStringResource(stringLiteral: course.state.courseName),
@@ -93,13 +102,19 @@ final class CourseLiveActivityController {
       )
       var replacing = false
       if let activity = existing[id] {
-        if activity.content.state.visibleFrom != course.state.visibleFrom {
+        if activity.activityState == .pending,
+          activity.content.state.visibleFrom != course.state.visibleFrom {
           // A pending activity's scheduled start can't be moved with update().
           await activity.end(nil, dismissalPolicy: .immediate)
           existing.removeValue(forKey: id)
-          requested.removeValue(forKey: id)
+          ledger.remove(id)
           replacing = true
         } else {
+          if activity.activityState != .pending || !ledger.contains(id) {
+            let visibleFrom = activity.activityState == .pending
+              ? activity.content.state.visibleFrom : min(activity.content.state.visibleFrom, now)
+            ledger.record(id, visibleFrom: visibleFrom, expiresAt: course.state.expiresAt)
+          }
           if activity.content.state != course.state {
             await activity.update(content)
           }
@@ -108,7 +123,7 @@ final class CourseLiveActivityController {
       }
 
       // Do not resurrect a dismissed activity, or create a new reminder after class starts.
-      guard (requested[id] == nil || replacing), course.state.startsAt > Date(),
+      guard (!ledger.contains(id) || replacing), course.state.startsAt > Date(),
         UIApplication.shared.applicationState == .active
       else { continue }
       do {
@@ -126,21 +141,83 @@ final class CourseLiveActivityController {
           await activity.update(content, alertConfiguration: alert)
         }
         existing[id] = activity
-        requested[id] = course.state.expiresAt.timeIntervalSince1970
+        ledger.record(id, visibleFrom: course.state.visibleFrom, expiresAt: course.state.expiresAt)
       } catch {
         // Other apps share the system limit. Keep successes and retry remaining courses on resume.
         break
       }
     }
-    defaults.set(requested, forKey: Self.requestedKey)
+    let existingIDs = Set(existing.compactMap { id, activity in
+      activity.activityState != .dismissed && activity.activityState != .ended ? id : nil
+    })
+    // ActivityKit can remove a reservation during an awaited update or request.
+    ledger.reconcile(enabled: true, desiredIDs: desiredIDs, existingIDs: existingIDs, now: Date())
+    defaults.set(ledger.storedValues, forKey: Self.requestedKey)
     // A partial queue must still acknowledge its successes, otherwise Dart could
     // schedule a second notification for a course already owned by ActivityKit.
-    // Ledger-only entries also suppress fallback after the user dismisses an activity.
+    // Only history for activities whose display time has arrived suppresses a
+    // repeated reminder after dismissal. A missing future reservation uses fallback.
     let confirmedIDs = desired.compactMap { course in
-      existing[course.occurrenceID] != nil || requested[course.occurrenceID] != nil
+      existingIDs.contains(course.occurrenceID) || ledger.contains(course.occurrenceID)
         ? course.occurrenceID : nil
     }
     return ["scheduledOccurrenceIDs": confirmedIDs, "activitiesEnabled": true]
+  }
+}
+
+/// Keeps pending reservations separate from dismissal history without depending on ActivityKit.
+struct CourseActivityReservationLedger {
+  struct Reservation: Equatable {
+    let visibleFrom: Date
+    let expiresAt: Date
+  }
+
+  private var reservations: [String: Reservation] = [:]
+
+  init(stored: [String: Any], legacyReservations: [String: Reservation]) {
+    for (id, value) in stored {
+      if let fields = value as? [String: Double],
+        let visibleFrom = fields["visibleFrom"], let expiresAt = fields["expiresAt"] {
+        reservations[id] = Reservation(
+          visibleFrom: Date(timeIntervalSince1970: visibleFrom),
+          expiresAt: Date(timeIntervalSince1970: expiresAt)
+        )
+      } else if let expiresAt = value as? Double, let desired = legacyReservations[id] {
+        // Older versions persisted only expiration; use the current plan to migrate it.
+        reservations[id] = Reservation(
+          visibleFrom: desired.visibleFrom, expiresAt: Date(timeIntervalSince1970: expiresAt)
+        )
+      }
+    }
+  }
+
+  mutating func reconcile(enabled: Bool, desiredIDs: Set<String>, existingIDs: Set<String>, now: Date) {
+    guard enabled else {
+      reservations.removeAll()
+      return
+    }
+    reservations = reservations.filter { id, reservation in
+      reservation.expiresAt > now && desiredIDs.contains(id)
+        && (existingIDs.contains(id) || reservation.visibleFrom <= now)
+    }
+  }
+
+  mutating func record(_ id: String, visibleFrom: Date, expiresAt: Date) {
+    reservations[id] = Reservation(visibleFrom: visibleFrom, expiresAt: expiresAt)
+  }
+
+  mutating func remove(_ id: String) {
+    reservations.removeValue(forKey: id)
+  }
+
+  func contains(_ id: String) -> Bool {
+    reservations[id] != nil
+  }
+
+  var storedValues: [String: [String: Double]] {
+    reservations.mapValues {
+      ["visibleFrom": $0.visibleFrom.timeIntervalSince1970, "expiresAt": $0.expiresAt.timeIntervalSince1970]
+    }
   }
 }
 
