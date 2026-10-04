@@ -103,10 +103,12 @@ class WeComRedeemResult {
   const WeComRedeemResult({
     required this.callbackUri,
     required this.sessionCookies,
+    this.accountName,
   });
 
   final Uri callbackUri;
   final List<WeComStoredCookie> sessionCookies;
+  final String? accountName;
 }
 
 /// 企业微信扫码登录错误。
@@ -172,8 +174,40 @@ class WeComAuthService {
           ),
       ];
 
+  /// Imports a host-scoped SSO session established by the campus login flow.
+  /// Domain matching remains in AcademicSessionCookieStore, so it is only sent
+  /// to the original identity host.
+  void adoptSessionCookies(
+    Iterable<({Cookie cookie, String domain, String path})> cookies,
+  ) {
+    for (final entry in cookies) {
+      final uri = Uri(scheme: 'https', host: entry.domain);
+      final cookie = Cookie(entry.cookie.name, entry.cookie.value)
+        ..domain = entry.domain
+        ..path = entry.path;
+      _cookies.save(uri, [cookie]);
+    }
+  }
+
   static void _debug(String message) {
     if (kDebugMode) debugPrint('[SHU_WECOM] $message');
+  }
+
+  @visibleForTesting
+  static String describeUrlForLog(Uri uri) {
+    final path = switch (uri.path) {
+      '/oauth/authorize' => '/oauth/authorize',
+      '/oauth/wecom/qrcode' => '/oauth/wecom/qrcode',
+      '/login-oauth2' => '/login-oauth2',
+      '/callback/oauth2' => '/callback/oauth2',
+      '/sso/shulogin' => '/sso/shulogin',
+      '/wwopen/sso/qrConnect' => '/wwopen/sso/qrConnect',
+      '/wwopen/sso/l/qrConnect' => '/wwopen/sso/l/qrConnect',
+      _ when uri.path.startsWith('/oauth2/login/') => '/oauth2/login/{context}',
+      _ => '/{other:${uri.pathSegments.length}}',
+    };
+    final keys = uri.queryParameters.keys.toList()..sort();
+    return '${uri.host}$path queryKeys=$keys';
   }
 
   /// 编码 OAuth 参数为 base64url 无填充字符串（与 `_extractParams` 格式一致）。
@@ -217,7 +251,7 @@ class WeComAuthService {
       );
     }
     final key = match.group(1)!;
-    _debug('startQrSession key=${key.substring(0, 8)}…');
+    _debug('startQrSession keyReceived=true');
     final confirmUrl = '${WeComConstants.confirmBase}?k=$key&notretry=yes';
     return WeComQrSession(
       key: key,
@@ -267,7 +301,7 @@ class WeComAuthService {
   ///
   /// [state] 必须为 [weComRedeemState]（教务参数），且必须携带 `appid`。
   Future<WeComSessionResult> redeem(String authCode, String state) async {
-    _debug('redeem begin code=${authCode.substring(0, 6)}…');
+    _debug('redeem begin');
     final uri =
         Uri.parse('${WeComConstants.ssoBase}/oauth/wecom/qrcode').replace(
       queryParameters: {
@@ -346,16 +380,27 @@ class WeComAuthService {
     }
     final callbackUri = uri.resolve(location);
     _validateRedirect(callbackUri, target.redirectUri);
-    _debug('authorizeTarget ok location=${callbackUri.host}${callbackUri.path} '
-        'queryKeys=${callbackUri.queryParameters.keys.toList()..sort()}');
+    final returnedState = callbackUri.queryParameters['state'];
+    if (returnedState != null && returnedState != state) {
+      throw const WeComAuthException(
+        'authorizationStateMismatch',
+        '统一认证授权状态校验失败',
+      );
+    }
+    if (callbackUri.queryParameters['code']?.isNotEmpty != true) {
+      throw const WeComAuthException(
+        'authorizationCodeMissing',
+        '统一认证未返回可用的授权码',
+      );
+    }
+    _debug('authorizeTarget ok location=${describeUrlForLog(callbackUri)}');
     return callbackUri;
   }
 
   /// 使用当前企微扫码建立的临时 SSO 会话，独立完成 WebVPN
   /// `auth/start → authorize → auth/finish → user/info` 握手。
   ///
-  /// 返回的 Cookie 只包含 WebVPN 会话；`SHU_OAUTH2` 不会被安装到
-  /// WebView，因此不会变成其他业务系统可复用的全局登录。
+  /// 返回 WebVPN 会话及 newsso 会话，供统一账户复用。
   Future<WeComRedeemResult> completeWebVpnLogin() async {
     final portal = Uri.parse(WeComConstants.webVpnBase);
     final callback = Uri.parse(WeComConstants.webVpnCallback);
@@ -485,11 +530,22 @@ class WeComAuthService {
         'WebVPN 已认证但未返回服务会话，请重试',
       );
     }
-    _debug('webvpn ok userId=$userId '
+    _debug('webvpn ok userIdPresent=true '
         'cookies=${webVpnCookies.map((entry) => entry.cookie.name).toSet().toList()}');
     return WeComRedeemResult(
       callbackUri: Uri.parse(WeComConstants.webVpnLanding),
-      sessionCookies: webVpnCookies,
+      sessionCookies: [
+        ...webVpnCookies,
+        for (final entry in _cookies.entries)
+          if (entry.domain == Uri.parse(WeComConstants.ssoBase).host &&
+              entry.cookie.name == WeComConstants.sessionCookieName)
+            WeComStoredCookie(
+              cookie: entry.cookie,
+              domain: entry.domain,
+              path: entry.path,
+            ),
+      ],
+      accountName: user is Map ? user['username']?.toString() : null,
     );
   }
 
@@ -761,6 +817,7 @@ class WeComAuthService {
     String? origin,
     Duration timeout = HttpTimeout.normal,
   }) async {
+    final timer = Stopwatch()..start();
     final request = await _client.getUrl(uri).timeout(HttpTimeout.connect);
     request.followRedirects = false;
     request.headers
@@ -796,16 +853,19 @@ class WeComAuthService {
     try {
       response = await request.close().timeout(timeout);
     } on Object catch (error) {
-      _debug('request-failed ${uri.host}${uri.path} '
-          'type=${error.runtimeType} error=$error');
+      _debug('request-failed ${describeUrlForLog(uri)} '
+          'type=${error.runtimeType} '
+          'durationMs=${timer.elapsedMilliseconds}');
       rethrow;
     }
     // 在这里统一收下所有响应（包括 redeem）下发的 Set-Cookie，
     // 模拟浏览器 Session 行为，共享同一个 Cookie 容器。
     final cookies = _parseCookies(response);
-    _debug('response ${uri.host}${uri.path} status=${response.statusCode} '
-        'location=${response.headers.value(HttpHeaders.locationHeader) ?? '-'} '
-        'cookies=${cookies.map((c) => c.name).toList()}');
+    final location = response.headers.value(HttpHeaders.locationHeader);
+    _debug('response ${describeUrlForLog(uri)} status=${response.statusCode} '
+        'location=${location == null ? '-' : describeUrlForLog(uri.resolve(location))} '
+        'cookies=${cookies.map((c) => c.name).toList()} '
+        'durationMs=${timer.elapsedMilliseconds}');
     _cookies.save(uri, cookies);
     return response;
   }
@@ -843,7 +903,7 @@ class WeComAuthService {
     }
     final expected = Uri.parse(expectedRedirect);
     if (uri.host != expected.host || uri.path != expected.path) {
-      _debug('redirect mismatch location=${uri.host}${uri.path} '
+      _debug('redirect mismatch location=${describeUrlForLog(uri)} '
           'expected=${expected.host}${expected.path}');
       throw const WeComAuthException(
         'unexpectedRedirect',

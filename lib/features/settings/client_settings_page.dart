@@ -209,7 +209,7 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
                     child: Text(
-                      '选择要退出的账户',
+                      '选择要退出的会话',
                       style: ShuYoTextStyles.sectionTitle(
                         color: colors.textPrimary,
                       ),
@@ -219,11 +219,13 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
                     leading: const Icon(Icons.school_outlined),
                     title: const Text('上大校园账户'),
                     subtitle: Text(
-                      _hasAcademicAccount ? '退出课表和校园服务' : '未登录',
+                      (_hasAcademicAccount || _hasWebVpnSession)
+                          ? '退出统一认证、教务和WebVPN'
+                          : '未登录',
                     ),
-                    enabled:
-                        _hasAcademicAccount && widget.onAcademicLogout != null,
-                    onTap: _hasAcademicAccount &&
+                    enabled: (_hasAcademicAccount || _hasWebVpnSession) &&
+                        widget.onAcademicLogout != null,
+                    onTap: (_hasAcademicAccount || _hasWebVpnSession) &&
                             widget.onAcademicLogout != null
                         ? () =>
                             Navigator.of(context).pop(_LogoutTarget.academic)
@@ -261,7 +263,7 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
             ),
             content: Text(
               academic
-                  ? '退出后校园服务需重新登录\n\n已保存的课表信息不会被清除'
+                  ? '将退出统一认证、教务和WebVPN。已保存的课表与学业数据不会被清除。'
                   : '退出后将关闭WebVPN并清除登录状态',
             ),
             actions: [
@@ -287,7 +289,10 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
     if (!mounted) return;
     setState(() {
       _loggingOut = false;
-      if (loggedOut && academic) _hasAcademicAccount = false;
+      if (loggedOut && academic) {
+        _hasAcademicAccount = false;
+        _hasWebVpnSession = false;
+      }
       if (loggedOut && target == _LogoutTarget.webVpn) {
         _hasWebVpnSession = false;
       }

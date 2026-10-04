@@ -1210,7 +1210,7 @@ String _friendlyError(Object error) {
   if (error is CourseRatingApiException) {
     return error.message;
   }
-  return '课程评价站点暂时无法访问，请稍后重试。';
+  return '课程评价站点暂时无法访问，请连接校园网、学校VPN，或开启WebVPN后重试。';
 }
 
 String _scoreText(double value) {

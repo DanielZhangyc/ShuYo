@@ -55,6 +55,39 @@ void main() {
     expect(find.textContaining('乐乎'), findsNothing);
   });
 
+  testWidgets('pending WebVPN can be retried while its switch is already on',
+      (tester) async {
+    final controller = StartupOnboardingController();
+    addTearDown(controller.dispose);
+    var recoveryRequests = 0;
+    controller.setWebVpnChangeHandler((enabled) async {
+      if (enabled) recoveryRequests++;
+      return true;
+    });
+    await tester.pumpWidget(MaterialApp(
+      home: StartupOnboarding(
+        initiallyCompleted: true,
+        initialAcademicLoggedIn: true,
+        onAcademicLoginCompleted: () {},
+        controller: controller,
+        child: const Scaffold(body: Text('主页')),
+      ),
+    ));
+    controller.openAccountManager(
+      academicLoggedIn: true,
+      webVpnEnabled: true,
+      webVpnPendingRecovery: true,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('使用WebVPN连接 · 登录待恢复'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.text('使用WebVPN连接 · 登录待恢复'), const Offset(0, -240));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('恢复WebVPN登录'));
+    await tester.pumpAndSettle();
+    expect(recoveryRequests, 1);
+  });
+
   testWidgets('first launch introduces campus features', (tester) async {
     final controller = StartupOnboardingController();
     addTearDown(controller.dispose);

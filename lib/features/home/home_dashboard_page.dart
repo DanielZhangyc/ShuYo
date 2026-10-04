@@ -18,6 +18,7 @@ class HomeDashboardPage extends StatelessWidget {
     required this.onOpenAnnouncements,
     required this.onOpenEmptyClassroom,
     required this.onOpenCourseRatings,
+    this.onOpenLibraryBooking,
     required this.todayCourseContent,
     required this.announcementContent,
     this.isDemo = false,
@@ -32,6 +33,7 @@ class HomeDashboardPage extends StatelessWidget {
   final VoidCallback onOpenAnnouncements;
   final VoidCallback onOpenEmptyClassroom;
   final VoidCallback onOpenCourseRatings;
+  final VoidCallback? onOpenLibraryBooking;
   final String todayCourseContent;
   final String announcementContent;
   final bool isDemo;
@@ -104,6 +106,12 @@ class HomeDashboardPage extends StatelessWidget {
           title: '空教室查询',
           content: '选择校区、教学楼和节次后查询',
           onTap: onOpenEmptyClassroom,
+        ),
+        _HomeRow(
+          icon: Icons.local_library_outlined,
+          title: '图书馆预约',
+          content: '查看四个场馆的座位并预约',
+          onTap: onOpenLibraryBooking,
         ),
         _HomeRow(
           icon: Icons.egg_alt,

@@ -22,6 +22,22 @@ void main() {
     );
   });
 
+  test('identity redirects use newsso without changing business callbacks', () {
+    final login = AcademicNativeAuthService.canonicalSsoUri(Uri.parse(
+      'https://oauth.shu.edu.cn/oauth2/login/context',
+    ));
+    final proxy = AcademicNativeAuthService.canonicalSsoUri(Uri.parse(
+      'https://https-newsso-shu-edu-cn-443.webvpn.shu.edu.cn/oauth/authorize?client_id=x',
+    ));
+    final callback = AcademicNativeAuthService.canonicalSsoUri(Uri.parse(
+      'https://jwxt.shu.edu.cn/sso/shulogin?code=x',
+    ));
+    expect(login.host, 'newsso.shu.edu.cn');
+    expect(proxy.host, 'newsso.shu.edu.cn');
+    expect(proxy.queryParameters['client_id'], 'x');
+    expect(callback.host, 'jwxt.shu.edu.cn');
+  });
+
   group('AcademicSessionCookieStore', () {
     const newsso = 'https://newsso.shu.edu.cn';
 

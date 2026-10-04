@@ -25,7 +25,18 @@ void main() {
     expect(find.text('使用企业微信登录'), findsOneWidget);
   });
 
-  testWidgets('credential card keeps labels and reveals password action on focus',
+  testWidgets('booking login names the feature being authorized',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: NativeLoginPage.there()),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('登录图书馆预约'), findsOneWidget);
+    expect(find.text('使用企业微信登录'), findsOneWidget);
+  });
+
+  testWidgets(
+      'credential card keeps labels and reveals password action on focus',
       (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;

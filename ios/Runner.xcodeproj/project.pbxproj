@@ -10,6 +10,10 @@
 		C30000000000000000000005 /* home_widget_privacy.bundle in Resources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000006 /* home_widget_privacy.bundle */; };
 		C30000000000000000000001 /* Runner PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000003 /* PrivacyInfo.xcprivacy */; };
 		C30000000000000000000002 /* Widget PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000004 /* PrivacyInfo.xcprivacy */; };
+		B20000000000000000000001 /* CourseActivityAttributes.swift in Runner Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000005 /* CourseActivityAttributes.swift */; };
+		B20000000000000000000002 /* CourseActivityAttributes.swift in Widget Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000005 /* CourseActivityAttributes.swift */; };
+		B20000000000000000000003 /* CourseLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006 /* CourseLiveActivity.swift */; };
+		B20000000000000000000004 /* CourseLiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000007 /* CourseLiveActivityController.swift */; };
 		A10000000000000000000001 /* ScheduleWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* ScheduleWidget.swift */; };
 		A10000000000000000000002 /* ScheduleWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* ScheduleWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = 1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */; };
@@ -68,6 +72,9 @@
 		C30000000000000000000006 /* home_widget_privacy.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.cfbundle"; path = home_widget_privacy.bundle; sourceTree = "<group>"; };
 		C30000000000000000000003 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		C30000000000000000000004 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		B20000000000000000000005 /* CourseActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourseActivityAttributes.swift; sourceTree = "<group>"; };
+		B20000000000000000000006 /* CourseLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourseLiveActivity.swift; sourceTree = "<group>"; };
+		B20000000000000000000007 /* CourseLiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourseLiveActivityController.swift; sourceTree = "<group>"; };
 		A10000000000000000000003 /* ScheduleWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleWidget.swift; sourceTree = "<group>"; };
 		A10000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000005 /* ScheduleWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ScheduleWidget.entitlements; sourceTree = "<group>"; };
@@ -111,11 +118,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		B20000000000000000000008 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000005 /* CourseActivityAttributes.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
 		A10000000000000000000011 /* ScheduleWidget */ = {
 			isa = PBXGroup;
 			children = (
 				C30000000000000000000004 /* PrivacyInfo.xcprivacy */,
 				A10000000000000000000003 /* ScheduleWidget.swift */,
+				B20000000000000000000006 /* CourseLiveActivity.swift */,
 				A10000000000000000000004 /* Info.plist */,
 				A10000000000000000000005 /* ScheduleWidget.entitlements */,
 			);
@@ -148,6 +164,7 @@
 				9740EEB11CF90186004384FC /* Flutter */,
 				97C146F01CF9000F007C117D /* Runner */,
 				A10000000000000000000011 /* ScheduleWidget */,
+				B20000000000000000000008 /* Shared */,
 				97C146EF1CF9000F007C117D /* Products */,
 				331C8082294A63A400263BE5 /* RunnerTests */,
 			);
@@ -176,6 +193,7 @@
 				1498D2321E8E86230040F4C2 /* GeneratedPluginRegistrant.h */,
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
+				B20000000000000000000007 /* CourseLiveActivityController.swift */,
 				7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 			);
@@ -361,6 +379,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000001 /* ScheduleWidget.swift in Sources */,
+				B20000000000000000000002 /* CourseActivityAttributes.swift in Widget Sources */,
+				B20000000000000000000003 /* CourseLiveActivity.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -377,6 +397,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
+				B20000000000000000000001 /* CourseActivityAttributes.swift in Runner Sources */,
+				B20000000000000000000004 /* CourseLiveActivityController.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,
 			);
