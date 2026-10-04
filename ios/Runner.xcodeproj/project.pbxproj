@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C30000000000000000000005 /* home_widget_privacy.bundle in Resources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000006 /* home_widget_privacy.bundle */; };
+		C30000000000000000000001 /* Runner PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000003 /* PrivacyInfo.xcprivacy */; };
+		C30000000000000000000002 /* Widget PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000004 /* PrivacyInfo.xcprivacy */; };
 		B20000000000000000000001 /* CourseActivityAttributes.swift in Runner Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000005 /* CourseActivityAttributes.swift */; };
 		B20000000000000000000002 /* CourseActivityAttributes.swift in Widget Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000005 /* CourseActivityAttributes.swift */; };
 		B20000000000000000000003 /* CourseLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006 /* CourseLiveActivity.swift */; };
@@ -66,6 +69,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		C30000000000000000000006 /* home_widget_privacy.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.cfbundle"; path = home_widget_privacy.bundle; sourceTree = "<group>"; };
+		C30000000000000000000003 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		C30000000000000000000004 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		B20000000000000000000005 /* CourseActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourseActivityAttributes.swift; sourceTree = "<group>"; };
 		B20000000000000000000006 /* CourseLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourseLiveActivity.swift; sourceTree = "<group>"; };
 		B20000000000000000000007 /* CourseLiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourseLiveActivityController.swift; sourceTree = "<group>"; };
@@ -123,6 +129,7 @@
 		A10000000000000000000011 /* ScheduleWidget */ = {
 			isa = PBXGroup;
 			children = (
+				C30000000000000000000004 /* PrivacyInfo.xcprivacy */,
 				A10000000000000000000003 /* ScheduleWidget.swift */,
 				B20000000000000000000006 /* CourseLiveActivity.swift */,
 				A10000000000000000000004 /* Info.plist */,
@@ -176,6 +183,8 @@
 		97C146F01CF9000F007C117D /* Runner */ = {
 			isa = PBXGroup;
 			children = (
+				C30000000000000000000006 /* home_widget_privacy.bundle */,
+				C30000000000000000000003 /* PrivacyInfo.xcprivacy */,
 				A10000000000000000000009 /* Runner.entitlements */,
 				97C146FA1CF9000F007C117D /* Main.storyboard */,
 				97C146FD1CF9000F007C117D /* Assets.xcassets */,
@@ -304,6 +313,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C30000000000000000000002 /* Widget PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -318,6 +328,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C30000000000000000000005 /* home_widget_privacy.bundle in Resources */,
+				C30000000000000000000001 /* Runner PrivacyInfo.xcprivacy in Resources */,
 				97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */,
 				3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */,
 				97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */,
