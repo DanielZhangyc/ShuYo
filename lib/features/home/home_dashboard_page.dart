@@ -104,13 +104,13 @@ class HomeDashboardPage extends StatelessWidget {
         _HomeRow(
           icon: Icons.location_on,
           title: '空教室查询',
-          content: '选择校区、教学楼和节次后查询',
+          content: '查询当前可用教室',
           onTap: onOpenEmptyClassroom,
         ),
         _HomeRow(
           icon: Icons.local_library_outlined,
           title: '图书馆预约',
-          content: '查看四个场馆的座位并预约',
+          content: '预约场馆座位',
           onTap: onOpenLibraryBooking,
         ),
         _HomeRow(

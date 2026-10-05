@@ -304,7 +304,7 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
       return EmptyState(
         icon: Icons.school_outlined,
         title: _loadError == null ? '还没有学业信息' : '读取学业信息失败',
-        message: _loadError ?? '登录上大校园账户后，同步一次即可在本地查看。',
+        message: _loadError ?? '登录校园账户后查看',
         action: FilledButton.icon(
           onPressed: _refreshing ? null : _refresh,
           icon: const Icon(Icons.refresh),
