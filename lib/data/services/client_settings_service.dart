@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/app_tab.dart';
+
 class ClientNotificationSettings {
   const ClientNotificationSettings({
     required this.scheduleEnabled,
@@ -44,6 +46,7 @@ class ClientSettingsService {
       'client.onboarding.startup.completed';
   static const themeIdKey = 'client.theme.id';
   static const followSystemThemeKey = 'client.theme.follow_system';
+  static const startupTabKey = 'client.startup.tab';
 
   final Future<SharedPreferences> Function() _preferencesLoader;
 
@@ -103,6 +106,16 @@ class ClientSettingsService {
   Future<void> saveFollowSystemTheme(bool enabled) async {
     final prefs = await _preferencesLoader();
     await prefs.setBool(followSystemThemeKey, enabled);
+  }
+
+  Future<AppTab> loadStartupTab() async {
+    final prefs = await _preferencesLoader();
+    return AppTab.fromStorageId(prefs.getString(startupTabKey));
+  }
+
+  Future<void> saveStartupTab(AppTab tab) async {
+    final prefs = await _preferencesLoader();
+    await prefs.setString(startupTabKey, tab.storageId);
   }
 
   Future<bool> loadStartupOnboardingCompleted() async {

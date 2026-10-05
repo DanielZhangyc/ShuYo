@@ -7,6 +7,7 @@ import 'package:home_widget/home_widget.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/classroom_url_resolver.dart';
+import '../core/app_tab.dart';
 import '../core/client_app_info.dart';
 import '../core/client_update_policy.dart';
 import '../data/demo/demo_data_bundle.dart';
@@ -68,6 +69,7 @@ class AppShell extends StatefulWidget {
     this.academicAuthService,
     this.unifiedAccountService,
     this.initialOpenSchedule = false,
+    this.initialStartupTab = AppTab.home,
     this.initialScheduleState,
     this.initialScheduleDisplayState,
     this.initialScheduleLoadError,
@@ -96,6 +98,7 @@ class AppShell extends StatefulWidget {
   final AcademicAuthService? academicAuthService;
   final UnifiedAccountService? unifiedAccountService;
   final bool initialOpenSchedule;
+  final AppTab initialStartupTab;
   final AcademicScheduleCacheState? initialScheduleState;
   final AcademicScheduleDisplayState? initialScheduleDisplayState;
   final String? initialScheduleLoadError;
@@ -111,7 +114,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   static const _exitBackPressInterval = Duration(seconds: 2);
   static const _webVpnStatusRefreshInterval = Duration(minutes: 5);
 
-  int _tabIndex = 0;
+  AppTab _tab = AppTab.home;
+  late AppTab _preferredStartupTab = widget.initialStartupTab;
   bool _scheduleTabInitialized = false;
   bool _progressTabInitialized = false;
   int _progressDataRevision = 0;
@@ -166,10 +170,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    if (widget.initialOpenSchedule) {
-      _tabIndex = 2;
-      _scheduleTabInitialized = true;
-    }
+    _tab =
+        widget.initialOpenSchedule ? AppTab.schedule : widget.initialStartupTab;
+    _progressTabInitialized = _tab == AppTab.progress;
+    _scheduleTabInitialized = _tab == AppTab.schedule;
     final demo = widget.demoData;
     _scheduleRepository = widget.scheduleRepository ??
         (widget.isDemo && demo != null
@@ -239,6 +243,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(covariant AppShell oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.initialStartupTab != oldWidget.initialStartupTab) {
+      _preferredStartupTab = widget.initialStartupTab;
+    }
     if (widget.academicLoginSignal != oldWidget.academicLoginSignal) {
       unawaited(_finishAcademicLogin());
     }
@@ -273,7 +280,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    const titles = ['首页', '学业', '日程'];
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -283,16 +289,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         body: SafeArea(
           child: Column(
             children: [
-              if (_tabIndex == 0)
+              if (_tab == AppTab.home)
                 AppHeader(
-                  title: titles[_tabIndex],
+                  title: AppTab.home.label,
                   showSettings: true,
                   onSettings: _openClientSettings,
                   onNotification: _openNotifications,
                 ),
               Expanded(
                 child: IndexedStack(
-                  index: _tabIndex,
+                  index: _tab.index,
                   children: [
                     _homeBody(),
                     _progressTabInitialized
@@ -331,15 +337,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           ),
         ),
         bottomNavigationBar: BottomNavigationBar(
-          currentIndex: _tabIndex,
+          currentIndex: _tab.index,
           type: BottomNavigationBarType.fixed,
-          onTap: _selectTab,
-          items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: '首页'),
-            BottomNavigationBarItem(
-                icon: Icon(Icons.school_outlined), label: '学业'),
-            BottomNavigationBarItem(
-                icon: Icon(Icons.calendar_month), label: '日程'),
+          onTap: (index) => _selectTab(AppTab.values[index]),
+          items: [
+            for (final tab in AppTab.values)
+              BottomNavigationBarItem(
+                  icon: Icon(_tabIcon(tab)), label: tab.label),
           ],
         ),
       ),
@@ -358,13 +362,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _showSnack('再按一次退出 ShuYo');
   }
 
-  void _selectTab(int index) {
+  IconData _tabIcon(AppTab tab) => switch (tab) {
+        AppTab.home => Icons.dashboard,
+        AppTab.progress => Icons.school_outlined,
+        AppTab.schedule => Icons.calendar_month,
+      };
+
+  void _selectTab(AppTab tab) {
     setState(() {
-      _tabIndex = index;
-      if (index == 1) _progressTabInitialized = true;
-      if (index == 2) _scheduleTabInitialized = true;
+      _tab = tab;
+      if (tab == AppTab.progress) _progressTabInitialized = true;
+      if (tab == AppTab.schedule) _scheduleTabInitialized = true;
     });
-    if (index == 0) {
+    if (tab == AppTab.home) {
       unawaited(_refreshScheduleSummaryQuietly());
       unawaited(_refreshAnnouncementSummaryQuietly());
     }
@@ -378,7 +388,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         onLogin: _openAccountManager,
         onOpenAcademicSystem: _syncingAcademicSchedule
             ? () => _showSnack('正在获取课表，请稍后')
-            : () => _selectTab(2),
+            : () => _selectTab(AppTab.schedule),
         onOpenAnnouncements: () => unawaited(_openAnnouncements()),
         onOpenEmptyClassroom: () => unawaited(_openEmptyClassroom()),
         onOpenLibraryBooking: () => unawaited(_openLibraryBooking()),
@@ -670,7 +680,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _openScheduleFromWidget() {
     if (!mounted) return;
     Navigator.of(context).popUntil((route) => route.isFirst);
-    _selectTab(2);
+    _selectTab(AppTab.schedule);
   }
 
   Future<void> _handleInvalidAcademicSession() async {
@@ -850,6 +860,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           followSystemTheme: widget.followSystemTheme,
           onThemeChanged: widget.onThemeChanged,
           onFollowSystemThemeChanged: widget.onFollowSystemThemeChanged,
+          selectedStartupTab: _preferredStartupTab,
+          onStartupTabChanged: _changeStartupTab,
           webVpnController: widget.onboardingController,
           hasAcademicAccount: _hasAcademicSession,
           hasWebVpnSession: hasWebVpnSession,
@@ -860,6 +872,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ),
       ),
     );
+  }
+
+  Future<void> _changeStartupTab(AppTab tab) async {
+    await _clientSettingsService.saveStartupTab(tab);
+    if (mounted) setState(() => _preferredStartupTab = tab);
   }
 
   Future<bool> _logoutAcademicAccount() async {

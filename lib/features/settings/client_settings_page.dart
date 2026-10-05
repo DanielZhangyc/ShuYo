@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/client_app_info.dart';
+import '../../core/app_tab.dart';
 import '../../core/client_update_policy.dart';
 import '../../data/repositories/client_backend_repository.dart';
 import '../../data/services/academic_schedule_notification_service.dart';
@@ -28,6 +29,8 @@ class ClientSettingsPage extends StatelessWidget {
     required this.followSystemTheme,
     required this.onThemeChanged,
     required this.onFollowSystemThemeChanged,
+    required this.selectedStartupTab,
+    required this.onStartupTabChanged,
     required this.webVpnController,
     this.hasAcademicAccount = false,
     this.hasWebVpnSession = false,
@@ -44,6 +47,8 @@ class ClientSettingsPage extends StatelessWidget {
   final bool followSystemTheme;
   final Future<void> Function(String themeId) onThemeChanged;
   final Future<void> Function(bool enabled) onFollowSystemThemeChanged;
+  final AppTab selectedStartupTab;
+  final Future<void> Function(AppTab tab) onStartupTabChanged;
   final StartupOnboardingController webVpnController;
   final bool hasAcademicAccount;
   final bool hasWebVpnSession;
@@ -67,6 +72,17 @@ class ClientSettingsPage extends StatelessWidget {
                   followSystemTheme: followSystemTheme,
                   onThemeChanged: onThemeChanged,
                   onFollowSystemThemeChanged: onFollowSystemThemeChanged,
+                ),
+              ),
+            ),
+          ),
+          _SettingsRow(
+            title: '启动显示',
+            onTap: () => Navigator.of(context).push<void>(
+              shuyoRoute(
+                builder: (context) => _StartupDisplayPage(
+                  selectedTab: selectedStartupTab,
+                  onChanged: onStartupTabChanged,
                 ),
               ),
             ),
@@ -132,6 +148,66 @@ class ClientSettingsPage extends StatelessWidget {
     if (confirmed) {
       await onExitDemo?.call();
       if (context.mounted) Navigator.of(context).pop();
+    }
+  }
+}
+
+class _StartupDisplayPage extends StatefulWidget {
+  const _StartupDisplayPage({
+    required this.selectedTab,
+    required this.onChanged,
+  });
+
+  final AppTab selectedTab;
+  final Future<void> Function(AppTab tab) onChanged;
+
+  @override
+  State<_StartupDisplayPage> createState() => _StartupDisplayPageState();
+}
+
+class _StartupDisplayPageState extends State<_StartupDisplayPage> {
+  late AppTab _selectedTab = widget.selectedTab;
+  AppTab? _savingTab;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('启动显示')),
+      body: ListView(
+        children: [
+          for (final tab in AppTab.values)
+            ListTile(
+              title: Text(tab.label),
+              trailing: _savingTab == tab
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2.5),
+                    )
+                  : tab == _selectedTab
+                      ? const Icon(Icons.check)
+                      : null,
+              onTap: _savingTab == null && tab != _selectedTab
+                  ? () => _selectTab(tab)
+                  : null,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _selectTab(AppTab tab) async {
+    setState(() => _savingTab = tab);
+    try {
+      await widget.onChanged(tab);
+      if (mounted) setState(() => _selectedTab = tab);
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('启动显示保存失败，请重试')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingTab = null);
     }
   }
 }

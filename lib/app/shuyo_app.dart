@@ -5,6 +5,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:home_widget/home_widget.dart';
 
 import '../core/client_app_info.dart';
+import '../core/app_tab.dart';
 import '../core/classroom_url_resolver.dart';
 import '../data/demo/demo_data_bundle.dart';
 import '../data/demo/demo_repositories.dart';
@@ -137,6 +138,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
                   : data.academicStudentId,
               initialNickname: demo ? null : data.nickname,
               initialPreferredCampus: data.preferredCampus,
+              initialStartupTab: data.startupTab,
               initialOpenSchedule: data.openScheduleFromWidget &&
                   (demo || data.onboardingCompleted),
               initialScheduleState: data.initialScheduleState,
@@ -177,6 +179,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
     }
     await ClientAppInfo.load();
     final networkSettings = await _settingsService.loadNetworkSettings();
+    final startupTab = await _settingsService.loadStartupTab();
     ClassroomUrlResolver.configure(
       useWebVpn: networkSettings.webVpnEnabled,
     );
@@ -206,6 +209,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
       academicStudentId: academicStudentId,
       nickname: nickname,
       preferredCampus: preferredCampus,
+      startupTab: startupTab,
       onboardingCompleted: onboardingCompleted,
       demoMode: false,
       openScheduleFromWidget: openScheduleFromWidget,
@@ -238,6 +242,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
       webVpnEnabled: false,
       hasAcademicSession: true,
       academicStudentId: initialScheduleLoad.state?.schedule?.term.studentId,
+      startupTab: await _settingsService.loadStartupTab(),
       onboardingCompleted: true,
       demoMode: true,
       openScheduleFromWidget: openScheduleFromWidget,
@@ -363,6 +368,7 @@ class _StartupData {
     required this.academicStudentId,
     this.nickname,
     this.preferredCampus = ClassroomCampus.defaultName,
+    this.startupTab = AppTab.home,
     required this.onboardingCompleted,
     required this.demoMode,
     required this.openScheduleFromWidget,
@@ -379,6 +385,7 @@ class _StartupData {
   final String? academicStudentId;
   final String? nickname;
   final String preferredCampus;
+  final AppTab startupTab;
   final bool onboardingCompleted;
   final bool demoMode;
   final bool openScheduleFromWidget;

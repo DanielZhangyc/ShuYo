@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuyo/app/app_shell.dart';
+import 'package:shuyo/core/app_tab.dart';
+import 'package:shuyo/data/services/client_settings_service.dart';
 import 'package:shuyo/features/home/academic_schedule_page.dart';
 import 'package:shuyo/features/home/academic_progress_page.dart';
 import 'package:shuyo/features/onboarding/startup_onboarding.dart';
@@ -85,6 +87,7 @@ void main() {
         initialAcademicStudentId: '25120000',
         onboardingController: controller,
         initialOpenSchedule: true,
+        initialStartupTab: AppTab.progress,
         isDemo: true,
       ),
     ));
@@ -95,5 +98,80 @@ void main() {
             .currentIndex,
         2);
     expect(find.byType(AcademicSchedulePage), findsOneWidget);
+  });
+
+  for (final tab in [AppTab.progress, AppTab.schedule]) {
+    testWidgets('starts on the preferred ${tab.label} tab', (tester) async {
+      final controller = StartupOnboardingController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: AppShell(
+          initialWebVpnEnabled: false,
+          selectedThemeId: 'default',
+          followSystemTheme: false,
+          onThemeChanged: (_) async {},
+          onFollowSystemThemeChanged: (_) async {},
+          academicLoginSignal: 0,
+          initialHasAcademicSession: true,
+          initialAcademicStudentId: '25120000',
+          onboardingController: controller,
+          initialStartupTab: tab,
+          isDemo: true,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester
+            .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
+            .currentIndex,
+        tab.index,
+      );
+      expect(
+        tab == AppTab.progress
+            ? find.byType(AcademicProgressPage)
+            : find.byType(AcademicSchedulePage),
+        findsOneWidget,
+      );
+    });
+  }
+
+  testWidgets('changing startup display does not switch the current tab',
+      (tester) async {
+    final controller = StartupOnboardingController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: AppShell(
+        initialWebVpnEnabled: false,
+        selectedThemeId: 'default',
+        followSystemTheme: false,
+        onThemeChanged: (_) async {},
+        onFollowSystemThemeChanged: (_) async {},
+        academicLoginSignal: 0,
+        initialHasAcademicSession: true,
+        initialAcademicStudentId: '25120000',
+        onboardingController: controller,
+        isDemo: true,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('设置'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('启动显示'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('学业'));
+    await tester.pumpAndSettle();
+    expect(await ClientSettingsService().loadStartupTab(), AppTab.progress);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
+          .currentIndex,
+      AppTab.home.index,
+    );
   });
 }

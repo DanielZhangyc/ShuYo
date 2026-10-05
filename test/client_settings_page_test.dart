@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shuyo/core/app_tab.dart';
 import 'package:shuyo/data/repositories/academic_schedule_repository.dart';
 import 'package:shuyo/data/repositories/client_backend_repository.dart';
 import 'package:shuyo/data/services/academic_schedule_notification_service.dart';
@@ -44,6 +45,8 @@ void main() {
           followSystemTheme: false,
           onThemeChanged: (_) async {},
           onFollowSystemThemeChanged: (_) async {},
+          selectedStartupTab: AppTab.home,
+          onStartupTabChanged: (_) async {},
           webVpnController: controller,
         ),
       ),
@@ -88,6 +91,36 @@ void main() {
     );
     await tester.pump();
     expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+  });
+
+  testWidgets('startup display lists tabs and saves the next launch choice',
+      (tester) async {
+    final service = ClientSettingsService();
+    await _pumpSettings(
+      tester,
+      onStartupTabChanged: service.saveStartupTab,
+    );
+
+    expect(tester.getTopLeft(find.text('主题切换')).dy,
+        lessThan(tester.getTopLeft(find.text('启动显示')).dy));
+    expect(tester.getTopLeft(find.text('启动显示')).dy,
+        lessThan(tester.getTopLeft(find.text('WebVPN连接')).dy));
+    await tester.tap(find.text('启动显示'));
+    await tester.pumpAndSettle();
+    expect(find.text('首页'), findsOneWidget);
+    expect(find.text('学业'), findsOneWidget);
+    expect(find.text('日程'), findsOneWidget);
+
+    await tester.tap(find.text('学业'));
+    await tester.pumpAndSettle();
+    expect(await service.loadStartupTab(), AppTab.progress);
+    expect(
+      find.descendant(
+        of: find.widgetWithText(ListTile, '学业'),
+        matching: find.byIcon(Icons.check),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('WebVPN loading drops below the switch and retracts',
@@ -231,6 +264,8 @@ Future<void> _pumpSettings(
   Future<bool> Function()? onAcademicLogout,
   Future<bool> Function()? onWebVpnLogout,
   StartupOnboardingController? webVpnController,
+  AppTab selectedStartupTab = AppTab.home,
+  Future<void> Function(AppTab)? onStartupTabChanged,
 }) async {
   final controller = webVpnController ?? StartupOnboardingController();
   if (webVpnController == null) addTearDown(controller.dispose);
@@ -251,6 +286,8 @@ Future<void> _pumpSettings(
         followSystemTheme: false,
         onThemeChanged: (_) async {},
         onFollowSystemThemeChanged: (_) async {},
+        selectedStartupTab: selectedStartupTab,
+        onStartupTabChanged: onStartupTabChanged ?? (_) async {},
         webVpnController: controller,
         hasAcademicAccount: hasAcademicAccount,
         hasWebVpnSession: hasWebVpnSession,

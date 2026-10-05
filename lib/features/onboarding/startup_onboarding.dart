@@ -796,7 +796,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
       decoration: TextDecoration.underline,
       decorationColor: color,
     );
-    return Center(
+    final profileRow = Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 18),
         child: Row(
@@ -863,6 +863,14 @@ class _StartupOnboardingState extends State<StartupOnboarding>
           ],
         ),
       ),
+    );
+    return Theme(
+      data: Theme.of(context).copyWith(
+        splashFactory: NoSplash.splashFactory,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+      ),
+      child: profileRow,
     );
   }
 
