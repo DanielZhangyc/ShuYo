@@ -139,6 +139,7 @@ void main() {
     );
     expect(creditText, findsOneWidget);
     expect(find.text('张老师'), findsNothing);
+    expect(find.text('课堂提示'), findsNothing);
     expect(
       tester.getTopLeft(creditText).dy,
       greaterThan(tester.getTopLeft(find.text('本周课程')).dy),
@@ -150,17 +151,117 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('显示学分'), findsOneWidget);
     await tester.tap(find.text('显示教师'));
+    await tester.tap(find.text('显示备注'));
     await tester.ensureVisible(find.text('完成'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('完成'));
     await tester.pumpAndSettle();
 
     expect(find.text('张老师'), findsOneWidget);
+    expect(find.text('课堂提示'), findsOneWidget);
     expect(creditText, findsOneWidget);
     expect(
       tester.getTopLeft(creditText).dy,
       greaterThan(tester.getTopLeft(find.text('张老师')).dy),
     );
+  });
+
+  testWidgets('keeps selected fields and fits note above location',
+      (tester) async {
+    final restoreFlutterError = _ignoreListTileBackgroundWarning();
+    addTearDown(restoreFlutterError);
+    final repository = AcademicScheduleRepository(
+      apiClient: AcademicScheduleApiClient(
+        authService: _FakeAcademicAuthService(),
+      ),
+    );
+    const note = '带好实验报告并提前完成预习，课前检查设备和资料，课后提交实验记录';
+    final schedule = _schedule.copyWith(sessions: [
+      _session(
+        id: 'two-sections',
+        name: '课程',
+        weekday: 1,
+        weeks: const [1],
+        teacherName: '张老师',
+        credit: '2',
+        location: 'A101',
+        note: note,
+      ),
+      _session(
+        id: 'one-section',
+        name: '单节课程',
+        weekday: 2,
+        weeks: const [1],
+        teacherName: '李老师',
+        credit: '1',
+        location: 'B202',
+        note: note,
+        endSection: 1,
+      ),
+    ]);
+    await tester.pumpWidget(MaterialApp(
+      home: AcademicSchedulePage(
+        repository: repository,
+        notificationService:
+            AcademicScheduleNotificationService(repository: repository),
+        widgetService: AcademicScheduleWidgetService(repository: repository),
+        onLoginRequired: () async {},
+        initialState: AcademicScheduleCacheState(
+          schedule: schedule,
+          weekState: ScheduleWeekState(
+            currentWeek: 1,
+            anchorMonday:
+                AcademicScheduleRepository.startOfWeek(DateTime.now()),
+          ),
+        ),
+        initialDisplayState: const AcademicScheduleDisplayState(
+          settings: AcademicScheduleDisplaySettings(
+            colorful: true,
+            showTeacher: true,
+            showCredit: true,
+            showNote: true,
+          ),
+          courseColorValues: {},
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    for (final id in ['two-sections', 'one-section']) {
+      final block = find.byKey(ValueKey('schedule-course-$id'));
+      final noteWidget = tester.widget<Text>(
+        find.descendant(of: block, matching: find.text(note)),
+      );
+      if (id == 'two-sections') {
+        expect(noteWidget.maxLines, 3);
+      } else {
+        expect(noteWidget.maxLines, lessThan(3));
+      }
+      expect(
+        find.descendant(
+            of: block,
+            matching: find.text(id == 'two-sections' ? '张老师' : '李老师')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+            of: block, matching: find.text(id == 'two-sections' ? '2' : '1')),
+        findsOneWidget,
+      );
+      final location = find.descendant(
+        of: block,
+        matching: find.text(id == 'two-sections' ? 'A101' : 'B202'),
+      );
+      expect(location, findsOneWidget);
+      expect(
+          tester.getTopLeft(location).dy,
+          greaterThan(tester
+              .getTopLeft(find.descendant(of: block, matching: find.text(note)))
+              .dy));
+      expect(tester.getBottomRight(location).dy,
+          lessThanOrEqualTo(tester.getBottomRight(block).dy));
+    }
+    expect(tester.takeException(), isNull);
   });
 }
 
@@ -212,6 +313,9 @@ CourseSession _session({
   required List<int> weeks,
   String teacherName = '',
   String credit = '',
+  String location = '',
+  String note = '',
+  int endSection = 2,
 }) {
   return CourseSession(
     id: id,
@@ -219,15 +323,15 @@ CourseSession _session({
     courseCode: id,
     teacherName: teacherName,
     campus: '',
-    location: '',
+    location: location,
     weekday: weekday,
     startSection: 1,
-    endSection: 2,
-    sections: const [1, 2],
+    endSection: endSection,
+    sections: [for (var section = 1; section <= endSection; section++) section],
     weeks: weeks,
     weekText: weeks.join(','),
     credit: credit,
-    note: '',
+    note: note,
   );
 }
 
@@ -249,6 +353,7 @@ final _schedule = AcademicSchedule(
       weeks: const [1],
       teacherName: '张老师',
       credit: '2',
+      note: '课堂提示',
     ),
     _session(id: 'covered', name: '被本周课程覆盖', weekday: 1, weeks: const [2]),
     _session(id: 'next', name: '下周课程', weekday: 2, weeks: const [2]),

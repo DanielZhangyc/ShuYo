@@ -1514,6 +1514,7 @@ class _DisplaySettingsSheetState extends State<_DisplaySettingsSheet> {
   late bool _colorful;
   late bool _showTeacher;
   late bool _showCredit;
+  late bool _showNote;
   late bool _showNonCurrentWeekCourses;
 
   @override
@@ -1522,6 +1523,7 @@ class _DisplaySettingsSheetState extends State<_DisplaySettingsSheet> {
     _colorful = widget.initial.colorful;
     _showTeacher = widget.initial.showTeacher;
     _showCredit = widget.initial.showCredit;
+    _showNote = widget.initial.showNote;
     _showNonCurrentWeekCourses = widget.initial.showNonCurrentWeekCourses;
   }
 
@@ -1571,6 +1573,11 @@ class _DisplaySettingsSheetState extends State<_DisplaySettingsSheet> {
                 onChanged: (value) => setState(() => _showCredit = value),
               ),
               SwitchListTile(
+                title: const _DisplaySettingTitle('显示备注'),
+                value: _showNote,
+                onChanged: (value) => setState(() => _showNote = value),
+              ),
+              SwitchListTile(
                 title: const _DisplaySettingTitle('显示非本周课程'),
                 value: _showNonCurrentWeekCourses,
                 onChanged: (value) =>
@@ -1593,6 +1600,7 @@ class _DisplaySettingsSheetState extends State<_DisplaySettingsSheet> {
                         colorful: _colorful,
                         showTeacher: _showTeacher,
                         showCredit: _showCredit,
+                        showNote: _showNote,
                         showNonCurrentWeekCourses: _showNonCurrentWeekCourses,
                       ),
                     ),
@@ -3294,57 +3302,141 @@ class _CourseBlock extends StatelessWidget {
       if (displaySettings.showCredit && session.credit.isNotEmpty)
         session.credit,
     ];
+    final note = displaySettings.showNote
+        ? session.note.replaceAll(RegExp(r'\s+'), ' ').trim()
+        : '';
     return Material(
       color: fillColor,
       borderRadius: BorderRadius.circular(_scheduleCourseRadius),
       child: InkWell(
         borderRadius: BorderRadius.circular(_scheduleCourseRadius),
         onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 7),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(_scheduleCourseRadius),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                session.courseName,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: courseTextColor,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 11.5,
-                  height: 1.2,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxHeight < 100;
+            final verticalPadding = compact ? 2.0 : 7.0;
+            final gap = compact ? 1.0 : 3.0;
+            final titleStyle = TextStyle(
+              color: courseTextColor,
+              fontWeight: FontWeight.w600,
+              fontSize: compact ? 8.5 : 11.5,
+              height: compact ? 1 : 1.2,
+            );
+            final metaStyle = TextStyle(
+              color: metaTextColor,
+              fontSize: compact ? 8 : 10.5,
+              height: compact ? 1 : null,
+            );
+            final noteStyle = TextStyle(
+              color: courseTextColor,
+              fontWeight: FontWeight.w500,
+              fontSize: compact ? 8 : 10.5,
+              height: compact ? 1 : 1.2,
+            );
+            final textWidth = constraints.maxWidth - 6;
+            final innerHeight = constraints.maxHeight - verticalPadding * 2;
+            double textHeight(
+                String value, TextStyle style, int maxLines, double width) {
+              final painter = TextPainter(
+                text: TextSpan(
+                  text: value,
+                  style: DefaultTextStyle.of(context).style.merge(style),
                 ),
-              ),
-              if (courseMetaLines.isNotEmpty) ...[
-                const SizedBox(height: 3),
-                for (final line in courseMetaLines)
-                  Text(
-                    line,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: metaTextColor,
-                      fontSize: 10.5,
+                textDirection: Directionality.of(context),
+                textScaler: MediaQuery.textScalerOf(context),
+                maxLines: maxLines,
+                ellipsis: '…',
+              )..layout(maxWidth: width);
+              final height = painter.height;
+              painter.dispose();
+              return height;
+            }
+
+            var titleLines = compact ? 1 : 3;
+            var noteLines = note.isEmpty ? 0 : 3;
+            double contentHeight() {
+              var height = textHeight(
+                  session.courseName, titleStyle, titleLines, textWidth);
+              if (courseMetaLines.isNotEmpty) {
+                height += gap;
+                for (final line in courseMetaLines) {
+                  height += textHeight(line, metaStyle, 1, textWidth);
+                }
+              }
+              if (noteLines > 0) {
+                height += gap +
+                    4 +
+                    textHeight(note, noteStyle, noteLines, textWidth - 4);
+              }
+              if (session.location.isNotEmpty) {
+                height += textHeight(session.location, metaStyle, 1, textWidth);
+              }
+              return height;
+            }
+
+            while (noteLines > 1 && contentHeight() > innerHeight) {
+              noteLines--;
+            }
+            while (titleLines > 1 && contentHeight() > innerHeight) {
+              titleLines--;
+            }
+            final needsScroll = contentHeight() > innerHeight;
+            final content = Column(
+              mainAxisSize: needsScroll ? MainAxisSize.min : MainAxisSize.max,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  session.courseName,
+                  maxLines: titleLines,
+                  overflow: TextOverflow.ellipsis,
+                  style: titleStyle,
+                ),
+                if (courseMetaLines.isNotEmpty) ...[
+                  SizedBox(height: gap),
+                  for (final line in courseMetaLines)
+                    Text(
+                      line,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: metaStyle,
+                    ),
+                ],
+                if (noteLines > 0) ...[
+                  SizedBox(height: gap),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Color.lerp(fillColor, Colors.white, 0.14),
+                      borderRadius: BorderRadius.circular(2.5),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 2, vertical: 2),
+                      child: Text(
+                        note,
+                        maxLines: noteLines,
+                        overflow: TextOverflow.ellipsis,
+                        style: noteStyle,
+                      ),
                     ),
                   ),
-              ],
-              const Spacer(),
-              if (session.location.isNotEmpty)
-                Text(
-                  session.location,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: metaTextColor,
-                    fontSize: 10.5,
+                ],
+                if (!needsScroll) const Spacer(),
+                if (session.location.isNotEmpty)
+                  Text(
+                    session.location,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: metaStyle,
                   ),
-                ),
-            ],
-          ),
+              ],
+            );
+            return Padding(
+              padding: EdgeInsets.symmetric(
+                  horizontal: 3, vertical: verticalPadding),
+              child:
+                  needsScroll ? SingleChildScrollView(child: content) : content,
+            );
+          },
         ),
       ),
     );
