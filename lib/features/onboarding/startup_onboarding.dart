@@ -405,8 +405,8 @@ class _StartupOnboardingState extends State<StartupOnboarding>
     final callback =
         widget.onAcademicLogout ?? widget.controller.logoutAcademic;
     final confirmed = await _confirmLogout(
-      title: '退出上大校园账户？',
-      message: '将退出统一认证、教务和WebVPN。已保存的课表与学业数据会保留。',
+      title: '确认退出',
+      message: '退出后将需要重新登录，仍可查看已保存的课表和学业信息',
     );
     if (!confirmed || !mounted) return;
     final loggedOut = await callback();

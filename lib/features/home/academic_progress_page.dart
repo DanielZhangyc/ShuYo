@@ -843,6 +843,7 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
         constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width),
         builder: (context) => SafeArea(
           top: false,
+          bottom: false,
           child: Container(
             key: const ValueKey('progress-course-sheet'),
             width: double.infinity,
@@ -857,7 +858,12 @@ class _AcademicProgressPageState extends State<AcademicProgressPage> {
             ),
             child: SingleChildScrollView(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(22, 10, 22, 28),
+                padding: EdgeInsets.fromLTRB(
+                  22,
+                  10,
+                  22,
+                  28 + MediaQuery.viewPaddingOf(context).bottom,
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,

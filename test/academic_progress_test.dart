@@ -410,6 +410,36 @@ void main() {
     expect(find.text('暂无资格证书信息'), findsOneWidget);
   });
 
+  testWidgets('course details cover the gesture navigation area',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    tester.view.viewPadding = const FakeViewPadding(bottom: 34);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewPadding);
+
+    await tester.pumpWidget(MaterialApp(
+      home: AcademicProgressPage(
+        repository: DemoAcademicProgressRepository(),
+        onLoginRequired: () async {},
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('公共基础课程'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('大学英语'));
+    await tester.pumpAndSettle();
+
+    final sheet = find.byKey(const ValueKey('progress-course-sheet'));
+    expect(tester.getBottomLeft(sheet).dy, 844);
+    final scrollView = tester.widget<SingleChildScrollView>(
+      find.descendant(of: sheet, matching: find.byType(SingleChildScrollView)),
+    );
+    final contentPadding = scrollView.child! as Padding;
+    expect(contentPadding.padding.resolve(TextDirection.ltr).bottom, 62);
+  });
+
   testWidgets('display settings control GPA only in the overview',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
