@@ -682,7 +682,7 @@ void main() {
       of: find.byKey(const ValueKey('start-hour')),
       matching: find.byType(Text),
     ));
-    expect(digit.style?.fontSize, 24);
+    expect(digit.style?.fontSize, 22);
     await tester.tap(find.byKey(const ValueKey('start-hour')));
     await tester.pumpAndSettle();
     expect(tester.widget<BottomSheet>(find.byType(BottomSheet)).backgroundColor,
