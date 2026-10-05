@@ -60,7 +60,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
   final _displaySettingsService = AcademicScheduleDisplaySettingsService();
   AcademicScheduleDisplaySettings _displaySettings =
       const AcademicScheduleDisplaySettings(
-          colorful: true, showTeacher: false, showCredit: false);
+          colorful: true, showTeacher: true, showCredit: false);
   Map<String, int> _courseColorValues = const {};
   late bool _usingInitialState;
   String? _initialLoadError;

@@ -73,7 +73,7 @@ class AcademicScheduleDisplaySettingsService {
   ) {
     return AcademicScheduleDisplaySettings(
       colorful: prefs.getBool(_colorfulKey) ?? true,
-      showTeacher: prefs.getBool(_showTeacherKey) ?? false,
+      showTeacher: prefs.getBool(_showTeacherKey) ?? true,
       showCredit: prefs.getBool(_showCreditKey) ?? false,
       showNonCurrentWeekCourses:
           prefs.getBool(_showNonCurrentWeekCoursesKey) ?? true,

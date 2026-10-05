@@ -15,7 +15,7 @@ void main() {
     final settings = await service.loadSettings();
 
     expect(settings.colorful, isTrue);
-    expect(settings.showTeacher, isFalse);
+    expect(settings.showTeacher, isTrue);
     expect(settings.showCredit, isFalse);
     expect(settings.showNonCurrentWeekCourses, isTrue);
   });
@@ -26,7 +26,7 @@ void main() {
     await service.saveSettings(
       const AcademicScheduleDisplaySettings(
         colorful: false,
-        showTeacher: true,
+        showTeacher: false,
         showCredit: true,
         showNonCurrentWeekCourses: false,
       ),
@@ -34,7 +34,7 @@ void main() {
     final settings = await service.loadSettings();
 
     expect(settings.colorful, isFalse);
-    expect(settings.showTeacher, isTrue);
+    expect(settings.showTeacher, isFalse);
     expect(settings.showCredit, isTrue);
     expect(settings.showNonCurrentWeekCourses, isFalse);
   });
