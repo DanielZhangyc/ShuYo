@@ -58,6 +58,106 @@ void main() {
     expect(find.textContaining('乐乎'), findsNothing);
   });
 
+  testWidgets('account manager edits nickname and preferred campus',
+      (tester) async {
+    final controller = StartupOnboardingController();
+    addTearDown(controller.dispose);
+    controller.updateProfile(
+      studentId: '25120000',
+      nickname: null,
+      preferredCampus: '宝山',
+    );
+    controller.setProfileChangeHandlers(
+      onNicknameChanged: (value) async {
+        final nickname = value?.trim();
+        controller.updateProfile(
+          studentId: '25120000',
+          nickname: nickname?.isEmpty == true ? null : nickname,
+          preferredCampus: controller.preferredCampus,
+        );
+        return true;
+      },
+      onCampusChanged: (campus) async {
+        controller.updateProfile(
+          studentId: '25120000',
+          nickname: controller.nickname,
+          preferredCampus: campus,
+        );
+        return true;
+      },
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: StartupOnboarding(
+        initiallyCompleted: true,
+        initialAcademicLoggedIn: true,
+        onAcademicLoginCompleted: () {},
+        controller: controller,
+        child: const Scaffold(body: Text('主页')),
+      ),
+    ));
+    controller.openAccountManager(academicLoggedIn: true);
+    await tester.pumpAndSettle();
+    expect(find.text('25120000'), findsOneWidget);
+    expect(find.text('校区：宝山'), findsOneWidget);
+    final nicknameRect = tester.getRect(find.byKey(const Key('nickname-edit')));
+    final campusRect = tester.getRect(find.byKey(const Key('campus-select')));
+    expect(campusRect.left - nicknameRect.right, closeTo(16, 1));
+    expect((nicknameRect.left + campusRect.right) / 2, closeTo(400, 1));
+
+    await tester.tap(find.byKey(const Key('nickname-edit')));
+    await tester.pumpAndSettle();
+    expect(find.text('留空将恢复显示学号'), findsNothing);
+    await tester.enterText(find.byType(TextFormField), ' 小明 ');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(controller.nickname, '小明');
+    expect(controller.academicStudentId, '25120000');
+    expect(find.text('小明'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('campus-select')));
+    await tester.pumpAndSettle();
+    expect(find.byType(BottomSheet), findsNothing);
+    final campusItem = find.widgetWithText(PopupMenuItem<String>, '嘉定');
+    expect(tester.getTopLeft(campusItem).dy,
+        greaterThanOrEqualTo(campusRect.bottom));
+    await tester.tap(campusItem);
+    await tester.pumpAndSettle();
+    expect(controller.preferredCampus, '嘉定');
+    expect(find.text('校区：嘉定'), findsOneWidget);
+  });
+
+  testWidgets('nickname and campus stay on one row on a narrow phone',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = StartupOnboardingController();
+    addTearDown(controller.dispose);
+    controller.updateProfile(
+      studentId: '25120000',
+      nickname: '一个比较长的昵称用于测试窄屏布局',
+      preferredCampus: '宝山东区',
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: StartupOnboarding(
+        initiallyCompleted: true,
+        initialAcademicLoggedIn: true,
+        onAcademicLoginCompleted: () {},
+        controller: controller,
+        child: const Scaffold(body: Text('主页')),
+      ),
+    ));
+    controller.openAccountManager(academicLoggedIn: true);
+    await tester.pumpAndSettle();
+
+    final nicknameRect = tester.getRect(find.byKey(const Key('nickname-edit')));
+    final campusRect = tester.getRect(find.byKey(const Key('campus-select')));
+    expect(nicknameRect.right, lessThan(campusRect.left));
+    expect(nicknameRect.center.dy, closeTo(campusRect.center.dy, 1));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('pending WebVPN can be retried while its switch is already on',
       (tester) async {
     final controller = StartupOnboardingController();

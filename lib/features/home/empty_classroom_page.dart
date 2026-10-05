@@ -15,11 +15,13 @@ class EmptyClassroomPage extends StatefulWidget {
     super.key,
     required this.repository,
     this.initialDate,
+    this.initialCampus = ClassroomCampus.defaultName,
     this.onWebVpnExpired,
   });
 
   final ClassroomRepository repository;
   final DateTime? initialDate;
+  final String initialCampus;
   final Future<void> Function()? onWebVpnExpired;
 
   @override
@@ -206,8 +208,11 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
     if (names.contains(_selectedCampus)) {
       return _selectedCampus;
     }
-    if (names.contains('宝山')) {
-      return '宝山';
+    if (names.contains(widget.initialCampus)) {
+      return widget.initialCampus;
+    }
+    if (names.contains(ClassroomCampus.defaultName)) {
+      return ClassroomCampus.defaultName;
     }
     return names.isEmpty ? null : names.first;
   }

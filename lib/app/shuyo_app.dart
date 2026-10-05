@@ -9,8 +9,10 @@ import '../core/classroom_url_resolver.dart';
 import '../data/demo/demo_data_bundle.dart';
 import '../data/demo/demo_repositories.dart';
 import '../data/demo/demo_session.dart';
+import '../data/models/classroom.dart';
 import '../data/repositories/academic_schedule_repository.dart';
 import '../data/services/academic_account_store.dart';
+import '../data/services/academic_profile_preferences.dart';
 import '../data/services/academic_auth_service.dart';
 import '../data/services/academic_schedule_display_settings_service.dart';
 import '../data/services/app_data_migration_service.dart';
@@ -133,6 +135,8 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
               initialAcademicStudentId: demo
                   ? data.initialScheduleState?.schedule?.term.studentId
                   : data.academicStudentId,
+              initialNickname: demo ? null : data.nickname,
+              initialPreferredCampus: data.preferredCampus,
               initialOpenSchedule: data.openScheduleFromWidget &&
                   (demo || data.onboardingCompleted),
               initialScheduleState: data.initialScheduleState,
@@ -182,6 +186,11 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
       await AcademicAuthService().clearAccount();
     }
     final academicStudentId = await academicAccountStore.loadStudentId();
+    final profilePreferences = AcademicProfilePreferences();
+    final nickname = academicStudentId == null
+        ? null
+        : await profilePreferences.loadNickname(academicStudentId);
+    final preferredCampus = await profilePreferences.loadPreferredCampus();
     final onboardingCompleted =
         await _settingsService.loadStartupOnboardingCompleted();
     final initialScheduleLoad = openScheduleFromWidget && onboardingCompleted
@@ -195,6 +204,8 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
       hasAcademicSession: academicStudentId != null,
       academicSessionExpired: await academicAccountStore.isSessionExpired(),
       academicStudentId: academicStudentId,
+      nickname: nickname,
+      preferredCampus: preferredCampus,
       onboardingCompleted: onboardingCompleted,
       demoMode: false,
       openScheduleFromWidget: openScheduleFromWidget,
@@ -350,6 +361,8 @@ class _StartupData {
     required this.hasAcademicSession,
     this.academicSessionExpired = false,
     required this.academicStudentId,
+    this.nickname,
+    this.preferredCampus = ClassroomCampus.defaultName,
     required this.onboardingCompleted,
     required this.demoMode,
     required this.openScheduleFromWidget,
@@ -364,6 +377,8 @@ class _StartupData {
   final bool hasAcademicSession;
   final bool academicSessionExpired;
   final String? academicStudentId;
+  final String? nickname;
+  final String preferredCampus;
   final bool onboardingCompleted;
   final bool demoMode;
   final bool openScheduleFromWidget;

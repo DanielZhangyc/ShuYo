@@ -6,13 +6,14 @@ void main() {
   Widget page(
           {required bool loggedIn,
           bool syncing = false,
-          bool expired = false}) =>
+          bool expired = false,
+          String? displayName}) =>
       MaterialApp(
         home: Scaffold(
           body: HomeDashboardPage(
             hasAcademicAccount: loggedIn,
             academicSessionExpired: expired,
-            academicStudentId: loggedIn ? '25120000' : null,
+            academicDisplayName: loggedIn ? displayName ?? '25120000' : null,
             isAcademicLoginCompleting: syncing,
             onLogin: () {},
             onOpenAcademicSystem: () {},
@@ -39,6 +40,12 @@ void main() {
     await tester.pumpWidget(page(loggedIn: false));
     expect(find.text('立即登录'), findsOneWidget);
     expect(find.text('登录后同步个人数据'), findsOneWidget);
+  });
+
+  testWidgets('custom nickname changes only the home greeting', (tester) async {
+    await tester.pumpWidget(page(loggedIn: true, displayName: '小明'));
+    expect(find.text('你好，小明！'), findsOneWidget);
+    expect(find.text('你好，25120000！'), findsNothing);
   });
 
   testWidgets(

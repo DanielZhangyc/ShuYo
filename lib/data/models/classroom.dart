@@ -1,5 +1,10 @@
 import 'common.dart';
 
+class ClassroomCampus {
+  static const defaultName = '宝山';
+  static const knownNames = ['宝山', '延长', '宝山东区', '嘉定'];
+}
+
 class ClassroomBuilding {
   const ClassroomBuilding({
     required this.id,

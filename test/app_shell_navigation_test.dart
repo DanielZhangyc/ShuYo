@@ -24,6 +24,7 @@ void main() {
         academicLoginSignal: 0,
         initialHasAcademicSession: true,
         initialAcademicStudentId: '25120000',
+        initialNickname: '小明',
         onboardingController: controller,
         isDemo: true,
       ),
@@ -34,7 +35,7 @@ void main() {
     );
     expect(navigation.items.map((item) => item.label).toList(),
         ['首页', '学业', '日程']);
-    expect(find.text('你好，25120000！'), findsOneWidget);
+    expect(find.text('你好，小明！'), findsOneWidget);
     await tester.tap(find.text('今日课程'));
     await tester.pumpAndSettle();
     expect(

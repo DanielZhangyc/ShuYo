@@ -6,6 +6,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/models/client_backend.dart';
+import '../../data/models/classroom.dart';
 import '../../data/services/client_settings_service.dart';
 import '../../shared/widgets/webvpn_toggle.dart';
 import '../auth/native_login_page.dart';
@@ -16,6 +17,11 @@ class StartupOnboardingController extends ChangeNotifier {
   VoidCallback? _onDismissAccountManager;
   Future<bool> Function()? _onAcademicLogout;
   Future<bool> Function(bool enabled)? _onWebVpnChanged;
+  Future<bool> Function(String? nickname)? _onNicknameChanged;
+  Future<bool> Function(String campus)? _onCampusChanged;
+  String? _academicStudentId;
+  String? _nickname;
+  String _preferredCampus = ClassroomCampus.defaultName;
   bool _webVpnEnabled = false;
   bool _webVpnPendingRecovery = false;
   bool _webVpnSessionReady = false;
@@ -28,6 +34,10 @@ class StartupOnboardingController extends ChangeNotifier {
 
   bool get academicLoggedIn => _academicLoggedIn;
   bool get academicSessionExpired => _academicSessionExpired;
+  String? get academicStudentId => _academicStudentId;
+  String? get nickname => _nickname;
+  String? get displayName => _nickname ?? _academicStudentId;
+  String get preferredCampus => _preferredCampus;
   int get openRequest => _openRequest;
   bool get accountManagerOpen => _accountManagerOpen;
   bool get webVpnEnabled => _webVpnEnabled;
@@ -106,6 +116,36 @@ class StartupOnboardingController extends ChangeNotifier {
   Future<bool> setWebVpnEnabled(bool enabled) async =>
       await _onWebVpnChanged?.call(enabled) ?? false;
 
+  void updateProfile({
+    required String? studentId,
+    required String? nickname,
+    required String preferredCampus,
+  }) {
+    if (_academicStudentId == studentId &&
+        _nickname == nickname &&
+        _preferredCampus == preferredCampus) {
+      return;
+    }
+    _academicStudentId = studentId;
+    _nickname = nickname;
+    _preferredCampus = preferredCampus;
+    _notifyListenersSafely();
+  }
+
+  void setProfileChangeHandlers({
+    Future<bool> Function(String? nickname)? onNicknameChanged,
+    Future<bool> Function(String campus)? onCampusChanged,
+  }) {
+    _onNicknameChanged = onNicknameChanged;
+    _onCampusChanged = onCampusChanged;
+  }
+
+  Future<bool> saveNickname(String? nickname) async =>
+      await _onNicknameChanged?.call(nickname) ?? false;
+
+  Future<bool> savePreferredCampus(String campus) async =>
+      await _onCampusChanged?.call(campus) ?? false;
+
   void setAccountLogoutHandlers({
     Future<bool> Function()? onAcademicLogout,
   }) {
@@ -137,6 +177,8 @@ class StartupOnboardingController extends ChangeNotifier {
     _disposed = true;
     _onAcademicLogout = null;
     _onWebVpnChanged = null;
+    _onNicknameChanged = null;
+    _onCampusChanged = null;
     super.dispose();
   }
 }
@@ -700,12 +742,19 @@ class _StartupOnboardingState extends State<StartupOnboarding>
 
   Widget _login(BuildContext context) => _pageLayout(
         context,
-        header: _pageHeader(
-          context,
-          title: '账号管理',
-          subtitle:
-              _accountManagerMode ? '管理校园账户和WebVPN连接。' : '登录教务系统后，ShuYo将为你同步课表',
-          subtitlePadding: const EdgeInsets.symmetric(horizontal: 18),
+        header: Column(
+          children: [
+            _pageHeader(
+              context,
+              title: '账号管理',
+              subtitle: _accountManagerMode ? null : '登录教务系统后，ShuYo将为你同步课表',
+              subtitlePadding: const EdgeInsets.symmetric(horizontal: 18),
+            ),
+            if (_accountManagerMode) ...[
+              const SizedBox(height: 8),
+              _profileRow(context),
+            ],
+          ],
         ),
         headerSpacing: 22,
         bottomChildren: [
@@ -734,6 +783,133 @@ class _StartupOnboardingState extends State<StartupOnboarding>
           ],
         ],
       );
+
+  Widget _profileRow(BuildContext context) {
+    final color = Theme.of(context).colorScheme.onSurfaceVariant;
+    final studentId = widget.controller.academicStudentId;
+    final canEditNickname = _academicLoggedIn && studentId != null;
+    final name = canEditNickname
+        ? widget.controller.displayName ?? studentId
+        : '登录后设置昵称';
+    final style = TextStyle(
+      color: color,
+      decoration: TextDecoration.underline,
+      decorationColor: color,
+    );
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Flexible(
+              fit: FlexFit.loose,
+              child: InkWell(
+                key: const Key('nickname-edit'),
+                onTap: canEditNickname ? _editNickname : null,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: style,
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Icon(Icons.edit_outlined, size: 16, color: color),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            PopupMenuButton<String>(
+              key: const Key('campus-select'),
+              tooltip: '选择校区',
+              position: PopupMenuPosition.under,
+              color: Colors.white,
+              surfaceTintColor: Colors.transparent,
+              itemBuilder: (context) => [
+                for (final campus in ClassroomCampus.knownNames)
+                  PopupMenuItem<String>(
+                    value: campus,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            campus,
+                            style: const TextStyle(color: Colors.black87),
+                          ),
+                        ),
+                        if (campus == widget.controller.preferredCampus)
+                          const Icon(Icons.check, color: Colors.black87),
+                      ],
+                    ),
+                  ),
+              ],
+              onSelected: (campus) => unawaited(_saveCampus(campus)),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('校区：${widget.controller.preferredCampus}', style: style),
+                  const SizedBox(width: 2),
+                  Icon(Icons.expand_more, size: 18, color: color),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editNickname() async {
+    final studentId = widget.controller.academicStudentId;
+    if (!_academicLoggedIn || studentId == null) return;
+    var input = widget.controller.nickname ?? '';
+    final value = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('编辑昵称'),
+        content: TextFormField(
+          initialValue: input,
+          autofocus: true,
+          maxLength: 20,
+          maxLines: 1,
+          textInputAction: TextInputAction.done,
+          decoration: InputDecoration(hintText: studentId),
+          onChanged: (value) => input = value,
+          onFieldSubmitted: (value) => Navigator.of(dialogContext).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(input),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (value == null || !mounted) return;
+    if (!await widget.controller.saveNickname(value) && mounted) {
+      _showPanelNotice('昵称保存失败，请稍后重试');
+    }
+  }
+
+  Future<void> _saveCampus(String selected) async {
+    if (selected == widget.controller.preferredCampus || !mounted) {
+      return;
+    }
+    if (!await widget.controller.savePreferredCampus(selected) && mounted) {
+      _showPanelNotice('校区保存失败，请稍后重试');
+    }
+  }
 
   Widget _webVpnSection(BuildContext context) {
     final colors = Theme.of(context).colorScheme;

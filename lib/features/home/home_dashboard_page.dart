@@ -11,7 +11,7 @@ class HomeDashboardPage extends StatelessWidget {
     super.key,
     required this.hasAcademicAccount,
     this.academicSessionExpired = false,
-    this.academicStudentId,
+    this.academicDisplayName,
     required this.isAcademicLoginCompleting,
     required this.onLogin,
     required this.onOpenAcademicSystem,
@@ -25,7 +25,7 @@ class HomeDashboardPage extends StatelessWidget {
 
   final bool hasAcademicAccount;
   final bool academicSessionExpired;
-  final String? academicStudentId;
+  final String? academicDisplayName;
   final bool isAcademicLoginCompleting;
   final VoidCallback onLogin;
   final VoidCallback onOpenAcademicSystem;
@@ -65,8 +65,8 @@ class HomeDashboardPage extends StatelessWidget {
           title: isAcademicLoginCompleting
               ? '正在完成校园登录'
               : hasAcademicAccount
-                  ? academicStudentId?.isNotEmpty == true
-                      ? '你好，$academicStudentId！'
+                  ? academicDisplayName?.isNotEmpty == true
+                      ? '你好，$academicDisplayName！'
                       : '你好！'
                   : academicSessionExpired
                       ? '重新登录'
