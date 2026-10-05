@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +13,8 @@ import 'package:shuyo/data/services/academic_schedule_api_client.dart';
 import 'package:shuyo/data/services/academic_auth_service.dart';
 import 'package:shuyo/data/services/client_settings_service.dart';
 import 'package:shuyo/features/settings/client_settings_page.dart';
+import 'package:shuyo/features/onboarding/startup_onboarding.dart';
+import 'package:shuyo/shared/widgets/webvpn_toggle.dart';
 import 'package:shuyo/core/client_app_info.dart';
 
 void main() {
@@ -19,6 +23,8 @@ void main() {
 
   testWidgets('settings hides logout entry when no account is active',
       (tester) async {
+    final controller = StartupOnboardingController();
+    addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: ClientSettingsPage(
@@ -38,6 +44,7 @@ void main() {
           followSystemTheme: false,
           onThemeChanged: (_) async {},
           onFollowSystemThemeChanged: (_) async {},
+          webVpnController: controller,
         ),
       ),
     );
@@ -50,11 +57,72 @@ void main() {
     expect(find.text('关于ShuYo'), findsOneWidget);
   });
 
-  testWidgets('settings no longer exposes WebVPN controls', (tester) async {
-    await _pumpSettings(tester);
+  testWidgets('WebVPN settings shares the account manager state',
+      (tester) async {
+    final controller = StartupOnboardingController();
+    addTearDown(controller.dispose);
+    controller.setWebVpnChangeHandler((enabled) async {
+      controller.updateAccountStatus(
+        academicLoggedIn: false,
+        webVpnEnabled: enabled,
+      );
+      return true;
+    });
+    await _pumpSettings(tester, webVpnController: controller);
 
-    expect(find.text('WebVPN代理'), findsNothing);
-    expect(find.text('自动使用WebVPN代理'), findsNothing);
+    expect(tester.getTopLeft(find.text('主题切换')).dy,
+        lessThan(tester.getTopLeft(find.text('WebVPN连接')).dy));
+    await tester.tap(find.text('WebVPN连接'));
+    await tester.pumpAndSettle();
+    expect(find.text('WebVPN'), findsOneWidget);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+
+    await tester.tap(find.text('WebVPN'));
+    await tester.pumpAndSettle();
+    expect(controller.webVpnEnabled, isTrue);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+
+    controller.updateAccountStatus(
+      academicLoggedIn: false,
+      webVpnEnabled: false,
+    );
+    await tester.pump();
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+  });
+
+  testWidgets('WebVPN loading drops below the switch and retracts',
+      (tester) async {
+    final controller = StartupOnboardingController();
+    addTearDown(controller.dispose);
+    final pending = Completer<bool>();
+    controller.setWebVpnChangeHandler((_) => pending.future);
+    await _pumpSettings(tester, webVpnController: controller);
+    await tester.tap(find.text('WebVPN连接'));
+    await tester.pumpAndSettle();
+    final labelWidth = tester.getSize(find.text('WebVPN')).width;
+
+    final loader = find.descendant(
+      of: find.byType(WebVpnToggle),
+      matching: find.byType(CircularProgressIndicator),
+    );
+    await tester.tap(find.byType(Switch));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 90));
+    expect(loader, findsOneWidget);
+    final fallingTop = tester.getTopLeft(loader).dy;
+    await tester.pump(const Duration(milliseconds: 200));
+    final restingTop = tester.getTopLeft(loader).dy;
+    expect(restingTop, greaterThan(fallingTop));
+    expect(
+        restingTop, greaterThan(tester.getBottomLeft(find.byType(Switch)).dy));
+    expect(tester.getSize(find.text('WebVPN')).width, labelWidth);
+
+    pending.complete(false);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.getTopLeft(loader).dy, lessThan(restingTop));
+    await tester.pumpAndSettle();
+    expect(loader, findsNothing);
   });
 
   testWidgets('about page exposes project privacy and support information',
@@ -162,7 +230,10 @@ Future<void> _pumpSettings(
   bool hasWebVpnSession = false,
   Future<bool> Function()? onAcademicLogout,
   Future<bool> Function()? onWebVpnLogout,
+  StartupOnboardingController? webVpnController,
 }) async {
+  final controller = webVpnController ?? StartupOnboardingController();
+  if (webVpnController == null) addTearDown(controller.dispose);
   await tester.pumpWidget(
     MaterialApp(
       home: ClientSettingsPage(
@@ -180,6 +251,7 @@ Future<void> _pumpSettings(
         followSystemTheme: false,
         onThemeChanged: (_) async {},
         onFollowSystemThemeChanged: (_) async {},
+        webVpnController: controller,
         hasAcademicAccount: hasAcademicAccount,
         hasWebVpnSession: hasWebVpnSession,
         onAcademicLogout: onAcademicLogout,

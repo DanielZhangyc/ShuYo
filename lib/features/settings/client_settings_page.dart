@@ -14,7 +14,9 @@ import '../../shared/navigation/shuyo_route.dart';
 import '../../shared/theme/shuyo_theme.dart';
 import '../../shared/widgets/client_update_prompt.dart';
 import '../../shared/widgets/empty_state.dart';
+import '../../shared/widgets/webvpn_toggle.dart';
 import 'client_feedback_page.dart';
+import '../onboarding/startup_onboarding.dart';
 
 class ClientSettingsPage extends StatelessWidget {
   const ClientSettingsPage({
@@ -26,6 +28,7 @@ class ClientSettingsPage extends StatelessWidget {
     required this.followSystemTheme,
     required this.onThemeChanged,
     required this.onFollowSystemThemeChanged,
+    required this.webVpnController,
     this.hasAcademicAccount = false,
     this.hasWebVpnSession = false,
     this.onAcademicLogout,
@@ -41,6 +44,7 @@ class ClientSettingsPage extends StatelessWidget {
   final bool followSystemTheme;
   final Future<void> Function(String themeId) onThemeChanged;
   final Future<void> Function(bool enabled) onFollowSystemThemeChanged;
+  final StartupOnboardingController webVpnController;
   final bool hasAcademicAccount;
   final bool hasWebVpnSession;
   final Future<bool> Function()? onAcademicLogout;
@@ -63,6 +67,17 @@ class ClientSettingsPage extends StatelessWidget {
                   followSystemTheme: followSystemTheme,
                   onThemeChanged: onThemeChanged,
                   onFollowSystemThemeChanged: onFollowSystemThemeChanged,
+                ),
+              ),
+            ),
+          ),
+          _SettingsRow(
+            title: 'WebVPN连接',
+            onTap: () => Navigator.of(context).push<void>(
+              shuyoRoute(
+                builder: (context) => _WebVpnSettingsPage(
+                  controller: webVpnController,
+                  isDemo: isDemo,
                 ),
               ),
             ),
@@ -118,6 +133,103 @@ class ClientSettingsPage extends StatelessWidget {
       await onExitDemo?.call();
       if (context.mounted) Navigator.of(context).pop();
     }
+  }
+}
+
+class _WebVpnSettingsPage extends StatefulWidget {
+  const _WebVpnSettingsPage({
+    required this.controller,
+    required this.isDemo,
+  });
+
+  final StartupOnboardingController controller;
+  final bool isDemo;
+
+  @override
+  State<_WebVpnSettingsPage> createState() => _WebVpnSettingsPageState();
+}
+
+class _WebVpnSettingsPageState extends State<_WebVpnSettingsPage> {
+  bool _changing = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('WebVPN连接')),
+      body: AnimatedBuilder(
+        animation: widget.controller,
+        builder: (context, _) {
+          final enabled = widget.controller.webVpnEnabled;
+          final pendingRecovery = widget.controller.webVpnPendingRecovery;
+          return ListView(
+            children: [
+              InkWell(
+                onTap: widget.isDemo || _changing
+                    ? null
+                    : () => _changeWebVpn(!enabled),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 24, 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('WebVPN'),
+                              const SizedBox(height: 4),
+                              Text(
+                                widget.isDemo
+                                    ? '演示模式下不可修改'
+                                    : '启用后，可使用外部网络访问校内服务',
+                                style: TextStyle(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      WebVpnToggle(
+                        value: enabled,
+                        changing: _changing,
+                        onChanged: widget.isDemo
+                            ? null
+                            : (value) => _changeWebVpn(value),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (pendingRecovery && !widget.isDemo)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _changing ? null : () => _changeWebVpn(true),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('恢复WebVPN登录'),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _changeWebVpn(bool enabled) async {
+    if (_changing) return;
+    setState(() => _changing = true);
+    await widget.controller.setWebVpnEnabled(enabled);
+    if (mounted) setState(() => _changing = false);
   }
 }
 

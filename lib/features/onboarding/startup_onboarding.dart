@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/models/client_backend.dart';
 import '../../data/services/client_settings_service.dart';
+import '../../shared/widgets/webvpn_toggle.dart';
 import '../auth/native_login_page.dart';
 
 class StartupOnboardingController extends ChangeNotifier {
@@ -772,7 +773,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
                     children: [
                       Expanded(
                         child: Text(
-                          '启用WebVPN后，可使用外部网络访问校内服务',
+                          '启用后，可使用外部网络访问校内服务',
                           style: TextStyle(
                             color: colors.onSurfaceVariant,
                             height: 1.45,
@@ -780,17 +781,10 @@ class _StartupOnboardingState extends State<StartupOnboarding>
                         ),
                       ),
                       const SizedBox(width: 8),
-                      if (_changingWebVpn)
-                        const Padding(
-                          padding: EdgeInsets.only(top: 12, right: 4),
-                          child: SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2.5),
-                          ),
-                        ),
-                      Switch(
+                      WebVpnToggle(
                         value: _webVpnEnabled,
-                        onChanged: _changingWebVpn ? null : _changeWebVpn,
+                        changing: _changingWebVpn,
+                        onChanged: _changeWebVpn,
                       ),
                     ],
                   ),

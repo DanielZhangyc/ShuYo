@@ -784,6 +784,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           followSystemTheme: widget.followSystemTheme,
           onThemeChanged: widget.onThemeChanged,
           onFollowSystemThemeChanged: widget.onFollowSystemThemeChanged,
+          webVpnController: widget.onboardingController,
           hasAcademicAccount: _hasAcademicSession,
           hasWebVpnSession: hasWebVpnSession,
           onAcademicLogout: _logoutAcademicAccount,
