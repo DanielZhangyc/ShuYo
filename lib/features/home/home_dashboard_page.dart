@@ -17,7 +17,6 @@ class HomeDashboardPage extends StatelessWidget {
     required this.onOpenAcademicSystem,
     required this.onOpenAnnouncements,
     required this.onOpenEmptyClassroom,
-    required this.onOpenCourseRatings,
     this.onOpenLibraryBooking,
     required this.todayCourseContent,
     required this.announcementContent,
@@ -32,7 +31,6 @@ class HomeDashboardPage extends StatelessWidget {
   final VoidCallback onOpenAcademicSystem;
   final VoidCallback onOpenAnnouncements;
   final VoidCallback onOpenEmptyClassroom;
-  final VoidCallback onOpenCourseRatings;
   final VoidCallback? onOpenLibraryBooking;
   final String todayCourseContent;
   final String announcementContent;
@@ -112,12 +110,6 @@ class HomeDashboardPage extends StatelessWidget {
           title: '图书馆预约',
           content: '预约场馆座位',
           onTap: onOpenLibraryBooking,
-        ),
-        _HomeRow(
-          icon: Icons.egg_alt,
-          title: '课程评价',
-          content: '搜索课程、课程号或教师',
-          onTap: onOpenCourseRatings,
         ),
       ],
     );

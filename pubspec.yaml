@@ -39,5 +39,4 @@ flutter:
     - assets/demo/academic/
     - assets/demo/announcements/
     - assets/demo/classroom/
-    - assets/demo/course_ratings/
     - assets/library_booking/

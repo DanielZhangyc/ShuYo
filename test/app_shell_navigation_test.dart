@@ -10,7 +10,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  testWidgets('opens the schedule from the home row and fourth tab',
+  testWidgets('opens the schedule from the home row and third tab',
       (tester) async {
     final controller = StartupOnboardingController();
     addTearDown(controller.dispose);
@@ -33,7 +33,7 @@ void main() {
       find.byType(BottomNavigationBar),
     );
     expect(navigation.items.map((item) => item.label).toList(),
-        ['首页', '评教', '学业', '日程']);
+        ['首页', '学业', '日程']);
     expect(find.text('你好，25120000！'), findsOneWidget);
     await tester.tap(find.text('今日课程'));
     await tester.pumpAndSettle();
@@ -41,21 +41,21 @@ void main() {
         tester
             .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
             .currentIndex,
-        3);
+        2);
     expect(find.byType(AcademicSchedulePage), findsOneWidget);
     expect(find.byTooltip('课表信息说明'), findsOneWidget);
     expect(find.byTooltip('更多'), findsOneWidget);
     expect(find.byTooltip('Back'), findsNothing);
     expect(find.byTooltip('通知'), findsNothing);
 
-    for (final label in ['评教', '学业', '首页', '日程']) {
+    for (final label in ['学业', '首页', '日程']) {
       await tester.tap(find.text(label).last);
       await tester.pumpAndSettle();
       expect(
           tester
               .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
               .currentIndex,
-          ['首页', '评教', '学业', '日程'].indexOf(label));
+          ['首页', '学业', '日程'].indexOf(label));
       if (label == '学业') {
         expect(find.byType(AcademicProgressPage), findsOneWidget);
         expect(find.byTooltip('更多'), findsOneWidget);
@@ -92,7 +92,7 @@ void main() {
         tester
             .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
             .currentIndex,
-        3);
+        2);
     expect(find.byType(AcademicSchedulePage), findsOneWidget);
   });
 }

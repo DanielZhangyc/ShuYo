@@ -10,18 +10,6 @@ void main() {
     expect(data.schedule.term.studentName, '演示同学');
     expect(data.schedule.term.studentId, 'DEMO0001');
     expect(data.announcements, hasLength(4));
-    expect(data.courseRatings.ratings, hasLength(20));
-    expect(
-      data.courseRatings.ratings.every(
-        (rating) =>
-            rating.teacherName.startsWith('教师') &&
-            rating.user.username.startsWith('同学') &&
-            !rating.content.contains('刘书朋') &&
-            !rating.content.contains('王永') &&
-            !rating.content.contains('渠老师'),
-      ),
-      isTrue,
-    );
     expect(data.classroomSchedule.building.name, 'GA楼');
   });
 

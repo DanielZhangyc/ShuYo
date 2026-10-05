@@ -301,7 +301,7 @@ void main() {
             tester
                 .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
                 .currentIndex,
-            tab == '学业' ? 2 : 3);
+            tab == '学业' ? 1 : 2);
         if (tab == '学业') expect(find.text('学业总览'), findsOneWidget);
         await tester.tap(find.text('首页').last);
         await tester.pumpAndSettle();

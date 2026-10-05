@@ -18,7 +18,6 @@ import '../data/repositories/academic_ranking_repository.dart';
 import '../data/repositories/announcement_repository.dart';
 import '../data/repositories/classroom_repository.dart';
 import '../data/repositories/client_backend_repository.dart';
-import '../data/repositories/course_rating_repository.dart';
 import '../data/services/academic_account_store.dart';
 import '../data/services/academic_auth_service.dart';
 import '../data/services/academic_schedule_api_client.dart';
@@ -34,7 +33,6 @@ import '../features/auth/webvpn_oauth_completion_page.dart';
 import '../features/home/academic_schedule_page.dart';
 import '../features/home/academic_progress_page.dart';
 import '../features/home/announcements_page.dart';
-import '../features/home/course_rating_page.dart';
 import '../features/home/empty_classroom_page.dart';
 import '../features/home/home_dashboard_page.dart';
 import '../features/library_booking/library_booking_page.dart';
@@ -150,7 +148,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final AcademicScheduleWidgetService _scheduleWidgetService;
   late final AnnouncementRepository _announcementRepository;
   late ClassroomRepository _classroomRepository;
-  late final CourseRatingRepository _courseRatingRepository;
   final _clientSettingsService = ClientSettingsService();
   late final UnifiedAccountService _unifiedAccountService =
       widget.unifiedAccountService ?? UnifiedAccountService();
@@ -161,7 +158,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     if (widget.initialOpenSchedule) {
-      _tabIndex = 3;
+      _tabIndex = 2;
       _scheduleTabInitialized = true;
     }
     final demo = widget.demoData;
@@ -193,9 +190,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             schedule: demo.classroomSchedule,
           )
         : ClassroomRepository();
-    _courseRatingRepository = widget.isDemo && demo != null
-        ? DemoCourseRatingRepository(demo.courseRatings)
-        : CourseRatingRepository();
     widget.onboardingController.setAccountLogoutHandlers(
       onAcademicLogout: _logoutAcademicAccount,
     );
@@ -265,7 +259,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    const titles = ['首页', '评教', '学业', '日程'];
+    const titles = ['首页', '学业', '日程'];
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -275,7 +269,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         body: SafeArea(
           child: Column(
             children: [
-              if (_tabIndex != 2 && _tabIndex != 3)
+              if (_tabIndex == 0)
                 AppHeader(
                   title: titles[_tabIndex],
                   showSettings: true,
@@ -287,7 +281,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   index: _tabIndex,
                   children: [
                     _homeBody(),
-                    const SizedBox.expand(),
                     _progressTabInitialized
                         ? AcademicProgressPage(
                             key: ValueKey(_progressDataRevision),
@@ -330,8 +323,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           items: const [
             BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: '首页'),
             BottomNavigationBarItem(
-                icon: Icon(Icons.rate_review_outlined), label: '评教'),
-            BottomNavigationBarItem(
                 icon: Icon(Icons.school_outlined), label: '学业'),
             BottomNavigationBarItem(
                 icon: Icon(Icons.calendar_month), label: '日程'),
@@ -356,8 +347,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _selectTab(int index) {
     setState(() {
       _tabIndex = index;
-      if (index == 2) _progressTabInitialized = true;
-      if (index == 3) _scheduleTabInitialized = true;
+      if (index == 1) _progressTabInitialized = true;
+      if (index == 2) _scheduleTabInitialized = true;
     });
     if (index == 0) {
       unawaited(_refreshScheduleSummaryQuietly());
@@ -373,10 +364,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         onLogin: _openAccountManager,
         onOpenAcademicSystem: _syncingAcademicSchedule
             ? () => _showSnack('正在获取课表，请稍后')
-            : () => _selectTab(3),
+            : () => _selectTab(2),
         onOpenAnnouncements: () => unawaited(_openAnnouncements()),
         onOpenEmptyClassroom: () => unawaited(_openEmptyClassroom()),
-        onOpenCourseRatings: () => unawaited(_openCourseRatings()),
         onOpenLibraryBooking: () => unawaited(_openLibraryBooking()),
         todayCourseContent: _scheduleSummaryText,
         announcementContent: _announcementSummaryText,
@@ -615,7 +605,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _openScheduleFromWidget() {
     if (!mounted) return;
     Navigator.of(context).popUntil((route) => route.isFirst);
-    _selectTab(3);
+    _selectTab(2);
   }
 
   Future<void> _handleInvalidAcademicSession() async {
@@ -778,14 +768,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     } finally {
       client.dispose();
     }
-  }
-
-  Future<void> _openCourseRatings() async {
-    await Navigator.of(context).push<void>(
-      shuyoRoute(
-        builder: (_) => CourseRatingPage(repository: _courseRatingRepository),
-      ),
-    );
   }
 
   Future<void> _openClientSettings() async {

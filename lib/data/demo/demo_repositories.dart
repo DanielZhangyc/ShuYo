@@ -3,13 +3,11 @@ import '../models/academic_progress.dart';
 import '../models/academic_ranking.dart';
 import '../models/announcement.dart';
 import '../models/classroom.dart';
-import '../models/course_rating.dart';
 import '../repositories/academic_schedule_repository.dart';
 import '../repositories/academic_progress_repository.dart';
 import '../repositories/academic_ranking_repository.dart';
 import '../repositories/announcement_repository.dart';
 import '../repositories/classroom_repository.dart';
-import '../repositories/course_rating_repository.dart';
 
 class DemoAcademicScheduleRepository extends AcademicScheduleRepository {
   DemoAcademicScheduleRepository(this.schedule);
@@ -224,123 +222,5 @@ class DemoClassroomRepository extends ClassroomRepository {
         startSection: query.startSection,
         endSection: query.endSection,
         floors: floors);
-  }
-}
-
-class DemoCourseRatingRepository extends CourseRatingRepository {
-  DemoCourseRatingRepository(this.latest);
-
-  final CourseRatingLatestResult latest;
-
-  @override
-  Future<CourseRatingLatestResult> fetchLatest(
-          {bool forceRefresh = false}) async =>
-      latest;
-
-  @override
-  Future<CourseRatingSearchResult> search(String keyword,
-      {bool forceRefresh = false}) async {
-    final query = normalizeKeyword(keyword).toLowerCase();
-    if (query.isEmpty) {
-      return const CourseRatingSearchResult(
-          query: '', courses: [], teachers: []);
-    }
-    final courses = <CourseRatingCourse>[];
-    final teachers = <CourseRatingTeacher>[];
-    for (final item in latest.ratings) {
-      if (item.courseName.toLowerCase().contains(query) ||
-          item.courseCode.toLowerCase().contains(query)) {
-        courses.add(CourseRatingCourse(
-            id: item.courseId,
-            name: item.courseName,
-            courseCode: item.courseCode));
-      }
-      if (item.teacherName.toLowerCase().contains(query)) {
-        teachers.add(
-            CourseRatingTeacher(id: item.teacherId, name: item.teacherName));
-      }
-    }
-    return CourseRatingSearchResult(
-        query: keyword,
-        courses: _uniqueCourses(courses),
-        teachers: _uniqueTeachers(teachers));
-  }
-
-  @override
-  Future<CourseRatingCourseTeachers> fetchCourseTeachers(
-      CourseRatingCourse course,
-      {bool forceRefresh = false}) async {
-    final teachers = latest.ratings
-        .where((item) => item.courseName == course.name)
-        .map((item) =>
-            CourseRatingTeacher(id: item.teacherId, name: item.teacherName))
-        .toList();
-    return CourseRatingCourseTeachers(
-        course: course, teachers: _uniqueTeachers(teachers));
-  }
-
-  @override
-  Future<CourseRatingTeacherCourses> fetchTeacherCourses(
-      CourseRatingTeacher teacher,
-      {bool forceRefresh = false}) async {
-    final courses = latest.ratings
-        .where((item) => item.teacherName == teacher.name)
-        .map((item) => CourseRatingCourse(
-            id: item.courseId,
-            name: item.courseName,
-            courseCode: item.courseCode))
-        .toList();
-    return CourseRatingTeacherCourses(
-        teacher: teacher, courses: _uniqueCourses(courses));
-  }
-
-  @override
-  Future<CourseRatingDetail> fetchRatingDetail(
-      {required CourseRatingCourse course,
-      required CourseRatingTeacher teacher,
-      int page = 1,
-      bool forceRefresh = false}) async {
-    final ratings = latest.ratings
-        .where((item) =>
-            item.courseName == course.name && item.teacherName == teacher.name)
-        .map((item) => CourseRatingItem(
-            id: item.id,
-            score: item.score,
-            content: item.content,
-            createdAt: item.createdAt,
-            upvotes: item.upvotes,
-            user: item.user))
-        .toList(growable: false);
-    final average = ratings.isEmpty
-        ? 0.0
-        : ratings.map((item) => item.score).reduce((a, b) => a + b) /
-            ratings.length;
-    return CourseRatingDetail(
-        course: course,
-        teacher: teacher,
-        average: average,
-        total: ratings.length,
-        page: page,
-        perPage: ratings.length,
-        ratings: ratings,
-        radar: const CourseRatingRadar(categories: [], values: []));
-  }
-
-  static List<CourseRatingCourse> _uniqueCourses(
-      List<CourseRatingCourse> values) {
-    final map = <String, CourseRatingCourse>{};
-    for (final value in values) {
-      map[value.name] = value;
-    }
-    return map.values.toList(growable: false);
-  }
-
-  static List<CourseRatingTeacher> _uniqueTeachers(
-      List<CourseRatingTeacher> values) {
-    final map = <int, CourseRatingTeacher>{};
-    for (final value in values) {
-      map[value.id] = value;
-    }
-    return map.values.toList(growable: false);
   }
 }
