@@ -6,6 +6,7 @@ import 'package:shuyo/data/services/academic_account_store.dart';
 import 'package:shuyo/data/services/there_booking_client.dart';
 import 'package:shuyo/data/services/unified_account_service.dart';
 import 'package:shuyo/features/library_booking/library_booking_page.dart';
+import 'package:shuyo/features/library_booking/library_booking_resources.dart';
 import 'package:shuyo/shared/theme/shuyo_theme.dart';
 
 class _BookingClient extends ThereBookingClient {
@@ -484,6 +485,130 @@ void main() {
     expect(enteringVenue, lessThan(0));
     await tester.pumpAndSettle();
     expect(find.text('选择场馆'), findsOneWidget);
+  });
+
+  testWidgets('rules and 24H help open local content and zoomable map',
+      (tester) async {
+    final client = _BookingClient();
+    addTearDown(client.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: LibraryBookingPage(
+      accountService: UnifiedAccountService(),
+      client: client,
+      schoolClock: schoolMorning,
+    )));
+    await tester.pumpAndSettle();
+    final rulesText = tester.widget<Text>(find.text('使用规则'));
+    expect(rulesText.style?.fontSize, 14.5);
+    expect(rulesText.style?.fontWeight, FontWeight.w400);
+    expect(find.ancestor(of: find.text('使用规则'), matching: find.byType(InkWell)),
+        findsNothing);
+    await tester.tap(find.text('使用规则'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LibraryBookingInfoPage), findsOneWidget);
+    expect(find.text('注意事项'), findsOneWidget);
+    expect(find.textContaining('刷卡或人脸识别'), findsOneWidget);
+    final paragraph = tester.widget<SelectableText>(find
+        .ancestor(
+          of: find.textContaining('刷卡或人脸识别'),
+          matching: find.byType(SelectableText),
+        )
+        .first);
+    expect(paragraph.style?.fontSize, 15.5);
+    expect(paragraph.textSpan!.toPlainText(), contains('若未按时签到将被记录为违约行为'));
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text(BookingVenue.studySpace.label));
+    await tester.pumpAndSettle();
+    expect(find.text('座位分布'), findsOneWidget);
+    expect(find.text('常见问题'), findsOneWidget);
+    expect(find.byIcon(Icons.map_outlined), findsOneWidget);
+    expect(tester.widget<Text>(find.text('座位分布')).style?.fontSize,
+        rulesText.style?.fontSize);
+    expect(tester.widget<Text>(find.text('常见问题')).style?.fontSize,
+        rulesText.style?.fontSize);
+    expect(
+        find.ancestor(
+          of: find.text('座位分布'),
+          matching: find.byType(InkWell),
+        ),
+        findsNothing);
+    await tester.tap(find.text('座位分布'));
+    await tester.pumpAndSettle();
+    final viewer =
+        tester.widget<InteractiveViewer>(find.byType(InteractiveViewer));
+    expect(viewer.maxScale, greaterThan(1));
+    final image = tester.widget<Image>(find.byType(Image).first);
+    expect((image.image as AssetImage).assetName, librarySeatsAsset);
+    await tester.tap(find.byTooltip('关闭图片'));
+    await tester.pumpAndSettle();
+    expect(find.byType(InteractiveViewer), findsNothing);
+
+    await tester.tap(find.text('常见问题'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LibraryBookingInfoPage), findsOneWidget);
+    expect(find.text('区域分布（包括饮食、仓库、水房等）'), findsOneWidget);
+    expect(find.byType(Image), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.textContaining('无法预约/签到失败等'),
+      180,
+      scrollable: find.byType(Scrollable).last,
+    );
+    final qaParagraph = tester.widget<SelectableText>(find
+        .ancestor(
+          of: find.textContaining('无法预约/签到失败等'),
+          matching: find.byType(SelectableText),
+        )
+        .first);
+    expect(qaParagraph.style?.fontSize, 15.5);
+    expect(qaParagraph.textSpan!.toPlainText(), contains('脸部识别/个人信息等：'));
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('二楼东侧'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(monthDay()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('下一步'));
+    await tester.pumpAndSettle();
+    expect(find.text('座位分布'), findsOneWidget);
+    await tester.tap(find.text('座位分布'));
+    await tester.pumpAndSettle();
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+    await tester.tap(find.byTooltip('关闭图片'));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('24H help stays on title rows at narrow width', (tester) async {
+    tester.view.physicalSize = const Size(260, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    final client = _BookingClient();
+    addTearDown(client.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: LibraryBookingPage(
+      accountService: UnifiedAccountService(),
+      client: client,
+      schoolClock: schoolMorning,
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(BookingVenue.studySpace.label));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('座位分布'), findsOneWidget);
+    expect(find.text('常见问题'), findsOneWidget);
+    await tester.tap(find.text('二楼东侧'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(monthDay()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('下一步'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('座位分布'), findsOneWidget);
   });
 
   testWidgets('area availability wraps as a complete item on narrow screens',

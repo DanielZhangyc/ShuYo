@@ -11,6 +11,7 @@ import '../../data/services/unified_account_service.dart';
 import '../../shared/theme/shuyo_theme.dart';
 import '../../shared/widgets/empty_state.dart';
 import '../auth/native_login_page.dart';
+import 'library_booking_resources.dart';
 
 enum _BookingStep {
   venue,
@@ -288,8 +289,47 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         children: children,
       );
 
+  Widget _infoLink(String label, VoidCallback onTap,
+          {IconData icon = Icons.help_outline}) =>
+      Semantics(
+        button: true,
+        label: label,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(icon, size: 16, color: context.shuyoColors.accent),
+              const SizedBox(width: 3),
+              Text(label,
+                  style: TextStyle(
+                    color: context.shuyoColors.accent,
+                    fontSize: 14.5,
+                    height: 1.25,
+                    fontWeight: FontWeight.w400,
+                  )),
+            ]),
+          ),
+        ),
+      );
+
+  void _openInfo(String title, String asset) {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => LibraryBookingInfoPage(title: title, asset: asset),
+    ));
+  }
+
+  void _showSeatsMap() =>
+      unawaited(showLibraryBookingImage(context, librarySeatsAsset));
+
   Widget _venuePage() => _pageList([
-        Text('选择场馆', style: Theme.of(context).textTheme.titleLarge),
+        Row(children: [
+          Expanded(
+              child:
+                  Text('选择场馆', style: Theme.of(context).textTheme.titleLarge)),
+          _infoLink('使用规则', () => _openInfo('使用规则', libraryRulesAsset)),
+        ]),
         const SizedBox(height: 16),
         for (final venue in BookingVenue.values) ...[
           _surface(
@@ -504,7 +544,25 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   Widget _areaPage() {
     final selectable = _selectableAreas(_areas);
     return _pageList([
-      Text('选择分区', style: Theme.of(context).textTheme.titleLarge),
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Expanded(
+            flex: 1,
+            child: Text('选择分区',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleLarge)),
+        if (_venue == BookingVenue.studySpace)
+          Flexible(
+              flex: 3,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  _infoLink('座位分布', _showSeatsMap, icon: Icons.map_outlined),
+                  _infoLink('常见问题', () => _openInfo('常见问题', libraryQaAsset)),
+                ]),
+              )),
+      ]),
       const SizedBox(height: 16),
       if (selectable.isEmpty) const Text('当前场馆没有可选分区'),
       for (final area in selectable) ...[
@@ -1226,8 +1284,15 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
             child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_areaName(_selectedArea ?? const {}),
-                style: Theme.of(context).textTheme.titleMedium),
+            Row(children: [
+              Expanded(
+                  child: Text(_areaName(_selectedArea ?? const {}),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium)),
+              if (_venue == BookingVenue.studySpace)
+                _infoLink('座位分布', _showSeatsMap, icon: Icons.map_outlined),
+            ]),
             const SizedBox(height: 4),
             Text(
                 '${_monthDay(_day)}  $_start–$_end · 可选 $available / ${_rooms.length}'),
