@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
@@ -31,6 +32,9 @@ const int _maximumAnimationFrames = 90;
 @visibleForTesting
 const announcementImagePlaceholderKey =
     ValueKey<String>('announcement-image-placeholder');
+
+@visibleForTesting
+const announcementSourceMenuKey = ValueKey<String>('announcement-source-menu');
 
 class AnnouncementsPage extends StatefulWidget {
   const AnnouncementsPage({
@@ -284,12 +288,19 @@ class _AnnouncementSourceMenu extends StatefulWidget {
 
 class _AnnouncementSourceMenuState extends State<_AnnouncementSourceMenu> {
   late Set<String> _favorites = {...widget.initialFavorites};
+  final ScrollController _scrollController = ScrollController();
   bool _favoritesExpanded = true;
   late bool _campusExpanded =
       widget.selected.group == AnnouncementSourceGroup.campus;
   late bool _collegeExpanded =
       widget.selected.group == AnnouncementSourceGroup.college;
   bool _saving = false;
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -300,36 +311,51 @@ class _AnnouncementSourceMenuState extends State<_AnnouncementSourceMenu> {
         AnnouncementSource.inGroup(AnnouncementSourceGroup.campus);
     final collegeSources =
         AnnouncementSource.inGroup(AnnouncementSourceGroup.college);
-    return Material(
-      elevation: 12,
-      borderRadius: BorderRadius.circular(16),
-      clipBehavior: Clip.antiAlias,
-      color: Theme.of(context).colorScheme.surface,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: 320,
-          maxHeight: MediaQuery.sizeOf(context).height * 0.72,
-        ),
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          children: [
-            _sectionHeader('收藏', _favoritesExpanded,
-                () => setState(() => _favoritesExpanded = !_favoritesExpanded)),
-            if (_favoritesExpanded)
-              if (favoriteSources.isEmpty)
-                const ListTile(title: Text('暂无收藏'))
-              else
-                for (final source in favoriteSources) _sourceRow(source),
-            _sectionHeader('校级与公共服务', _campusExpanded,
-                () => setState(() => _campusExpanded = !_campusExpanded)),
-            if (_campusExpanded)
-              for (final source in campusSources) _sourceRow(source),
-            _sectionHeader('学院与培养单位', _collegeExpanded,
-                () => setState(() => _collegeExpanded = !_collegeExpanded)),
-            if (_collegeExpanded)
-              for (final source in collegeSources) _sourceRow(source),
-          ],
+    final menuWidth = math.min(264.0, MediaQuery.sizeOf(context).width * 0.68);
+    return SizedBox(
+      key: announcementSourceMenuKey,
+      width: menuWidth,
+      child: Material(
+        elevation: 12,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        color: Theme.of(context).colorScheme.surface,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.72,
+          ),
+          child: Scrollbar(
+            controller: _scrollController,
+            thumbVisibility: true,
+            child: ListView(
+              controller: _scrollController,
+              shrinkWrap: true,
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              children: [
+                _sectionHeader(
+                    '收藏',
+                    _favoritesExpanded,
+                    () => setState(
+                        () => _favoritesExpanded = !_favoritesExpanded)),
+                if (_favoritesExpanded)
+                  if (favoriteSources.isEmpty)
+                    const ListTile(
+                      contentPadding: EdgeInsets.only(left: 16, right: 12),
+                      title: Text('暂无收藏'),
+                    )
+                  else
+                    for (final source in favoriteSources) _sourceRow(source),
+                _sectionHeader('校级与公共服务', _campusExpanded,
+                    () => setState(() => _campusExpanded = !_campusExpanded)),
+                if (_campusExpanded)
+                  for (final source in campusSources) _sourceRow(source),
+                _sectionHeader('学院与培养单位', _collegeExpanded,
+                    () => setState(() => _collegeExpanded = !_collegeExpanded)),
+                if (_collegeExpanded)
+                  for (final source in collegeSources) _sourceRow(source),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -337,6 +363,7 @@ class _AnnouncementSourceMenuState extends State<_AnnouncementSourceMenu> {
 
   Widget _sectionHeader(String title, bool expanded, VoidCallback onTap) {
     return ListTile(
+      contentPadding: const EdgeInsets.only(left: 16, right: 12),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
       trailing: Icon(expanded ? Icons.expand_less : Icons.expand_more),
       onTap: onTap,
@@ -346,10 +373,24 @@ class _AnnouncementSourceMenuState extends State<_AnnouncementSourceMenu> {
   Widget _sourceRow(AnnouncementSource source) {
     final favorite = _favorites.contains(source.id);
     return ListTile(
-      title: Text(source.name),
+      contentPadding: const EdgeInsets.only(left: 16, right: 12),
+      title: Text(
+        source.name,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
       selected: widget.selected == source,
       onTap: () => widget.onSelect(source),
       trailing: IconButton(
+        iconSize: 22,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+        splashRadius: 20,
+        style: IconButton.styleFrom(
+          fixedSize: const Size.square(40),
+          shape: const CircleBorder(),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
         tooltip: favorite ? '取消收藏${source.name}' : '收藏${source.name}',
         icon: Icon(
           favorite ? Icons.star : Icons.star_border,

@@ -184,6 +184,50 @@ void main() {
     expect(find.text('国际教育学院'), findsNothing);
   });
 
+  testWidgets('source menu stays narrow with a dismissible left mask',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    final repository = _repositoryWith();
+    await tester.pumpWidget(
+      MaterialApp(home: AnnouncementsPage(repository: repository)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('选择公告来源'));
+    await tester.pumpAndSettle();
+
+    final menu = find.byKey(announcementSourceMenuKey);
+    expect(tester.getSize(menu).width, 264);
+    expect(tester.getTopLeft(menu).dx, closeTo(390 - 264 - 12, 1));
+    expect(find.descendant(of: menu, matching: find.byType(Scrollbar)),
+        findsOneWidget);
+    expect(tester.widget<Text>(find.text('研究生院 · 培养管理')).maxLines, 2);
+    final starButton = find
+        .ancestor(
+          of: find.byTooltip('收藏本科生院'),
+          matching: find.byType(IconButton),
+        )
+        .first;
+    expect(tester.getSize(starButton), const Size.square(40));
+    expect(tester.widget<IconButton>(starButton).style?.shape?.resolve({}),
+        isA<CircleBorder>());
+    expect(tester.takeException(), isNull);
+
+    tester.view.physicalSize = const Size(320, 640);
+    await tester.pumpAndSettle();
+    expect(tester.getSize(menu).width, closeTo(320 * 0.68, 0.1));
+    expect(tester.getTopLeft(menu).dx, closeTo(320 - 320 * 0.68 - 12, 1));
+    expect(tester.takeException(), isNull);
+
+    await tester.tapAt(const Offset(20, 300));
+    await tester.pumpAndSettle();
+    expect(menu, findsNothing);
+  });
+
   testWidgets('merged college notices show their original column',
       (tester) async {
     final repository = _FakeAnnouncementRepository(
