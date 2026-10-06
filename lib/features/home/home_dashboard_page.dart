@@ -63,7 +63,6 @@ class HomeDashboardPage extends StatelessWidget {
           const SizedBox(height: 10),
         ],
         _HomeRow(
-          showDivider: true,
           title: isAcademicLoginCompleting
               ? '正在完成校园登录'
               : hasAcademicAccount
@@ -251,7 +250,6 @@ class _HomeRow extends StatelessWidget {
     this.icon,
     this.trailing,
     this.onTap,
-    this.showDivider = false,
   });
 
   final String title;
@@ -259,7 +257,6 @@ class _HomeRow extends StatelessWidget {
   final IconData? icon;
   final Widget? trailing;
   final VoidCallback? onTap;
-  final bool showDivider;
 
   @override
   Widget build(BuildContext context) {
@@ -274,7 +271,7 @@ class _HomeRow extends StatelessWidget {
       child: Container(
         constraints: const BoxConstraints(minHeight: 68),
         padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: customBackground || !showDivider
+        decoration: customBackground
             ? null
             : BoxDecoration(
                 border: Border(bottom: BorderSide(color: colors.border)),

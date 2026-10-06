@@ -109,15 +109,17 @@ void main() {
           .first,
     );
     expect((firstContainer.decoration as BoxDecoration).border, isNotNull);
-    final todayContainer = tester.widget<Container>(
-      find
-          .ancestor(
-            of: find.text('今日课程'),
-            matching: find.byType(Container),
-          )
-          .first,
-    );
-    expect(todayContainer.decoration, isNull);
+    for (final title in ['今日课程', '通知公告', '空教室查询', '图书馆预约']) {
+      final row = tester.widget<Container>(
+        find
+            .ancestor(
+              of: find.text(title),
+              matching: find.byType(Container),
+            )
+            .first,
+      );
+      expect((row.decoration as BoxDecoration).border, isNotNull);
+    }
   });
 
   testWidgets('logged out home invites campus login', (tester) async {
