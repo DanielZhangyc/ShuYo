@@ -12,6 +12,7 @@ import '../../data/services/academic_schedule_display_settings_service.dart';
 import '../../data/services/academic_schedule_notification_service.dart';
 import '../../data/services/academic_schedule_widget_service.dart';
 import '../../shared/shuyo_text_styles.dart';
+import '../../shared/navigation/shuyo_route.dart';
 import '../../shared/theme/shuyo_theme.dart';
 import '../../shared/widgets/empty_state.dart';
 import 'academic_schedule_editor_page.dart';
@@ -383,14 +384,17 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     }
     final result = await Navigator.of(context).push<ScheduleCourseEditorResult>(
       MaterialPageRoute(
-        builder: (context) => AcademicScheduleEditorPage(
-          initialWeek: _displayedWeek,
-          maxWeek: schedule.maxWeek,
-          initialWeekday: slot.weekday,
-          initialStartSection: slot.section,
-          colorful: _displaySettings.colorful,
-          palette: context.shuyoColors.schedulePalette,
-          conflictValidator: (result) => _findEditorConflicts(schedule, result),
+        builder: (context) => ShuYoRouteSurface(
+          child: AcademicScheduleEditorPage(
+            initialWeek: _displayedWeek,
+            maxWeek: schedule.maxWeek,
+            initialWeekday: slot.weekday,
+            initialStartSection: slot.section,
+            colorful: _displaySettings.colorful,
+            palette: context.shuyoColors.schedulePalette,
+            conflictValidator: (result) =>
+                _findEditorConflicts(schedule, result),
+          ),
         ),
       ),
     );
@@ -848,19 +852,21 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     final colorKey = _courseColorSeed(session);
     final result = await Navigator.of(context).push<ScheduleCourseEditorResult>(
       MaterialPageRoute(
-        builder: (context) => AcademicScheduleEditorPage(
-          initialWeek: _displayedWeek,
-          maxWeek: schedule.maxWeek,
-          initialWeekday: session.weekday,
-          initialStartSection: session.startSection,
-          initialSessions: relatedSessions,
-          colorful: _displaySettings.colorful,
-          palette: context.shuyoColors.schedulePalette,
-          initialColorValue: _courseColorValues[colorKey],
-          conflictValidator: (result) => _findEditorConflicts(
-            schedule,
-            result,
-            excludingCourse: session,
+        builder: (context) => ShuYoRouteSurface(
+          child: AcademicScheduleEditorPage(
+            initialWeek: _displayedWeek,
+            maxWeek: schedule.maxWeek,
+            initialWeekday: session.weekday,
+            initialStartSection: session.startSection,
+            initialSessions: relatedSessions,
+            colorful: _displaySettings.colorful,
+            palette: context.shuyoColors.schedulePalette,
+            initialColorValue: _courseColorValues[colorKey],
+            conflictValidator: (result) => _findEditorConflicts(
+              schedule,
+              result,
+              excludingCourse: session,
+            ),
           ),
         ),
       ),

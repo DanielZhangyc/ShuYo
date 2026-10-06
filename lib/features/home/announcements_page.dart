@@ -8,6 +8,7 @@ import '../../data/services/announcement_api_client.dart';
 import '../../shared/shuyo_text_styles.dart';
 import '../../shared/navigation/shuyo_route.dart';
 import '../../shared/theme/shuyo_theme.dart';
+import '../../shared/theme/custom_background.dart';
 import '../../shared/widgets/empty_state.dart';
 import '../../shared/widgets/fullscreen_image_page.dart';
 
@@ -93,6 +94,9 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
                 );
               },
               separatorBuilder: (context, index) {
+                if (CustomBackgroundScope.maybeOf(context) != null) {
+                  return const SizedBox.shrink();
+                }
                 return Divider(height: 1, color: context.shuyoColors.border);
               },
               itemCount: items.length,

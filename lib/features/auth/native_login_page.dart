@@ -13,6 +13,7 @@ import '../../data/services/unified_account_service.dart';
 import '../../data/services/verification_delivery_service.dart';
 import '../../data/services/wecom_auth_service.dart';
 import '../../data/demo/demo_session.dart';
+import '../../shared/navigation/shuyo_route.dart';
 import '../../shared/theme/shuyo_theme.dart';
 import 'webvpn_oauth_completion_page.dart';
 import 'wecom_scan_page.dart';
@@ -534,10 +535,12 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
       setState(() => _busy = false);
       final redeemed = await Navigator.of(context).push<WeComRedeemResult>(
         MaterialPageRoute(
-          builder: (_) => WeComScanPage(
-            session: session,
-            authService: _weComAuthService,
-            target: _weComTarget,
+          builder: (_) => ShuYoRouteSurface(
+            child: WeComScanPage(
+              session: session,
+              authService: _weComAuthService,
+              target: _weComTarget,
+            ),
           ),
         ),
       );
@@ -679,9 +682,11 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
     }
     final completed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => WebVpnOAuthCompletionPage(
-          callbackUri: callbackUri,
-          webVpnOnly: widget.destination == NativeLoginDestination.webVpn,
+        builder: (_) => ShuYoRouteSurface(
+          child: WebVpnOAuthCompletionPage(
+            callbackUri: callbackUri,
+            webVpnOnly: widget.destination == NativeLoginDestination.webVpn,
+          ),
         ),
       ),
     );

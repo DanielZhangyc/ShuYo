@@ -45,6 +45,7 @@ import '../shared/navigation/shuyo_route.dart';
 import '../shared/widgets/app_header.dart';
 import '../shared/widgets/client_update_prompt.dart';
 import '../shared/widgets/info_confirm_dialog.dart';
+import '../shared/theme/custom_background.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({
@@ -56,6 +57,8 @@ class AppShell extends StatefulWidget {
     required this.followSystemTheme,
     required this.onThemeChanged,
     required this.onFollowSystemThemeChanged,
+    this.customBackground,
+    this.onCustomBackgroundChanged,
     required this.academicLoginSignal,
     required this.initialHasAcademicSession,
     required this.initialAcademicStudentId,
@@ -85,6 +88,8 @@ class AppShell extends StatefulWidget {
   final bool followSystemTheme;
   final Future<void> Function(String) onThemeChanged;
   final Future<void> Function(bool) onFollowSystemThemeChanged;
+  final CustomBackground? customBackground;
+  final Future<void> Function(CustomBackground)? onCustomBackgroundChanged;
   final int academicLoginSignal;
   final bool initialHasAcademicSession;
   final String? initialAcademicStudentId;
@@ -860,6 +865,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           followSystemTheme: widget.followSystemTheme,
           onThemeChanged: widget.onThemeChanged,
           onFollowSystemThemeChanged: widget.onFollowSystemThemeChanged,
+          customBackground: widget.customBackground,
+          onCustomBackgroundChanged: widget.onCustomBackgroundChanged,
           selectedStartupTab: _preferredStartupTab,
           onStartupTabChanged: _changeStartupTab,
           webVpnController: widget.onboardingController,

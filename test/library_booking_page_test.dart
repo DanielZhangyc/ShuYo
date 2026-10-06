@@ -7,6 +7,8 @@ import 'package:shuyo/data/services/there_booking_client.dart';
 import 'package:shuyo/data/services/unified_account_service.dart';
 import 'package:shuyo/features/library_booking/library_booking_page.dart';
 import 'package:shuyo/features/library_booking/library_booking_resources.dart';
+import 'package:shuyo/shared/navigation/shuyo_route.dart';
+import 'package:shuyo/shared/theme/custom_background.dart';
 import 'package:shuyo/shared/theme/shuyo_theme.dart';
 
 class _BookingClient extends ThereBookingClient {
@@ -229,6 +231,51 @@ class _NoMinimumClient extends _BookingClient {
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('custom photo travels with each booking step', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      AcademicAccountStore.studentIdKey: 'STUDENT_1',
+    });
+    const background = CustomBackground(
+      imagePath: 'assets/images/icon.png',
+      opacity: 50,
+      background: Color(0xFFF8F8F8),
+      surface: Colors.white,
+      text: Color(0xFF171717),
+      accent: Color(0xFF3478D4),
+    );
+    final client = _BookingClient();
+    addTearDown(client.dispose);
+    await tester.pumpWidget(MaterialApp(
+      theme: background.theme.themeData(),
+      builder: (_, child) => CustomBackgroundFrame(
+        settings: background,
+        child: child!,
+      ),
+      home: LibraryBookingPage(
+        accountService: UnifiedAccountService(),
+        client: client,
+        schoolClock: () {
+          final day = DateTime.parse(ThereBookingClient.schoolDay());
+          return DateTime.utc(day.year, day.month, day.day, 8);
+        },
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byType(ShuYoRouteSurface), findsOneWidget);
+
+    await tester.tap(find.text('仅查看座位情况'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(find.byType(ShuYoRouteSurface), findsNWidgets(2));
+    expect(
+      find.descendant(
+        of: find.byType(ShuYoRouteSurface),
+        matching: find.byType(CustomBackgroundLayer),
+      ),
+      findsNWidgets(2),
+    );
+  });
 
   DateTime schoolMorning() {
     final day = DateTime.parse(ThereBookingClient.schoolDay());

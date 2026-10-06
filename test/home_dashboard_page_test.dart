@@ -1,8 +1,74 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuyo/features/home/home_dashboard_page.dart';
+import 'package:shuyo/shared/theme/custom_background.dart';
 
 void main() {
+  testWidgets('custom photo keeps stronger home text without tap ripple',
+      (tester) async {
+    const background = CustomBackground(
+      imagePath: 'assets/images/icon.png',
+      opacity: 100,
+      background: Color(0xFF777777),
+      surface: Color(0xFFBBBBBB),
+      text: Colors.black,
+      accent: Colors.blue,
+    );
+    await tester.pumpWidget(MaterialApp(
+      theme: background.theme.themeData(),
+      builder: (_, child) => CustomBackgroundFrame(
+        settings: background,
+        child: child!,
+      ),
+      home: Scaffold(
+        body: HomeDashboardPage(
+          hasAcademicAccount: false,
+          isAcademicLoginCompleting: false,
+          onLogin: () {},
+          onOpenAcademicSystem: () {},
+          onOpenAnnouncements: () {},
+          onOpenEmptyClassroom: () {},
+          todayCourseContent: '今日无课',
+          announcementContent: '查看公告',
+        ),
+      ),
+    ));
+
+    expect(
+      tester.widget<Text>(find.text('查询当前可用教室')).style?.color,
+      background.text,
+    );
+    final todayRow = tester.widget<InkWell>(
+      find
+          .ancestor(
+            of: find.text('今日课程'),
+            matching: find.byType(InkWell),
+          )
+          .first,
+    );
+    expect(todayRow.splashFactory, NoSplash.splashFactory);
+    expect(todayRow.overlayColor?.resolve({WidgetState.pressed}),
+        Colors.transparent);
+    final todayContainer = tester.widget<Container>(
+      find
+          .ancestor(
+            of: find.text('今日课程'),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    expect(todayContainer.decoration, isNull);
+    final firstContainer = tester.widget<Container>(
+      find
+          .ancestor(
+            of: find.text('立即登录'),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    expect(firstContainer.decoration, isNull);
+  });
+
   Widget page(
           {required bool loggedIn,
           bool syncing = false,
@@ -34,6 +100,24 @@ void main() {
     expect(find.text('图书馆预约'), findsOneWidget);
     expect(find.text('课程评价'), findsNothing);
     expect(find.textContaining('论坛'), findsNothing);
+    final firstContainer = tester.widget<Container>(
+      find
+          .ancestor(
+            of: find.text('你好，25120000！'),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    expect((firstContainer.decoration as BoxDecoration).border, isNotNull);
+    final todayContainer = tester.widget<Container>(
+      find
+          .ancestor(
+            of: find.text('今日课程'),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    expect(todayContainer.decoration, isNull);
   });
 
   testWidgets('logged out home invites campus login', (tester) async {

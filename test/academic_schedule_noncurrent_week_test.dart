@@ -9,11 +9,60 @@ import 'package:shuyo/data/services/academic_schedule_display_settings_service.d
 import 'package:shuyo/data/services/academic_schedule_notification_service.dart';
 import 'package:shuyo/data/services/academic_schedule_widget_service.dart';
 import 'package:shuyo/features/home/academic_schedule_page.dart';
+import 'package:shuyo/shared/theme/custom_background.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('custom photo uses stronger theme color for schedule dates',
+      (tester) async {
+    const background = CustomBackground(
+      imagePath: 'assets/images/icon.png',
+      opacity: 100,
+      background: Color(0xFF777777),
+      surface: Color(0xFFBBBBBB),
+      text: Colors.black,
+      accent: Colors.blue,
+    );
+    final repository = AcademicScheduleRepository(
+      apiClient: AcademicScheduleApiClient(
+        authService: _FakeAcademicAuthService(),
+      ),
+    );
+    await tester.pumpWidget(MaterialApp(
+      theme: background.theme.themeData(),
+      builder: (_, child) => CustomBackgroundFrame(
+        settings: background,
+        child: child!,
+      ),
+      home: AcademicSchedulePage(
+        repository: repository,
+        notificationService:
+            AcademicScheduleNotificationService(repository: repository),
+        widgetService: AcademicScheduleWidgetService(repository: repository),
+        onLoginRequired: () async {},
+        initialState: AcademicScheduleCacheState(
+          schedule: _schedule,
+          weekState: ScheduleWeekState(
+            currentWeek: 1,
+            anchorMonday:
+                AcademicScheduleRepository.startOfWeek(DateTime.now()),
+          ),
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    final dates = find.byWidgetPredicate((widget) =>
+        widget is Text &&
+        RegExp(r'^\d{1,2}/\d{1,2}$').hasMatch(widget.data ?? ''));
+    expect(dates, findsWidgets);
+    for (final date in tester.widgetList<Text>(dates)) {
+      expect(date.style?.color, background.text);
+    }
+  });
 
   testWidgets(
       'shows non-current-week courses unless a current course occupies the slot',

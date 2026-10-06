@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shuyo/data/models/announcement.dart';
 import 'package:shuyo/data/repositories/announcement_repository.dart';
 import 'package:shuyo/features/home/announcements_page.dart';
+import 'package:shuyo/shared/theme/custom_background.dart';
 
 const _listTitle = '关于开展实验室安全检查的通知';
 const _detailBody = '各单位请于本周五前完成自查。';
@@ -63,6 +64,44 @@ Future<void> _openDetail(
 }
 
 void main() {
+  testWidgets('announcement separators remain in presets and hide in custom',
+      (tester) async {
+    final repository = _FakeAnnouncementRepository(
+      items: const [
+        _listItem,
+        AnnouncementListItem(
+          title: '第二条公告',
+          url: 'https://www.shu.edu.cn/info/1051/2.htm',
+        ),
+      ],
+      details: const {},
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: AnnouncementsPage(repository: repository),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byType(Divider), findsOneWidget);
+
+    const theme = CustomBackground(
+      imagePath: '',
+      opacity: 0,
+      background: Color(0xFFF8F8F8),
+      surface: Colors.white,
+      text: Colors.black,
+      accent: Colors.blue,
+    );
+    await tester.pumpWidget(MaterialApp(
+      theme: theme.theme.themeData(),
+      builder: (_, child) => CustomBackgroundFrame(
+        settings: theme,
+        child: child!,
+      ),
+      home: AnnouncementsPage(repository: repository),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byType(Divider), findsNothing);
+  });
+
   testWidgets('detail body waits for the push animation', (tester) async {
     final repository = _repositoryWith();
     await _openDetail(tester, repository);

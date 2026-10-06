@@ -23,6 +23,7 @@ import '../data/services/webvpn_session_store.dart';
 import 'app_shell.dart';
 import '../features/onboarding/startup_onboarding.dart';
 import '../shared/theme/shuyo_theme.dart';
+import '../shared/theme/custom_background.dart';
 import '../shared/widgets/shuyo_launch_surface.dart';
 
 class ShuYoApp extends StatefulWidget {
@@ -30,10 +31,12 @@ class ShuYoApp extends StatefulWidget {
     super.key,
     this.initialThemeId,
     this.initialFollowSystemTheme = false,
+    this.initialCustomBackground,
   });
 
   final String? initialThemeId;
   final bool initialFollowSystemTheme;
+  final CustomBackground? initialCustomBackground;
 
   @override
   State<ShuYoApp> createState() => _ShuYoAppState();
@@ -45,6 +48,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
   final _onboardingController = StartupOnboardingController();
   late Future<_StartupData> _startupFuture;
   String _manualThemeId = ShuYoThemes.defaultId;
+  CustomBackground? _customBackground;
   bool _followSystemTheme = false;
   bool _demoMode = false;
   DemoDataBundle? _demoData;
@@ -57,7 +61,11 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    _manualThemeId = ShuYoThemes.byId(widget.initialThemeId).id;
+    _customBackground = widget.initialCustomBackground;
+    _manualThemeId = widget.initialThemeId == ShuYoThemes.customBackgroundId &&
+            _customBackground != null
+        ? ShuYoThemes.customBackgroundId
+        : ShuYoThemes.byId(widget.initialThemeId).id;
     _followSystemTheme = widget.initialFollowSystemTheme;
     WidgetsBinding.instance.addObserver(this);
     _initialScheduleWidgetLaunch = _loadInitialScheduleWidgetLaunch();
@@ -99,6 +107,15 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
         GlobalWidgetsLocalizations.delegate,
       ],
       theme: theme.themeData(),
+      builder: (context, child) {
+        final background = theme.id == ShuYoThemes.customBackgroundId
+            ? _customBackground
+            : null;
+        return CustomBackgroundFrame(
+          settings: background,
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       home: FutureBuilder<_StartupData>(
         future: _startupFuture,
         builder: (context, snapshot) {
@@ -127,8 +144,10 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
               initialWebVpnSessionReady: demo ? false : data.webVpnSessionReady,
               selectedThemeId: theme.id,
               followSystemTheme: _followSystemTheme,
+              customBackground: _customBackground,
               onThemeChanged: _changeTheme,
               onFollowSystemThemeChanged: _changeFollowSystemTheme,
+              onCustomBackgroundChanged: _changeCustomBackground,
               academicLoginSignal: _academicLoginSignal,
               initialHasAcademicSession: demo || data.hasAcademicSession,
               initialAcademicSessionExpired:
@@ -159,6 +178,10 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
     final themeId = _followSystemTheme
         ? ShuYoThemes.systemThemeIdFor(_systemBrightness)
         : _manualThemeId;
+    if (themeId == ShuYoThemes.customBackgroundId &&
+        _customBackground != null) {
+      return _customBackground!.theme;
+    }
     return ShuYoThemes.byId(themeId);
   }
 
@@ -316,22 +339,43 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
     }
     final themeId = await _settingsService.loadThemeId();
     final followSystemTheme = await _settingsService.loadFollowSystemTheme();
+    final customBackground = await _settingsService.loadCustomBackground();
     if (!mounted) {
       return;
     }
     setState(() {
-      _manualThemeId = ShuYoThemes.byId(themeId).id;
+      _customBackground = customBackground;
+      _manualThemeId =
+          themeId == ShuYoThemes.customBackgroundId && customBackground != null
+              ? ShuYoThemes.customBackgroundId
+              : ShuYoThemes.byId(themeId).id;
       _followSystemTheme = followSystemTheme;
     });
   }
 
   Future<void> _changeTheme(String themeId) async {
-    final theme = ShuYoThemes.byId(themeId);
-    await _settingsService.saveThemeId(theme.id);
+    final selectedId =
+        themeId == ShuYoThemes.customBackgroundId && _customBackground != null
+            ? themeId
+            : ShuYoThemes.byId(themeId).id;
+    await _settingsService.saveThemeId(selectedId);
     await _settingsService.saveFollowSystemTheme(false);
     if (mounted) {
       setState(() {
-        _manualThemeId = theme.id;
+        _manualThemeId = selectedId;
+        _followSystemTheme = false;
+      });
+    }
+  }
+
+  Future<void> _changeCustomBackground(CustomBackground settings) async {
+    await _settingsService.saveThemeId(ShuYoThemes.customBackgroundId);
+    await _settingsService.saveFollowSystemTheme(false);
+    await _settingsService.saveCustomBackground(settings);
+    if (mounted) {
+      setState(() {
+        _customBackground = settings;
+        _manualThemeId = ShuYoThemes.customBackgroundId;
         _followSystemTheme = false;
       });
     }

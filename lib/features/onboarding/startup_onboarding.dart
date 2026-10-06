@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../data/models/client_backend.dart';
 import '../../data/models/classroom.dart';
 import '../../data/services/client_settings_service.dart';
+import '../../shared/navigation/shuyo_route.dart';
 import '../../shared/widgets/webvpn_toggle.dart';
 import '../auth/native_login_page.dart';
 
@@ -384,7 +385,9 @@ class _StartupOnboardingState extends State<StartupOnboarding>
 
   Future<void> _openAcademicLogin() async {
     final result = await Navigator.of(context).push<NativeLoginResult>(
-      MaterialPageRoute(builder: (_) => const NativeLoginPage()),
+      MaterialPageRoute(
+        builder: (_) => const ShuYoRouteSurface(child: NativeLoginPage()),
+      ),
     );
     if (result == NativeLoginResult.demo) {
       await _enterDemoMode();

@@ -5,6 +5,7 @@ import 'package:lunar/calendar/Lunar.dart';
 
 import '../../shared/shuyo_text_styles.dart';
 import '../../shared/theme/shuyo_theme.dart';
+import '../../shared/theme/custom_background.dart';
 
 class HomeDashboardPage extends StatelessWidget {
   const HomeDashboardPage({
@@ -62,6 +63,7 @@ class HomeDashboardPage extends StatelessWidget {
           const SizedBox(height: 10),
         ],
         _HomeRow(
+          showDivider: true,
           title: isAcademicLoginCompleting
               ? '正在完成校园登录'
               : hasAcademicAccount
@@ -249,6 +251,7 @@ class _HomeRow extends StatelessWidget {
     this.icon,
     this.trailing,
     this.onTap,
+    this.showDivider = false,
   });
 
   final String title;
@@ -256,18 +259,26 @@ class _HomeRow extends StatelessWidget {
   final IconData? icon;
   final Widget? trailing;
   final VoidCallback? onTap;
+  final bool showDivider;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.shuyoColors;
+    final customBackground = CustomBackgroundScope.maybeOf(context) != null;
     return InkWell(
       onTap: onTap,
+      splashFactory: customBackground ? NoSplash.splashFactory : null,
+      overlayColor: customBackground
+          ? const WidgetStatePropertyAll(Colors.transparent)
+          : null,
       child: Container(
         constraints: const BoxConstraints(minHeight: 68),
         padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: colors.border)),
-        ),
+        decoration: customBackground || !showDivider
+            ? null
+            : BoxDecoration(
+                border: Border(bottom: BorderSide(color: colors.border)),
+              ),
         child: Row(
           children: [
             if (icon != null) ...[

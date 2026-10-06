@@ -20,6 +20,7 @@ class ShuYoThemeSpec {
       ];
 
   ThemeData themeData() {
+    final transparentBackground = id == ShuYoThemes.customBackgroundId;
     final scheme = ColorScheme.fromSeed(
       seedColor: colors.accent,
       brightness: colors.brightness,
@@ -32,15 +33,23 @@ class ShuYoThemeSpec {
       onError: colors.onDanger,
       surface: colors.surface,
       onSurface: colors.textPrimary,
+      onSurfaceVariant: transparentBackground ? colors.textSecondary : null,
+      primaryContainer: transparentBackground ? colors.accentSoft : null,
+      onPrimaryContainer: transparentBackground ? colors.onAccentSoft : null,
+      surfaceContainerLow: transparentBackground ? colors.surfaceAlt : null,
+      surfaceContainer: transparentBackground ? colors.surface : null,
+      surfaceContainerHigh: transparentBackground ? colors.surfaceMuted : null,
       surfaceContainerHighest: colors.surfaceMuted,
       outline: colors.borderStrong,
+      outlineVariant: transparentBackground ? colors.border : null,
     );
 
     return ThemeData(
       useMaterial3: true,
       brightness: colors.brightness,
       colorScheme: scheme,
-      scaffoldBackgroundColor: colors.background,
+      scaffoldBackgroundColor:
+          transparentBackground ? Colors.transparent : colors.background,
       extensions: [colors],
       textTheme: ShuYoTextStyles.theme.apply(
         bodyColor: colors.textPrimary,
@@ -52,7 +61,8 @@ class ShuYoThemeSpec {
         space: 1,
       ),
       appBarTheme: AppBarTheme(
-        backgroundColor: colors.background,
+        backgroundColor:
+            transparentBackground ? Colors.transparent : colors.background,
         foregroundColor: colors.textPrimary,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
@@ -60,7 +70,9 @@ class ShuYoThemeSpec {
         toolbarTextStyle: ShuYoTextStyles.label(color: colors.textPrimary),
       ),
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
-        backgroundColor: colors.background,
+        backgroundColor:
+            transparentBackground ? Colors.transparent : colors.background,
+        elevation: transparentBackground ? 0 : null,
         selectedItemColor: colors.navSelected,
         unselectedItemColor: colors.navUnselected,
         type: BottomNavigationBarType.fixed,
@@ -345,6 +357,7 @@ class ShuYoThemes {
   const ShuYoThemes._();
 
   static const defaultId = 'blue_light';
+  static const customBackgroundId = 'custom_background';
   static const systemDarkId = 'default_dark';
   static const systemLightId = defaultId;
 
@@ -451,7 +464,8 @@ class ShuYoThemes {
         disabledFill: Color(0xFFE4EAF1),
         inverseSurface: Color(0xFF1F2937),
         inverseOnSurface: Color(0xFFFFFFFF),
-        scheduleEmptyCell: Color.fromARGB(255, 235, 235, 235),
+        // 6% black over #FAFAFA retains the previous #EBEBEB appearance.
+        scheduleEmptyCell: Color(0x0F000000),
         scheduleCourseFill: Color(0xFFFFFFFF),
         scheduleCourseText: Color(0xFF202423),
         scheduleCourseMetaText: Color(0xFF59625D),

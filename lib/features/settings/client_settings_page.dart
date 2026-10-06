@@ -1,6 +1,12 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:crop_your_image/crop_your_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/client_app_info.dart';
@@ -13,6 +19,7 @@ import '../../data/services/client_settings_service.dart';
 import '../../shared/shuyo_text_styles.dart';
 import '../../shared/navigation/shuyo_route.dart';
 import '../../shared/theme/shuyo_theme.dart';
+import '../../shared/theme/custom_background.dart';
 import '../../shared/widgets/client_update_prompt.dart';
 import '../../shared/widgets/empty_state.dart';
 import '../../shared/widgets/webvpn_toggle.dart';
@@ -29,6 +36,8 @@ class ClientSettingsPage extends StatelessWidget {
     required this.followSystemTheme,
     required this.onThemeChanged,
     required this.onFollowSystemThemeChanged,
+    this.customBackground,
+    this.onCustomBackgroundChanged,
     required this.selectedStartupTab,
     required this.onStartupTabChanged,
     required this.webVpnController,
@@ -47,6 +56,8 @@ class ClientSettingsPage extends StatelessWidget {
   final bool followSystemTheme;
   final Future<void> Function(String themeId) onThemeChanged;
   final Future<void> Function(bool enabled) onFollowSystemThemeChanged;
+  final CustomBackground? customBackground;
+  final Future<void> Function(CustomBackground)? onCustomBackgroundChanged;
   final AppTab selectedStartupTab;
   final Future<void> Function(AppTab tab) onStartupTabChanged;
   final StartupOnboardingController webVpnController;
@@ -72,6 +83,8 @@ class ClientSettingsPage extends StatelessWidget {
                   followSystemTheme: followSystemTheme,
                   onThemeChanged: onThemeChanged,
                   onFollowSystemThemeChanged: onFollowSystemThemeChanged,
+                  customBackground: customBackground,
+                  onCustomBackgroundChanged: onCustomBackgroundChanged,
                 ),
               ),
             ),
@@ -882,12 +895,16 @@ class _ThemeSettingsPage extends StatefulWidget {
     required this.followSystemTheme,
     required this.onThemeChanged,
     required this.onFollowSystemThemeChanged,
+    this.customBackground,
+    this.onCustomBackgroundChanged,
   });
 
   final String selectedThemeId;
   final bool followSystemTheme;
   final Future<void> Function(String themeId) onThemeChanged;
   final Future<void> Function(bool enabled) onFollowSystemThemeChanged;
+  final CustomBackground? customBackground;
+  final Future<void> Function(CustomBackground)? onCustomBackgroundChanged;
 
   @override
   State<_ThemeSettingsPage> createState() => _ThemeSettingsPageState();
@@ -898,12 +915,16 @@ class _ThemeSettingsPageState extends State<_ThemeSettingsPage> {
   late bool _followSystemTheme;
   String? _savingThemeId;
   bool _savingFollowSystemTheme = false;
+  bool _savingCustom = false;
+  CustomBackground? _customBackground;
+  double? _opacityDraft;
 
   @override
   void initState() {
     super.initState();
     _selectedThemeId = widget.selectedThemeId;
     _followSystemTheme = widget.followSystemTheme;
+    _customBackground = widget.customBackground;
   }
 
   @override
@@ -917,24 +938,32 @@ class _ThemeSettingsPageState extends State<_ThemeSettingsPage> {
         !_savingFollowSystemTheme) {
       _followSystemTheme = widget.followSystemTheme;
     }
+    if (widget.customBackground != oldWidget.customBackground &&
+        !_savingCustom) {
+      _customBackground = widget.customBackground;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.shuyoColors;
-    return Scaffold(
+    final page = Scaffold(
       appBar: AppBar(title: const Text('主题切换')),
-      body: ListView.separated(
-        itemCount: ShuYoThemes.all.length + 1,
-        separatorBuilder: (context, index) => Divider(color: colors.border),
+      body: ListView.builder(
+        itemCount: ShuYoThemes.all.length + 2,
         itemBuilder: (context, index) {
           if (index == 0) {
             return _SettingsSwitchRow(
               title: '跟随系统',
               value: _followSystemTheme,
-              enabled: _savingThemeId == null && !_savingFollowSystemTheme,
+              enabled: _savingThemeId == null &&
+                  !_savingFollowSystemTheme &&
+                  !_savingCustom,
               onChanged: _toggleFollowSystemTheme,
             );
+          }
+          if (index == ShuYoThemes.all.length + 1) {
+            return _buildCustomBackgroundRow(context);
           }
           final theme = ShuYoThemes.all[index - 1];
           final selected = theme.id == _selectedThemeId;
@@ -952,17 +981,340 @@ class _ThemeSettingsPageState extends State<_ThemeSettingsPage> {
               selected: selected,
               saving: _savingThemeId == theme.id,
             ),
-            onTap: _savingThemeId == null ? () => _selectTheme(theme) : null,
+            onTap: _savingThemeId == null && !_savingCustom
+                ? () => _selectTheme(theme)
+                : null,
           );
         },
       ),
     );
+    final preview = _opacityDraft != null &&
+            !_followSystemTheme &&
+            _selectedThemeId == ShuYoThemes.customBackgroundId &&
+            _customBackground != null
+        ? _customBackground!.copyWith(opacity: _opacityDraft!.round())
+        : null;
+    return CustomBackgroundLayer(settings: preview, child: page);
+  }
+
+  Widget _buildCustomBackgroundRow(BuildContext context) {
+    final selected = !_followSystemTheme &&
+        _selectedThemeId == ShuYoThemes.customBackgroundId;
+    final settings = _customBackground;
+    final colors = context.shuyoColors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ListTile(
+          selected: selected,
+          selectedColor: colors.textPrimary,
+          title: Text('自定义主题',
+              style: TextStyle(
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              )),
+          trailing: settings == null
+              ? Icon(Icons.palette_outlined, color: colors.textSecondary)
+              : _ThemeSwatches(
+                  theme: settings.theme,
+                  selected: selected,
+                  saving: _savingCustom,
+                ),
+          onTap: _savingCustom ||
+                  _savingFollowSystemTheme ||
+                  _savingThemeId != null
+              ? null
+              : _selectCustomBackground,
+        ),
+        if (selected && settings != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    TextButton.icon(
+                      onPressed: _savingCustom ? null : _replacePhoto,
+                      icon: const Icon(Icons.photo_outlined, size: 18),
+                      label: Text(settings.hasPhoto ? '更换照片' : '选择照片'),
+                    ),
+                    const Spacer(),
+                    if (settings.hasPhoto)
+                      TextButton(
+                        onPressed: _savingCustom ? null : _clearPhoto,
+                        child: const Text('清除'),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const Text('不透明度'),
+                const SizedBox(height: 8),
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    showValueIndicator: ShowValueIndicator.onDrag,
+                    disabledActiveTrackColor: Colors.grey.shade600,
+                    disabledInactiveTrackColor: Colors.grey.shade400,
+                    disabledThumbColor: Colors.grey.shade600,
+                  ),
+                  child: Slider(
+                    value: _opacityDraft ?? settings.opacity.toDouble(),
+                    min: 0,
+                    max: 100,
+                    label: '${(_opacityDraft ?? settings.opacity).round()}%',
+                    semanticFormatterCallback: (value) => '${value.round()}%',
+                    onChanged: _savingCustom || !settings.hasPhoto
+                        ? null
+                        : (value) => setState(() => _opacityDraft = value),
+                    onChangeEnd: _savingCustom || !settings.hasPhoto
+                        ? null
+                        : (value) {
+                            setState(() => _opacityDraft = null);
+                            _saveCustom(
+                              settings.copyWith(opacity: value.round()),
+                            );
+                          },
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text('颜色'),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 10,
+                  children: [
+                    _editableColor('背景', settings.background,
+                        (color) => settings.withBackgroundColor(color)),
+                    _editableColor('文字', settings.text,
+                        (color) => settings.copyWith(text: color)),
+                    _editableColor('主题', settings.accent,
+                        (color) => settings.copyWith(accent: color)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _editableColor(
+    String label,
+    Color color,
+    CustomBackground Function(Color) update,
+  ) {
+    return InkWell(
+      onTap: _savingCustom
+          ? null
+          : () async {
+              final next = await showDialog<Color>(
+                context: context,
+                builder: (_) => _ThemeColorDialog(label: label, initial: color),
+              );
+              if (next == null || !mounted) return;
+              final settings = update(next);
+              await _saveCustom(settings);
+            },
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: Column(
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                border: Border.all(color: context.shuyoColors.borderStrong),
+              ),
+              child: const SizedBox.square(dimension: 32),
+            ),
+            const SizedBox(height: 4),
+            Text(label, style: const TextStyle(fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _selectCustomBackground() async {
+    if (_customBackground == null) {
+      final callback = widget.onCustomBackgroundChanged;
+      if (callback == null) return;
+      final previousId = _selectedThemeId;
+      final previousFollowSystem = _followSystemTheme;
+      final settings = CustomBackground.withoutPhoto(context.shuyoColors);
+      setState(() {
+        _customBackground = settings;
+        _selectedThemeId = ShuYoThemes.customBackgroundId;
+        _followSystemTheme = false;
+        _savingCustom = true;
+      });
+      try {
+        await callback(settings);
+      } on Object catch (error) {
+        if (!mounted) return;
+        _showSnack(context, '主题保存失败：$error');
+        setState(() {
+          _customBackground = null;
+          _selectedThemeId = previousId;
+          _followSystemTheme = previousFollowSystem;
+        });
+      } finally {
+        if (mounted) setState(() => _savingCustom = false);
+      }
+      return;
+    }
+    if (!_followSystemTheme &&
+        _selectedThemeId == ShuYoThemes.customBackgroundId) {
+      return;
+    }
+    setState(() {
+      _selectedThemeId = ShuYoThemes.customBackgroundId;
+      _followSystemTheme = false;
+      _savingCustom = true;
+    });
+    try {
+      await widget.onThemeChanged(ShuYoThemes.customBackgroundId);
+    } on Object catch (error) {
+      if (!mounted) return;
+      _showSnack(context, '主题保存失败：$error');
+      setState(() {
+        _selectedThemeId = widget.selectedThemeId;
+        _followSystemTheme = widget.followSystemTheme;
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _savingCustom = false);
+      }
+    }
+  }
+
+  Future<void> _replacePhoto() async {
+    if (_savingCustom || widget.onCustomBackgroundChanged == null) return;
+    setState(() => _savingCustom = true);
+    File? newFile;
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 2400,
+        imageQuality: 90,
+        requestFullMetadata: false,
+      );
+      if (picked == null || !mounted) return;
+      final codec = await ui.instantiateImageCodec(await picked.readAsBytes());
+      late Uint8List bytes;
+      ui.FrameInfo? frame;
+      try {
+        frame = await codec.getNextFrame();
+        final pngData =
+            await frame.image.toByteData(format: ui.ImageByteFormat.png);
+        if (pngData == null) throw StateError('无法读取照片');
+        bytes = pngData.buffer.asUint8List();
+      } finally {
+        frame?.image.dispose();
+        codec.dispose();
+      }
+      if (!mounted) return;
+      final cropped = await Navigator.of(context).push<Uint8List>(
+        shuyoRoute(builder: (_) => _BackgroundCropPage(image: bytes)),
+      );
+      if (cropped == null || !mounted) return;
+      final directory = await getApplicationSupportDirectory();
+      newFile = File(
+        '${directory.path}/custom_background_${DateTime.now().microsecondsSinceEpoch}.png',
+      );
+      await newFile.writeAsBytes(cropped, flush: true);
+      final settings = await CustomBackground.fromImage(
+        imagePath: newFile.path,
+        provider: MemoryImage(cropped),
+      );
+      await widget.onCustomBackgroundChanged!(settings);
+      final oldPath = _customBackground?.imagePath;
+      if (!mounted) return;
+      setState(() {
+        _customBackground = settings;
+        _selectedThemeId = ShuYoThemes.customBackgroundId;
+        _followSystemTheme = false;
+      });
+      if (oldPath != null && oldPath.isNotEmpty && oldPath != newFile.path) {
+        await _deleteStoredPhoto(oldPath);
+      }
+    } on Object catch (error) {
+      if (newFile != null) {
+        try {
+          await newFile.delete();
+        } on FileSystemException {
+          // Keep the original error visible.
+        }
+      }
+      if (mounted) _showSnack(context, '照片设置失败：$error');
+    } finally {
+      if (mounted) setState(() => _savingCustom = false);
+    }
+  }
+
+  Future<void> _clearPhoto() async {
+    final previous = _customBackground;
+    final callback = widget.onCustomBackgroundChanged;
+    if (_savingCustom ||
+        previous == null ||
+        !previous.hasPhoto ||
+        callback == null) {
+      return;
+    }
+    final cleared = previous.copyWith(imagePath: '', opacity: 0);
+    setState(() {
+      _customBackground = cleared;
+      _savingCustom = true;
+    });
+    try {
+      await callback(cleared);
+      await _deleteStoredPhoto(previous.imagePath);
+    } on Object catch (error) {
+      if (!mounted) return;
+      _showSnack(context, '照片清除失败：$error');
+      setState(() => _customBackground = previous);
+    } finally {
+      if (mounted) setState(() => _savingCustom = false);
+    }
+  }
+
+  Future<void> _deleteStoredPhoto(String path) async {
+    final file = File(path);
+    if (!file.uri.pathSegments.last.startsWith('custom_background_')) {
+      return;
+    }
+    try {
+      final directory = await getApplicationSupportDirectory();
+      if (file.parent.path != directory.path) return;
+      await file.delete();
+    } on Object {
+      // Theme changes are already saved; an orphaned cache file is harmless.
+    }
+  }
+
+  Future<void> _saveCustom(CustomBackground settings) async {
+    if (_savingCustom || widget.onCustomBackgroundChanged == null) return;
+    final previous = _customBackground;
+    setState(() {
+      _customBackground = settings;
+      _savingCustom = true;
+    });
+    try {
+      await widget.onCustomBackgroundChanged!(settings);
+    } on Object catch (error) {
+      if (!mounted) return;
+      _showSnack(context, '主题保存失败：$error');
+      setState(() => _customBackground = previous);
+    } finally {
+      if (mounted) setState(() => _savingCustom = false);
+    }
   }
 
   Future<void> _selectTheme(ShuYoThemeSpec theme) async {
     if ((!_followSystemTheme && _selectedThemeId == theme.id) ||
         _savingThemeId != null ||
-        _savingFollowSystemTheme) {
+        _savingFollowSystemTheme ||
+        _savingCustom) {
       return;
     }
     setState(() {
@@ -989,7 +1341,7 @@ class _ThemeSettingsPageState extends State<_ThemeSettingsPage> {
   }
 
   Future<void> _toggleFollowSystemTheme(bool enabled) async {
-    if (_savingFollowSystemTheme || _savingThemeId != null) {
+    if (_savingFollowSystemTheme || _savingThemeId != null || _savingCustom) {
       return;
     }
     setState(() {
@@ -1073,6 +1425,309 @@ class _ThemeSwatch extends StatelessWidget {
         shape: BoxShape.circle,
       ),
       child: const SizedBox.square(dimension: 16),
+    );
+  }
+}
+
+class _BackgroundCropPage extends StatefulWidget {
+  const _BackgroundCropPage({required this.image});
+
+  final Uint8List image;
+
+  @override
+  State<_BackgroundCropPage> createState() => _BackgroundCropPageState();
+}
+
+class _BackgroundCropPageState extends State<_BackgroundCropPage> {
+  final _controller = CropController();
+  bool _cropping = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('裁剪照片'),
+        actions: [
+          TextButton(
+            onPressed: _cropping
+                ? null
+                : () {
+                    setState(() => _cropping = true);
+                    _controller.crop();
+                  },
+            child: const Text('完成'),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          Crop(
+            image: widget.image,
+            controller: _controller,
+            aspectRatio: MediaQuery.sizeOf(context).aspectRatio,
+            interactive: true,
+            onCropped: (result) {
+              if (!mounted) return;
+              switch (result) {
+                case CropSuccess(:final croppedImage):
+                  Navigator.of(context).pop(croppedImage);
+                case CropFailure(:final cause):
+                  setState(() => _cropping = false);
+                  _showSnack(context, '裁剪失败：$cause');
+              }
+            },
+          ),
+          if (_cropping) const Center(child: CircularProgressIndicator()),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThemeColorDialog extends StatefulWidget {
+  const _ThemeColorDialog({required this.label, required this.initial});
+
+  final String label;
+  final Color initial;
+
+  @override
+  State<_ThemeColorDialog> createState() => _ThemeColorDialogState();
+}
+
+class _ThemeColorDialogState extends State<_ThemeColorDialog> {
+  late HSVColor _hsv;
+  late final TextEditingController _hexController;
+
+  @override
+  void initState() {
+    super.initState();
+    _hsv = HSVColor.fromColor(widget.initial);
+    _hexController = TextEditingController(text: _hex(_hsv.toColor()));
+  }
+
+  @override
+  void dispose() {
+    _hexController.dispose();
+    super.dispose();
+  }
+
+  String _hex(Color color) => (color.toARGB32() & 0xFFFFFF)
+      .toRadixString(16)
+      .padLeft(6, '0')
+      .toUpperCase();
+
+  void _setColor(HSVColor color) {
+    setState(() => _hsv = color);
+    final hex = _hex(color.toColor());
+    _hexController.value = TextEditingValue(
+      text: hex,
+      selection: TextSelection.collapsed(offset: hex.length),
+    );
+  }
+
+  void _selectSquare(Offset point, double side) {
+    final saturation = (point.dx / side).clamp(0.0, 1.0);
+    final value = (1 - point.dy / side).clamp(0.0, 1.0);
+    _setColor(_hsv.withSaturation(saturation).withValue(value));
+  }
+
+  void _selectHue(Offset point, double width) {
+    final hue = (point.dx / width * 360).clamp(0.0, 360.0);
+    _setColor(_hsv.withHue(hue));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _hsv.toColor();
+    final side = (MediaQuery.sizeOf(context).width - 112).clamp(180.0, 300.0);
+    return AlertDialog(
+      title: Text(widget.label),
+      content: SingleChildScrollView(
+        child: SizedBox(
+          width: side,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Semantics(
+                label: '饱和度和明度',
+                child: GestureDetector(
+                  key: const Key('theme-color-square'),
+                  behavior: HitTestBehavior.opaque,
+                  onPanDown: (details) =>
+                      _selectSquare(details.localPosition, side),
+                  onPanUpdate: (details) =>
+                      _selectSquare(details.localPosition, side),
+                  child: SizedBox.square(
+                    dimension: side,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      Colors.white,
+                                      HSVColor.fromAHSV(1, _hsv.hue, 1, 1)
+                                          .toColor(),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.transparent,
+                                      Colors.black,
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Positioned(
+                          left: _hsv.saturation * side - 9,
+                          top: (1 - _hsv.value) * side - 9,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: color,
+                              border:
+                                  Border.all(color: Colors.white, width: 2.5),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black54,
+                                  blurRadius: 3,
+                                ),
+                              ],
+                            ),
+                            child: const SizedBox.square(dimension: 18),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Semantics(
+                label: '色相',
+                child: GestureDetector(
+                  key: const Key('theme-hue-bar'),
+                  behavior: HitTestBehavior.opaque,
+                  onPanDown: (details) =>
+                      _selectHue(details.localPosition, side),
+                  onPanUpdate: (details) =>
+                      _selectHue(details.localPosition, side),
+                  child: SizedBox(
+                    width: side,
+                    height: 28,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      clipBehavior: Clip.none,
+                      children: [
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            gradient: const LinearGradient(colors: [
+                              Colors.red,
+                              Colors.yellow,
+                              Colors.green,
+                              Colors.cyan,
+                              Colors.blue,
+                              Colors.purple,
+                              Colors.red,
+                            ]),
+                          ),
+                          child: const SizedBox(
+                              height: 16, width: double.infinity),
+                        ),
+                        Positioned(
+                          left: _hsv.hue / 360 * side - 8,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: HSVColor.fromAHSV(1, _hsv.hue, 1, 1)
+                                  .toColor(),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black45,
+                                  blurRadius: 3,
+                                ),
+                              ],
+                            ),
+                            child: const SizedBox.square(dimension: 16),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(6),
+                      border:
+                          Border.all(color: context.shuyoColors.borderStrong),
+                    ),
+                    child: const SizedBox.square(dimension: 36),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      key: const Key('theme-hex-field'),
+                      controller: _hexController,
+                      maxLength: 6,
+                      textCapitalization: TextCapitalization.characters,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'[0-9a-fA-F]'),
+                        ),
+                      ],
+                      decoration: const InputDecoration(
+                        prefixText: '#',
+                        counterText: '',
+                        isDense: true,
+                      ),
+                      onChanged: (value) {
+                        if (value.length != 6) return;
+                        final rgb = int.tryParse(value, radix: 16);
+                        if (rgb != null) {
+                          setState(() => _hsv =
+                              HSVColor.fromColor(Color(0xFF000000 | rgb)));
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(color),
+          child: const Text('确定'),
+        ),
+      ],
     );
   }
 }

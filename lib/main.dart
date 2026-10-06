@@ -9,6 +9,7 @@ import 'data/services/app_data_migration_service.dart';
 import 'data/services/academic_schedule_widget_service.dart';
 import 'data/services/client_settings_service.dart';
 import 'shared/theme/shuyo_theme.dart';
+import 'shared/theme/custom_background.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,6 +27,7 @@ Future<void> main() async {
     ShuYoApp(
       initialThemeId: initialThemeSettings.themeId,
       initialFollowSystemTheme: initialThemeSettings.followSystemTheme,
+      initialCustomBackground: initialThemeSettings.customBackground,
     ),
   );
 }
@@ -37,8 +39,9 @@ Future<_InitialThemeSettings> _loadInitialThemeSettings() async {
     await AppDataMigrationService().migrateIfNeeded();
     final settingsService = ClientSettingsService();
     return _InitialThemeSettings(
-      themeId: ShuYoThemes.byId(await settingsService.loadThemeId()).id,
+      themeId: await settingsService.loadThemeId() ?? ShuYoThemes.defaultId,
       followSystemTheme: await settingsService.loadFollowSystemTheme(),
+      customBackground: await settingsService.loadCustomBackground(),
     );
   } on Object {
     // Keep startup recoverable if a platform preference or migration service
@@ -54,8 +57,10 @@ class _InitialThemeSettings {
   const _InitialThemeSettings({
     required this.themeId,
     required this.followSystemTheme,
+    this.customBackground,
   });
 
   final String themeId;
   final bool followSystemTheme;
+  final CustomBackground? customBackground;
 }

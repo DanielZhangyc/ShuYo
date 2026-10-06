@@ -8,6 +8,7 @@ import '../../data/services/academic_account_store.dart';
 import '../../data/services/library_booking_cache.dart';
 import '../../data/services/there_booking_client.dart';
 import '../../data/services/unified_account_service.dart';
+import '../../shared/navigation/shuyo_route.dart';
 import '../../shared/theme/shuyo_theme.dart';
 import '../../shared/widgets/empty_state.dart';
 import '../auth/native_login_page.dart';
@@ -184,50 +185,53 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
             child: child,
           );
         },
-        child: Scaffold(
+        child: ShuYoRouteSurface(
           key: ValueKey(_step),
-          appBar: AppBar(
-            leading: _step == _BookingStep.venue
-                ? null
-                : IconButton(
-                    tooltip: '返回上一步',
-                    onPressed: _busy ? null : _goBack,
-                    icon: const Icon(Icons.arrow_back),
+          child: Scaffold(
+            appBar: AppBar(
+              leading: _step == _BookingStep.venue
+                  ? null
+                  : IconButton(
+                      tooltip: '返回上一步',
+                      onPressed: _busy ? null : _goBack,
+                      icon: const Icon(Icons.arrow_back),
+                    ),
+              title: Text(_pageTitle),
+              actions: [
+                if (_step != _BookingStep.venue)
+                  IconButton(
+                    tooltip: '刷新',
+                    onPressed: _busy ||
+                            _loading ||
+                            _loadingSeats ||
+                            _loadingAllAreas ||
+                            _previewLoading
+                        ? null
+                        : _retry,
+                    icon: const Icon(Icons.refresh),
                   ),
-            title: Text(_pageTitle),
-            actions: [
-              if (_step != _BookingStep.venue)
-                IconButton(
-                  tooltip: '刷新',
-                  onPressed: _busy ||
-                          _loading ||
-                          _loadingSeats ||
-                          _loadingAllAreas ||
-                          _previewLoading
-                      ? null
-                      : _retry,
-                  icon: const Icon(Icons.refresh),
-                ),
-            ],
+              ],
+            ),
+            body: _loading
+                ? _loadingBody()
+                : _error != null
+                    ? EmptyState(
+                        icon: _error!.contains('校园网')
+                            ? Icons.wifi_off_outlined
+                            : Icons.event_busy_outlined,
+                        title: '加载失败',
+                        message: _error!,
+                        action: TextButton.icon(
+                          onPressed: _retry,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('重试'),
+                        ),
+                      )
+                    : _stepBody(),
+            bottomNavigationBar: seatStep && !_loading && _error == null
+                ? _seatBottomBar()
+                : null,
           ),
-          body: _loading
-              ? _loadingBody()
-              : _error != null
-                  ? EmptyState(
-                      icon: _error!.contains('校园网')
-                          ? Icons.wifi_off_outlined
-                          : Icons.event_busy_outlined,
-                      title: '加载失败',
-                      message: _error!,
-                      action: TextButton.icon(
-                        onPressed: _retry,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('重试'),
-                      ),
-                    )
-                  : _stepBody(),
-          bottomNavigationBar:
-              seatStep && !_loading && _error == null ? _seatBottomBar() : null,
         ),
       )),
     );
@@ -316,7 +320,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
 
   void _openInfo(String title, String asset) {
     Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => LibraryBookingInfoPage(title: title, asset: asset),
+      builder: (_) => ShuYoRouteSurface(
+        child: LibraryBookingInfoPage(title: title, asset: asset),
+      ),
     ));
   }
 
@@ -1880,7 +1886,11 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     }
     if (!mounted) return false;
     final result = await Navigator.of(context).push<NativeLoginResult>(
-      MaterialPageRoute(builder: (_) => const NativeLoginPage.there()),
+      MaterialPageRoute(
+        builder: (_) => const ShuYoRouteSurface(
+          child: NativeLoginPage.there(),
+        ),
+      ),
     );
     if (result == NativeLoginResult.authenticated) {
       _client.resetSession();

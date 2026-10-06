@@ -17,10 +17,293 @@ import 'package:shuyo/features/settings/client_settings_page.dart';
 import 'package:shuyo/features/onboarding/startup_onboarding.dart';
 import 'package:shuyo/shared/widgets/webvpn_toggle.dart';
 import 'package:shuyo/core/client_app_info.dart';
+import 'package:shuyo/shared/theme/custom_background.dart';
+import 'package:shuyo/shared/theme/shuyo_theme.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
   tearDown(() => debugDefaultTargetPlatformOverride = null);
+
+  testWidgets('custom theme opens without a photo and disables opacity',
+      (tester) async {
+    CustomBackground? saved;
+    await _pumpSettings(
+      tester,
+      onCustomBackgroundChanged: (settings) async => saved = settings,
+    );
+    await tester.tap(find.text('主题切换'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('自定义主题'), 180);
+    await tester.tap(find.text('自定义主题'));
+    await tester.pumpAndSettle();
+
+    expect(saved?.hasPhoto, isFalse);
+    expect(saved?.opacity, 0);
+    expect(find.text('选择照片'), findsOneWidget);
+    expect(find.text('更换照片'), findsNothing);
+    expect(find.text('清除'), findsNothing);
+    expect(tester.widget<Slider>(find.byType(Slider)).onChanged, isNull);
+    expect(find.text('背景'), findsOneWidget);
+    expect(find.text('文字'), findsOneWidget);
+    expect(find.text('主题'), findsOneWidget);
+  });
+
+  testWidgets('custom background expands only while selected and keeps edits',
+      (tester) async {
+    final selected = <String>[];
+    CustomBackground? saved;
+    final background = CustomBackground(
+      imagePath: 'assets/images/icon.png',
+      opacity: 50,
+      background: const Color(0xFFF8F8F8),
+      surface: Colors.white,
+      text: const Color(0xFF171717),
+      accent: const Color(0xFF3478D4),
+    );
+    await _pumpSettings(
+      tester,
+      customBackground: background,
+      onThemeChanged: (id) async => selected.add(id),
+      onCustomBackgroundChanged: (settings) async => saved = settings,
+    );
+    await tester.tap(find.text('主题切换'));
+    await tester.pumpAndSettle();
+    expect(find.byType(Divider), findsNothing);
+    await tester.scrollUntilVisible(find.text('自定义主题'), 180);
+    expect(find.text('不透明度'), findsNothing);
+
+    await tester.tap(find.text('自定义主题'));
+    await tester.pumpAndSettle();
+    expect(find.text('不透明度'), findsOneWidget);
+    expect(find.text('更换照片'), findsOneWidget);
+    expect(find.text('清除'), findsOneWidget);
+    expect(find.text('面板'), findsNothing);
+    expect(find.text('背景'), findsOneWidget);
+    expect(find.text('文字'), findsOneWidget);
+    expect(find.text('主题'), findsOneWidget);
+    await tester.ensureVisible(find.byType(Slider));
+    await tester.pumpAndSettle();
+    final slider = find.byType(Slider);
+    expect(tester.widget<Slider>(slider).divisions, isNull);
+    expect(tester.widget<Slider>(slider).label, '50%');
+    expect(
+      tester
+          .widget<SliderTheme>(find
+              .ancestor(
+                of: slider,
+                matching: find.byType(SliderTheme),
+              )
+              .first)
+          .data
+          .showValueIndicator,
+      ShowValueIndicator.onDrag,
+    );
+    final drag = await tester.startGesture(tester.getCenter(slider));
+    await drag.moveBy(Offset(-tester.getSize(slider).width / 5, 0));
+    await tester.pump();
+    final previewOpacity = tester.widget<Slider>(slider).value.round();
+    expect(
+      find.byWidgetPredicate((widget) =>
+          widget is CustomBackgroundLayer &&
+          widget.settings?.opacity == previewOpacity),
+      findsOneWidget,
+    );
+    await drag.up();
+    await tester.pumpAndSettle();
+    expect(saved?.opacity, inInclusiveRange(28, 33));
+
+    await tester.scrollUntilVisible(find.text('浅色'), -180);
+    await tester.ensureVisible(find.text('浅色'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('浅色'));
+    await tester.pumpAndSettle();
+    expect(find.text('不透明度'), findsNothing);
+    await tester.scrollUntilVisible(find.text('自定义主题'), 180);
+    await tester.tap(find.text('自定义主题'));
+    await tester.pumpAndSettle();
+    expect(find.text('不透明度'), findsOneWidget);
+    expect(tester.widget<Slider>(find.byType(Slider)).value, saved!.opacity);
+    expect(selected, [
+      ShuYoThemes.customBackgroundId,
+      ShuYoThemes.defaultId,
+      ShuYoThemes.customBackgroundId,
+    ]);
+
+    await tester.ensureVisible(find.text('清除'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('清除'));
+    await tester.pumpAndSettle();
+    expect(saved?.hasPhoto, isFalse);
+    expect(saved?.opacity, 0);
+    expect(saved?.accent, background.accent);
+    expect(find.text('选择照片'), findsOneWidget);
+    expect(find.text('清除'), findsNothing);
+    expect(tester.widget<Slider>(find.byType(Slider)).onChanged, isNull);
+  });
+
+  testWidgets('switches away from custom on the first selection',
+      (tester) async {
+    const background = CustomBackground(
+      imagePath: 'assets/images/icon.png',
+      opacity: 50,
+      background: Color(0xFFF8F8F8),
+      surface: Colors.white,
+      text: Color(0xFF171717),
+      accent: Color(0xFF3478D4),
+    );
+    final controller = StartupOnboardingController();
+    addTearDown(controller.dispose);
+    final repository = AcademicScheduleRepository(
+      apiClient: AcademicScheduleApiClient(
+        authService: _FakeAcademicAuthService(),
+        httpClient: MockClient((_) async => http.Response('{}', 200)),
+      ),
+    );
+    var selectedId = ShuYoThemes.customBackgroundId;
+    var followSystem = false;
+    await tester.pumpWidget(StatefulBuilder(
+      builder: (context, rebuild) {
+        final theme = followSystem
+            ? ShuYoThemes.byId(ShuYoThemes.defaultId)
+            : selectedId == ShuYoThemes.customBackgroundId
+                ? background.theme
+                : ShuYoThemes.byId(selectedId);
+        final activeBackground =
+            followSystem || selectedId != ShuYoThemes.customBackgroundId
+                ? null
+                : background;
+        return MaterialApp(
+          theme: theme.themeData(),
+          builder: (_, child) => CustomBackgroundFrame(
+            settings: activeBackground,
+            child: child!,
+          ),
+          home: ClientSettingsPage(
+            settingsService: ClientSettingsService(),
+            scheduleNotificationService:
+                AcademicScheduleNotificationService(repository: repository),
+            backendRepository: ClientBackendRepository(),
+            selectedThemeId: theme.id,
+            followSystemTheme: followSystem,
+            onThemeChanged: (id) async => rebuild(() {
+              selectedId = id;
+              followSystem = false;
+            }),
+            onFollowSystemThemeChanged: (enabled) async => rebuild(() {
+              followSystem = enabled;
+              if (enabled) selectedId = ShuYoThemes.defaultId;
+            }),
+            customBackground: background,
+            onCustomBackgroundChanged: (_) async {},
+            selectedStartupTab: AppTab.home,
+            onStartupTabChanged: (_) async {},
+            webVpnController: controller,
+          ),
+        );
+      },
+    ));
+    await tester.tap(find.text('主题切换'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('自定义主题'), 180);
+
+    await tester.ensureVisible(find.byType(Switch));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    expect(find.text('跟随系统'), findsOneWidget);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+    expect(
+      find.descendant(
+        of: find.widgetWithText(ListTile, '自定义主题'),
+        matching: find.byIcon(Icons.check),
+      ),
+      findsNothing,
+    );
+
+    await tester.scrollUntilVisible(find.text('自定义主题'), 180);
+    await tester.tap(find.text('自定义主题'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+    expect(find.text('不透明度'), findsOneWidget);
+
+    await tester.scrollUntilVisible(find.text('纸白'), -180);
+    await tester.tap(find.text('纸白'));
+    await tester.pumpAndSettle();
+    expect(find.text('跟随系统'), findsOneWidget);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+    expect(
+      find.descendant(
+        of: find.widgetWithText(ListTile, '纸白'),
+        matching: find.byIcon(Icons.check),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('不透明度'), findsNothing);
+  });
+
+  testWidgets('custom color picker supports square, hue, and hex input',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    CustomBackground? saved;
+    final background = CustomBackground(
+      imagePath: 'assets/images/icon.png',
+      opacity: 50,
+      background: const Color(0xFFF8F8F8),
+      surface: Colors.white,
+      text: const Color(0xFF171717),
+      accent: const Color(0xFF3478D4),
+    );
+    await _pumpSettings(
+      tester,
+      customBackground: background,
+      onCustomBackgroundChanged: (settings) async => saved = settings,
+    );
+    await tester.tap(find.text('主题切换'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('自定义主题'), 180);
+    await tester.tap(find.text('自定义主题'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('主题'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('主题'));
+    await tester.pumpAndSettle();
+
+    final square = find.byKey(const Key('theme-color-square'));
+    final hue = find.byKey(const Key('theme-hue-bar'));
+    expect(square, findsOneWidget);
+    expect(hue, findsOneWidget);
+    await tester.tapAt(tester.getTopLeft(square) + const Offset(100, 70));
+    await tester.tapAt(tester.getTopLeft(hue) + const Offset(100, 14));
+    await tester.enterText(find.byKey(const Key('theme-hex-field')), 'AA3366');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('确定'));
+    await tester.pumpAndSettle();
+    expect(saved?.accent, const Color(0xFFAA3366));
+
+    await tester.ensureVisible(find.text('文字'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('文字'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('theme-hex-field')), 'F8F8F8');
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('theme-hex-field')))
+          .controller
+          ?.text,
+      'F8F8F8',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('确定'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(saved?.text, background.background);
+    expect(find.text('文字与背景颜色过于接近'), findsNothing);
+  });
 
   testWidgets('settings hides logout entry when no account is active',
       (tester) async {
@@ -266,6 +549,9 @@ Future<void> _pumpSettings(
   StartupOnboardingController? webVpnController,
   AppTab selectedStartupTab = AppTab.home,
   Future<void> Function(AppTab)? onStartupTabChanged,
+  CustomBackground? customBackground,
+  Future<void> Function(String)? onThemeChanged,
+  Future<void> Function(CustomBackground)? onCustomBackgroundChanged,
 }) async {
   final controller = webVpnController ?? StartupOnboardingController();
   if (webVpnController == null) addTearDown(controller.dispose);
@@ -284,8 +570,10 @@ Future<void> _pumpSettings(
         backendRepository: ClientBackendRepository(),
         selectedThemeId: 'default',
         followSystemTheme: false,
-        onThemeChanged: (_) async {},
+        onThemeChanged: onThemeChanged ?? (_) async {},
         onFollowSystemThemeChanged: (_) async {},
+        customBackground: customBackground,
+        onCustomBackgroundChanged: onCustomBackgroundChanged,
         selectedStartupTab: selectedStartupTab,
         onStartupTabChanged: onStartupTabChanged ?? (_) async {},
         webVpnController: controller,

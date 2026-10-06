@@ -2,6 +2,8 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../theme/custom_background.dart';
+
 Route<T> shuyoRoute<T>({
   required WidgetBuilder builder,
   RouteSettings? settings,
@@ -18,7 +20,7 @@ Route<T> shuyoRoute<T>({
       transitionDuration: Duration.zero,
       reverseTransitionDuration: Duration.zero,
       pageBuilder: (context, animation, secondaryAnimation) {
-        return _ShuYoRouteSurface(child: builder(context));
+        return ShuYoRouteSurface(child: builder(context));
       },
     );
   }
@@ -27,7 +29,7 @@ Route<T> shuyoRoute<T>({
       animatePush: animatePush,
       settings: settings,
       fullscreenDialog: fullscreenDialog,
-      builder: (context) => _ShuYoRouteSurface(child: builder(context)),
+      builder: (context) => ShuYoRouteSurface(child: builder(context)),
     );
   }
   return PageRouteBuilder<T>(
@@ -38,7 +40,7 @@ Route<T> shuyoRoute<T>({
         animatePush ? const Duration(milliseconds: 240) : Duration.zero,
     reverseTransitionDuration: const Duration(milliseconds: 210),
     pageBuilder: (context, animation, secondaryAnimation) {
-      return _ShuYoRouteSurface(child: builder(context));
+      return ShuYoRouteSurface(child: builder(context));
     },
     transitionsBuilder: (context, animation, secondaryAnimation, child) {
       final begin = fullscreenDialog ? const Offset(0, 1) : const Offset(1, 0);
@@ -72,20 +74,22 @@ class _ShuYoCupertinoRoute<T> extends CupertinoPageRoute<T> {
   Duration get reverseTransitionDuration => super.transitionDuration;
 }
 
-class _ShuYoRouteSurface extends StatelessWidget {
-  const _ShuYoRouteSurface({required this.child});
+class ShuYoRouteSurface extends StatelessWidget {
+  const ShuYoRouteSurface({super.key, required this.child});
 
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
+    final customBackground = CustomBackgroundScope.maybeOf(context);
     // RenderFractionalTranslation, which backs SlideTransition, only shifts the
     // paint offset and creates no layer. Without a repaint boundary the whole
     // page is re-recorded on every frame of the transition; this boundary lets
     // the recorded layer be reused and only re-composited.
     return RepaintBoundary(
-      child: ColoredBox(
-        color: Theme.of(context).scaffoldBackgroundColor,
+      child: CustomBackgroundLayer(
+        settings: customBackground,
+        fallbackColor: Theme.of(context).scaffoldBackgroundColor,
         child: child,
       ),
     );

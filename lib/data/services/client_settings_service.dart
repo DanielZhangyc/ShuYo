@@ -1,6 +1,10 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/app_tab.dart';
+import '../../shared/theme/custom_background.dart';
 
 class ClientNotificationSettings {
   const ClientNotificationSettings({
@@ -46,6 +50,7 @@ class ClientSettingsService {
       'client.onboarding.startup.completed';
   static const themeIdKey = 'client.theme.id';
   static const followSystemThemeKey = 'client.theme.follow_system';
+  static const customBackgroundKey = 'client.theme.custom_background';
   static const startupTabKey = 'client.startup.tab';
 
   final Future<SharedPreferences> Function() _preferencesLoader;
@@ -106,6 +111,29 @@ class ClientSettingsService {
   Future<void> saveFollowSystemTheme(bool enabled) async {
     final prefs = await _preferencesLoader();
     await prefs.setBool(followSystemThemeKey, enabled);
+  }
+
+  Future<CustomBackground?> loadCustomBackground() async {
+    final prefs = await _preferencesLoader();
+    final raw = prefs.getString(customBackgroundKey);
+    if (raw == null) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return null;
+      final settings = CustomBackground.fromJson(decoded);
+      if (settings == null ||
+          (settings.hasPhoto && !await File(settings.imagePath).exists())) {
+        return null;
+      }
+      return settings;
+    } on Object {
+      return null;
+    }
+  }
+
+  Future<void> saveCustomBackground(CustomBackground settings) async {
+    final prefs = await _preferencesLoader();
+    await prefs.setString(customBackgroundKey, jsonEncode(settings.toJson()));
   }
 
   Future<AppTab> loadStartupTab() async {
