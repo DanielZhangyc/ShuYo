@@ -485,102 +485,108 @@ class _SearchControls extends StatelessWidget {
         border: Border(bottom: BorderSide(color: colors.border)),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        padding: const EdgeInsets.only(top: 8, bottom: 12),
         child: Column(
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    key: ValueKey('campus-$selectedCampus'),
-                    initialValue: selectedCampus,
-                    decoration: const InputDecoration(
-                      labelText: '校区',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    items: [
-                      for (final campus in options.campusNames)
-                        DropdownMenuItem(
-                          value: campus,
-                          child: Text(campus),
-                        ),
-                    ],
-                    onChanged: onCampusChanged,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: DropdownButtonFormField<int>(
-                    key: ValueKey(
-                      'building-$selectedCampus-${selectedBuilding?.id ?? 0}',
-                    ),
-                    initialValue: selectedBuilding?.id ?? 0,
-                    decoration: const InputDecoration(
-                      labelText: '教学楼',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    items: [
-                      const DropdownMenuItem(
-                        value: 0,
-                        child: Text('全部教学楼'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      key: ValueKey('campus-$selectedCampus'),
+                      initialValue: selectedCampus,
+                      decoration: const InputDecoration(
+                        labelText: '校区',
+                        border: OutlineInputBorder(),
+                        isDense: true,
                       ),
-                      for (final building in campusBuildings)
-                        DropdownMenuItem(
-                          value: building.id,
-                          child: Text(building.name),
-                        ),
-                    ],
-                    onChanged: (id) => onBuildingChanged(
-                      id == 0 ? null : _buildingById(campusBuildings, id),
+                      items: [
+                        for (final campus in options.campusNames)
+                          DropdownMenuItem(
+                            value: campus,
+                            child: Text(campus),
+                          ),
+                      ],
+                      onChanged: onCampusChanged,
                     ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: DropdownButtonFormField<int>(
+                      key: ValueKey(
+                        'building-$selectedCampus-${selectedBuilding?.id ?? 0}',
+                      ),
+                      initialValue: selectedBuilding?.id ?? 0,
+                      decoration: const InputDecoration(
+                        labelText: '教学楼',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: [
+                        const DropdownMenuItem(
+                          value: 0,
+                          child: Text('全部教学楼'),
+                        ),
+                        for (final building in campusBuildings)
+                          DropdownMenuItem(
+                            value: building.id,
+                            child: Text(building.name),
+                          ),
+                      ],
+                      onChanged: (id) => onBuildingChanged(
+                        id == 0 ? null : _buildingById(campusBuildings, id),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 10),
-            Row(
-              children: [
-                _DateButton(
-                  label: '今天',
-                  selected: _isSameDay(selectedDate, DateTime.now()),
-                  onTap: () => onDateChanged(DateTime.now()),
-                ),
-                const SizedBox(width: 8),
-                _DateButton(
-                  label: '明天',
-                  selected: _isSameDay(
-                    selectedDate,
-                    DateTime.now().add(const Duration(days: 1)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  _DateButton(
+                    label: '今天',
+                    selected: _isSameDay(selectedDate, DateTime.now()),
+                    onTap: () => onDateChanged(DateTime.now()),
                   ),
-                  onTap: () => onDateChanged(
-                    DateTime.now().add(const Duration(days: 1)),
+                  const SizedBox(width: 8),
+                  _DateButton(
+                    label: '明天',
+                    selected: _isSameDay(
+                      selectedDate,
+                      DateTime.now().add(const Duration(days: 1)),
+                    ),
+                    onTap: () => onDateChanged(
+                      DateTime.now().add(const Duration(days: 1)),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () async {
-                      final picked = await showDatePicker(
-                        context: context,
-                        initialDate: selectedDate,
-                        firstDate: DateTime.now().subtract(
-                          const Duration(days: 30),
-                        ),
-                        lastDate: DateTime.now().add(
-                          const Duration(days: 180),
-                        ),
-                      );
-                      if (picked != null) {
-                        onDateChanged(picked);
-                      }
-                    },
-                    icon: const Icon(Icons.calendar_month_outlined, size: 18),
-                    label: Text(_dateLabel(selectedDate)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: selectedDate,
+                          firstDate: DateTime.now().subtract(
+                            const Duration(days: 30),
+                          ),
+                          lastDate: DateTime.now().add(
+                            const Duration(days: 180),
+                          ),
+                        );
+                        if (picked != null) {
+                          onDateChanged(picked);
+                        }
+                      },
+                      icon: const Icon(Icons.calendar_month_outlined, size: 18),
+                      label: Text(_dateLabel(selectedDate)),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: 10),
             _SectionRangeSelector(
@@ -591,8 +597,11 @@ class _SearchControls extends StatelessWidget {
               onNext: onNextRange,
             ),
             const SizedBox(height: 6),
-            _ClassroomSearchField(
-              onChanged: onKeywordChanged,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _ClassroomSearchField(
+                onChanged: onKeywordChanged,
+              ),
             ),
           ],
         ),
@@ -693,11 +702,13 @@ class _SectionRangeSelector extends StatelessWidget {
           range.start == selectedRange?.start &&
           range.end == selectedRange?.end,
     );
-    return Row(
+    final canGoPrevious = selectedIndex > 0;
+    final canGoNext = selectedIndex >= 0 && selectedIndex < ranges.length - 1;
+    final selector = Row(
       children: [
         IconButton(
           tooltip: '上一节',
-          onPressed: selectedIndex > 0 ? onPrevious : null,
+          onPressed: canGoPrevious ? onPrevious : null,
           icon: const Icon(Icons.chevron_left),
           visualDensity: VisualDensity.compact,
         ),
@@ -710,18 +721,49 @@ class _SectionRangeSelector extends StatelessWidget {
               final selectedWidth = (constraints.maxWidth - compactTotal)
                   .clamp(72.0, 104.0)
                   .toDouble();
-              return Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              final sideWidth =
+                  ((constraints.maxWidth - selectedWidth - compactTotal) / 2)
+                      .clamp(0.0, double.infinity);
+              return Stack(
                 children: [
-                  for (var index = 0; index < ranges.length; index++) ...[
-                    if (index > 0) const SizedBox(width: gap),
-                    _AnimatedRangeButton(
-                      range: ranges[index],
-                      selected: index == selectedIndex,
-                      selectedWidth: selectedWidth,
-                      onTap: () => onChanged(ranges[index]),
+                  // Fill only the blank space beside the range buttons.
+                  Positioned.fill(
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: sideWidth,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            excludeFromSemantics: true,
+                            onTap: canGoPrevious ? onPrevious : null,
+                          ),
+                        ),
+                        const Spacer(),
+                        SizedBox(
+                          width: sideWidth,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            excludeFromSemantics: true,
+                            onTap: canGoNext ? onNext : null,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      for (var index = 0; index < ranges.length; index++) ...[
+                        if (index > 0) const SizedBox(width: gap),
+                        _AnimatedRangeButton(
+                          range: ranges[index],
+                          selected: index == selectedIndex,
+                          selectedWidth: selectedWidth,
+                          onTap: () => onChanged(ranges[index]),
+                        ),
+                      ],
+                    ],
+                  ),
                 ],
               );
             },
@@ -729,11 +771,40 @@ class _SectionRangeSelector extends StatelessWidget {
         ),
         IconButton(
           tooltip: '下一节',
-          onPressed: selectedIndex >= 0 && selectedIndex < ranges.length - 1
-              ? onNext
-              : null,
+          onPressed: canGoNext ? onNext : null,
           icon: const Icon(Icons.chevron_right),
           visualDensity: VisualDensity.compact,
+        ),
+      ],
+    );
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  excludeFromSemantics: true,
+                  onTap: canGoPrevious ? onPrevious : null,
+                ),
+              ),
+              const Spacer(),
+              SizedBox(
+                width: 16,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  excludeFromSemantics: true,
+                  onTap: canGoNext ? onNext : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: selector,
         ),
       ],
     );
