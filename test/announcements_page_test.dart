@@ -1,6 +1,10 @@
+import 'dart:async';
+
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuyo/data/models/announcement.dart';
+import 'package:shuyo/data/models/announcement_source.dart';
 import 'package:shuyo/data/repositories/announcement_repository.dart';
 import 'package:shuyo/features/home/announcements_page.dart';
 import 'package:shuyo/shared/theme/custom_background.dart';
@@ -18,22 +22,51 @@ class _FakeAnnouncementRepository extends AnnouncementRepository {
   _FakeAnnouncementRepository({
     required this.items,
     required this.details,
+    this.previewFutures = const {},
   });
 
   final List<AnnouncementListItem> items;
   final Map<String, AnnouncementDetail> details;
+  final Map<String, Future<String?>> previewFutures;
   int detailRequestCount = 0;
+  final previewRequests = <String>[];
+  AnnouncementSource currentDefault = AnnouncementSource.official;
+  final requestedSources = <String>[];
 
   @override
   Future<List<AnnouncementListItem>> fetchAnnouncements({
+    AnnouncementSource? source,
     bool forceRefresh = false,
-  }) async =>
-      items;
+  }) async {
+    requestedSources.add((source ?? currentDefault).id);
+    return items;
+  }
+
+  @override
+  Future<AnnouncementSource> defaultSource() async => currentDefault;
+
+  @override
+  Future<void> setDefaultSource(AnnouncementSource source) async {
+    currentDefault = source;
+  }
 
   @override
   Future<AnnouncementDetail> fetchDetail(AnnouncementListItem item) async {
     detailRequestCount++;
     return details[item.title]!;
+  }
+
+  @override
+  Future<String?> loadPreview(AnnouncementListItem item) async {
+    previewRequests.add(item.url);
+    final pending = previewFutures[item.url];
+    if (pending != null) return pending;
+    final blocks =
+        details[item.title]?.blocks ?? const <AnnouncementContentBlock>[];
+    for (final block in blocks) {
+      if (block.isText) return block.value;
+    }
+    return null;
   }
 }
 
@@ -64,6 +97,173 @@ Future<void> _openDetail(
 }
 
 void main() {
+  testWidgets('source switch is temporary until starred as default',
+      (tester) async {
+    final repository = _repositoryWith();
+    await tester.pumpWidget(
+      MaterialApp(home: AnnouncementsPage(repository: repository)),
+    );
+    await tester.pumpAndSettle();
+    expect(repository.requestedSources, ['shu']);
+
+    await tester.tap(find.byTooltip('选择公告来源'));
+    await tester.pumpAndSettle();
+    expect(find.text('公告来源'), findsOneWidget);
+    expect(
+        tester.getTopLeft(find.text('公告来源')).dx,
+        greaterThan(
+            tester.view.physicalSize.width / tester.view.devicePixelRatio / 2));
+    expect(find.byType(ModalBarrier), findsWidgets);
+    expect(find.byIcon(Icons.star), findsOneWidget);
+    expect(find.textContaining('设为默认'), findsNothing);
+    await tester.tap(find.byTooltip('将本科生院设为默认'));
+    await tester.pumpAndSettle();
+    expect(repository.currentDefault.id, 'bksy');
+    expect(repository.requestedSources, ['shu']);
+    expect(find.text('公告来源'), findsOneWidget);
+    expect(find.byIcon(Icons.star), findsOneWidget);
+    expect(find.text(_listTitle), findsOneWidget);
+
+    await tester.tap(find.text('本科生院'));
+    await tester.pumpAndSettle();
+    expect(repository.requestedSources.last, 'bksy');
+
+    await tester.pumpWidget(
+      MaterialApp(home: AnnouncementsPage(repository: repository)),
+    );
+    await tester.pumpAndSettle();
+    expect(repository.requestedSources.last, 'bksy');
+  });
+
+  testWidgets('previews for later rows start after scrolling', (tester) async {
+    final items = List.generate(
+      30,
+      (index) => AnnouncementListItem(
+        title: '公告 $index',
+        url: 'https://bksy.shu.edu.cn/info/$index.htm',
+        sourceId: 'bksy',
+      ),
+    );
+    final repository =
+        _FakeAnnouncementRepository(items: items, details: const {});
+    await tester.pumpWidget(
+      MaterialApp(home: AnnouncementsPage(repository: repository)),
+    );
+    await tester.pumpAndSettle();
+    final initiallyRequested = repository.previewRequests.length;
+    expect(initiallyRequested, greaterThan(0));
+    expect(initiallyRequested, lessThan(items.length));
+
+    await tester.drag(find.byType(ListView).first, const Offset(0, -550));
+    await tester.pumpAndSettle();
+    expect(repository.previewRequests.length, greaterThan(initiallyRequested));
+    expect(repository.previewRequests.length, lessThan(items.length));
+  });
+
+  testWidgets('first screen waits for previews before showing any titles',
+      (tester) async {
+    final pending = Completer<String?>();
+    const item = AnnouncementListItem(
+      title: '等待正文的公告',
+      url: 'https://bksy.shu.edu.cn/info/wait.htm',
+      sourceId: 'bksy',
+    );
+    final repository = _FakeAnnouncementRepository(
+      items: const [item],
+      details: const {},
+      previewFutures: {item.url: pending.future},
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: AnnouncementsPage(repository: repository)),
+    );
+    await tester.pump();
+    expect(find.text(item.title), findsNothing);
+    expect(repository.previewRequests, [item.url]);
+
+    pending.complete('完整正文摘要');
+    await tester.pumpAndSettle();
+    expect(find.text(item.title), findsOneWidget);
+    expect(find.text('完整正文摘要'), findsOneWidget);
+    expect(find.byType(SlideTransition), findsWidgets);
+  });
+
+  testWidgets('scrolled-to rows wait for their preview before sliding in',
+      (tester) async {
+    final items = List.generate(
+      20,
+      (index) => AnnouncementListItem(
+        title: '公告 $index',
+        url: 'https://bksy.shu.edu.cn/info/$index.htm',
+        sourceId: 'bksy',
+      ),
+    );
+    final pending = Completer<String?>();
+    final repository = _FakeAnnouncementRepository(
+      items: items,
+      details: const {},
+      previewFutures: {items[10].url: pending.future},
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: AnnouncementsPage(repository: repository)),
+    );
+    await tester.pumpAndSettle();
+    expect(repository.previewRequests, isNot(contains(items[10].url)));
+
+    await tester.scrollUntilVisible(
+      find.byKey(ValueKey(items[10].url)),
+      350,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pump();
+    expect(repository.previewRequests, contains(items[10].url));
+    expect(find.text(items[10].title), findsNothing);
+
+    pending.complete('滚动后才加载的摘要');
+    await tester.pumpAndSettle();
+    expect(find.text(items[10].title), findsOneWidget);
+    expect(find.text('滚动后才加载的摘要'), findsOneWidget);
+  });
+
+  testWidgets('share button copies the article URL', (tester) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String?;
+        }
+        return null;
+      },
+    );
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null));
+    final repository = _repositoryWith();
+    await tester.pumpWidget(MaterialApp(
+      home: AnnouncementDetailPage(repository: repository, item: _listItem),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('复制公告链接'));
+    await tester.pump();
+    expect(copied, _listItem.url);
+    expect(find.text('公告链接已复制'), findsOneWidget);
+  });
+
+  testWidgets('opening the original page requires confirmation',
+      (tester) async {
+    final repository = _repositoryWith();
+    await tester.pumpWidget(MaterialApp(
+      home: AnnouncementDetailPage(repository: repository, item: _listItem),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('查看原文'));
+    await tester.pumpAndSettle();
+    expect(find.text('在浏览器中打开？'), findsOneWidget);
+    expect(find.text('打开浏览器'), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(find.text('在浏览器中打开？'), findsNothing);
+  });
+
   testWidgets('announcement separators remain in presets and hide in custom',
       (tester) async {
     final repository = _FakeAnnouncementRepository(
@@ -112,11 +312,15 @@ void main() {
     expect(repository.detailRequestCount, 1);
     await tester.pump(const Duration(milliseconds: 80));
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    expect(find.text(_detailBody), findsNothing);
+    final detailText = find.descendant(
+      of: find.byType(AnnouncementDetailPage),
+      matching: find.text(_detailBody),
+    );
+    expect(detailText, findsNothing);
 
     await tester.pumpAndSettle();
     expect(find.byType(CircularProgressIndicator), findsNothing);
-    expect(find.text(_detailBody), findsOneWidget);
+    expect(detailText, findsOneWidget);
   });
 
   testWidgets('loading state can reuse its layer during the transition',
@@ -161,6 +365,23 @@ void main() {
     expect(decodeWidth, lessThanOrEqualTo(displayPixels.round()));
     expect(decodeWidth, greaterThan((displayPixels * 0.8).round()));
     expect(image.frameBuilder, isNotNull);
+  });
+
+  testWidgets('detail tables remain readable inside the app', (tester) async {
+    final repository = _repositoryWith(
+      blocks: const [
+        AnnouncementContentBlock.text('评审结果'),
+        AnnouncementContentBlock.table([
+          ['姓名', '学院'],
+          ['张同学', '理学院'],
+        ]),
+      ],
+    );
+    await _openDetail(tester, repository);
+    await tester.pumpAndSettle();
+    expect(find.text('评审结果'), findsOneWidget);
+    expect(find.text('张同学'), findsOneWidget);
+    expect(find.byType(Table), findsOneWidget);
   });
 
   testWidgets('detail images reserve height before they are decoded',

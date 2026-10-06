@@ -668,10 +668,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (_loadingAnnouncementSummary) return;
     _loadingAnnouncementSummary = true;
     try {
-      final items = await _announcementRepository.fetchAnnouncements();
+      await _announcementRepository.fetchAnnouncements();
       if (mounted) {
-        setState(() => _announcementSummaryText =
-            items.isEmpty ? '点击查看通知公告' : items.first.title);
+        final summary = await _announcementRepository.homeSummary();
+        if (mounted) setState(() => _announcementSummaryText = summary.text);
       }
     } on Object {
       if (mounted && _announcementSummaryText == '正在读取通知公告...') {
@@ -771,10 +771,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _openAnnouncements() async {
     await Navigator.of(context).push<void>(
       shuyoRoute(
-        builder: (_) => AnnouncementsPage(repository: _announcementRepository),
+        builder: (_) => AnnouncementsPage(
+          repository: _announcementRepository,
+          isDemo: widget.isDemo,
+        ),
       ),
     );
-    if (mounted) unawaited(_refreshAnnouncementSummaryQuietly());
+    if (mounted) {
+      unawaited(_loadAnnouncementSummaryFromCache());
+      unawaited(_refreshAnnouncementSummaryQuietly());
+    }
   }
 
   Future<void> _openEmptyClassroom() async {

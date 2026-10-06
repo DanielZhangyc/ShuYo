@@ -25,3 +25,5 @@ ios/.symlinks/
 /.plan
 # Widget Preview related
 .widget_preview/
+
+/docs

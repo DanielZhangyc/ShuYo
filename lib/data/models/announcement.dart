@@ -1,32 +1,56 @@
 import 'common.dart';
+import 'announcement_source.dart';
 
 enum AnnouncementContentType {
   text,
   image,
+  link,
+  table,
 }
 
 class AnnouncementContentBlock {
   const AnnouncementContentBlock.text(this.value)
       : type = AnnouncementContentType.text,
-        alt = '';
+        alt = '',
+        label = '',
+        rows = const [];
 
   const AnnouncementContentBlock.image(
     this.value, {
     this.alt = '',
-  }) : type = AnnouncementContentType.image;
+  })  : type = AnnouncementContentType.image,
+        label = '',
+        rows = const [];
+
+  const AnnouncementContentBlock.link(this.value, {required this.label})
+      : type = AnnouncementContentType.link,
+        alt = '',
+        rows = const [];
+
+  const AnnouncementContentBlock.table(this.rows)
+      : type = AnnouncementContentType.table,
+        value = '',
+        alt = '',
+        label = '';
 
   final AnnouncementContentType type;
   final String value;
   final String alt;
+  final String label;
+  final List<List<String>> rows;
 
   bool get isText => type == AnnouncementContentType.text;
   bool get isImage => type == AnnouncementContentType.image;
+  bool get isLink => type == AnnouncementContentType.link;
+  bool get isTable => type == AnnouncementContentType.table;
 
   JsonMap toJson() {
     return {
       'type': type.name,
       'value': value,
       'alt': alt,
+      'label': label,
+      'rows': rows,
     };
   }
 
@@ -39,6 +63,19 @@ class AnnouncementContentBlock {
         alt: stringValue(json['alt']),
       );
     }
+    if (type == AnnouncementContentType.link.name) {
+      return AnnouncementContentBlock.link(
+        value,
+        label: stringValue(json['label']),
+      );
+    }
+    if (type == AnnouncementContentType.table.name) {
+      final rows = (json['rows'] as List? ?? const [])
+          .whereType<List>()
+          .map((row) => row.map((cell) => cell.toString()).toList())
+          .toList();
+      return AnnouncementContentBlock.table(rows);
+    }
     return AnnouncementContentBlock.text(value);
   }
 }
@@ -50,6 +87,7 @@ class AnnouncementListItem {
     this.summary = '',
     this.dateText = '',
     this.publishedAt,
+    this.sourceId = AnnouncementSource.officialId,
   });
 
   final String title;
@@ -57,6 +95,7 @@ class AnnouncementListItem {
   final String summary;
   final String dateText;
   final DateTime? publishedAt;
+  final String sourceId;
 
   JsonMap toJson() {
     return {
@@ -65,6 +104,7 @@ class AnnouncementListItem {
       'summary': summary,
       'dateText': dateText,
       'publishedAt': publishedAt?.toIso8601String(),
+      'sourceId': sourceId,
     };
   }
 
@@ -75,6 +115,9 @@ class AnnouncementListItem {
       summary: stringValue(json['summary']),
       dateText: stringValue(json['dateText']),
       publishedAt: dateValue(json['publishedAt']),
+      sourceId: stringValue(json['sourceId']).isEmpty
+          ? AnnouncementSource.officialId
+          : stringValue(json['sourceId']),
     );
   }
 }

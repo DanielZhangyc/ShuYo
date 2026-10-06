@@ -2,6 +2,7 @@ import '../models/academic_schedule.dart';
 import '../models/academic_progress.dart';
 import '../models/academic_ranking.dart';
 import '../models/announcement.dart';
+import '../models/announcement_source.dart';
 import '../models/classroom.dart';
 import '../repositories/academic_schedule_repository.dart';
 import '../repositories/academic_progress_repository.dart';
@@ -161,17 +162,39 @@ class DemoAnnouncementRepository extends AnnouncementRepository {
   final Map<String, AnnouncementDetail> details;
 
   @override
-  Future<List<AnnouncementListItem>> loadCachedAnnouncements() async => items;
+  Future<List<AnnouncementListItem>> loadCachedAnnouncements({
+    AnnouncementSource? source,
+  }) async =>
+      items;
+
+  @override
+  Future<AnnouncementSource> defaultSource() async =>
+      AnnouncementSource.official;
+
+  @override
+  Future<void> setDefaultSource(AnnouncementSource source) async {}
 
   @override
   Future<List<AnnouncementListItem>> fetchAnnouncements(
-          {bool forceRefresh = false}) async =>
+          {AnnouncementSource? source, bool forceRefresh = false}) async =>
       items;
 
   @override
   Future<AnnouncementDetail> fetchDetail(AnnouncementListItem item) async =>
       details[item.title] ??
       AnnouncementDetail(title: item.title, url: item.url, blocks: const []);
+
+  @override
+  Future<String?> loadPreview(AnnouncementListItem item) async {
+    if (item.summary.isNotEmpty) return item.summary;
+    for (final block
+        in details[item.title]?.blocks ?? const <AnnouncementContentBlock>[]) {
+      if (block.isText && block.value.trim().isNotEmpty) {
+        return block.value.trim();
+      }
+    }
+    return null;
+  }
 
   @override
   Future<AnnouncementHomeSummary> homeSummary() async => items.isEmpty
