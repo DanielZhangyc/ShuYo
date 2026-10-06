@@ -49,7 +49,6 @@ class AnnouncementsPage extends StatefulWidget {
 class _AnnouncementsPageState extends State<AnnouncementsPage> {
   Future<_LoadedAnnouncementList>? _future;
   AnnouncementSource? _source;
-  AnnouncementSource? _defaultSource;
 
   @override
   void initState() {
@@ -67,7 +66,6 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
     if (!mounted) return;
     setState(() {
       _source = source;
-      _defaultSource = source;
       _future = _loadList(source);
     });
   }
@@ -183,7 +181,13 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
   }
 
   Future<void> _chooseSource() async {
-    var savingDefault = false;
+    Set<String> favorites;
+    try {
+      favorites = await widget.repository.favoriteSourceIds();
+    } on Object {
+      favorites = <String>{};
+    }
+    if (!mounted || _source == null) return;
     final choice = await showGeneralDialog<AnnouncementSource>(
       context: context,
       barrierDismissible: true,
@@ -202,79 +206,20 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
           child: FadeTransition(opacity: animation, child: child),
         );
       },
-      pageBuilder: (dialogContext, animation, secondaryAnimation) =>
-          StatefulBuilder(
-              builder: (menuContext, menuSetState) => SafeArea(
-                    child: Align(
-                      alignment: Alignment.topRight,
-                      child: Padding(
-                        padding: const EdgeInsets.only(
-                            top: kToolbarHeight + 8, right: 12),
-                        child: Material(
-                          elevation: 12,
-                          borderRadius: BorderRadius.circular(16),
-                          clipBehavior: Clip.antiAlias,
-                          color: Theme.of(menuContext).colorScheme.surface,
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: 320,
-                              maxHeight:
-                                  MediaQuery.sizeOf(menuContext).height * 0.72,
-                            ),
-                            child: ListView(
-                              shrinkWrap: true,
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              children: [
-                                const ListTile(title: Text('公告来源')),
-                                for (final source in AnnouncementSource.all)
-                                  ListTile(
-                                    title: Text(source.name),
-                                    selected: _source == source,
-                                    onTap: () =>
-                                        Navigator.of(menuContext).pop(source),
-                                    trailing: IconButton(
-                                      tooltip: '将${source.name}设为默认',
-                                      icon: Icon(_defaultSource == source
-                                          ? Icons.star
-                                          : Icons.star_border),
-                                      onPressed: savingDefault
-                                          ? null
-                                          : () async {
-                                              menuSetState(
-                                                  () => savingDefault = true);
-                                              try {
-                                                await widget.repository
-                                                    .setDefaultSource(source);
-                                                if (mounted) {
-                                                  setState(() =>
-                                                      _defaultSource = source);
-                                                }
-                                              } on Object {
-                                                if (mounted) {
-                                                  ScaffoldMessenger.of(context)
-                                                      .showSnackBar(
-                                                    const SnackBar(
-                                                      content:
-                                                          Text('默认来源保存失败，请重试'),
-                                                    ),
-                                                  );
-                                                }
-                                              } finally {
-                                                if (menuContext.mounted) {
-                                                  menuSetState(() =>
-                                                      savingDefault = false);
-                                                }
-                                              }
-                                            },
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  )),
+      pageBuilder: (menuContext, animation, secondaryAnimation) => SafeArea(
+        child: Align(
+          alignment: Alignment.topRight,
+          child: Padding(
+            padding: const EdgeInsets.only(top: kToolbarHeight + 8, right: 12),
+            child: _AnnouncementSourceMenu(
+              selected: _source!,
+              initialFavorites: favorites,
+              onToggleFavorite: widget.repository.toggleFavoriteSource,
+              onSelect: (source) => Navigator.of(menuContext).pop(source),
+            ),
+          ),
+        ),
+      ),
     );
     if (!mounted || choice == null) return;
     setState(() {
@@ -317,6 +262,119 @@ class _LoadedAnnouncementList {
 
   final List<AnnouncementListItem> items;
   final Map<String, String?> initialPreviews;
+}
+
+class _AnnouncementSourceMenu extends StatefulWidget {
+  const _AnnouncementSourceMenu({
+    required this.selected,
+    required this.initialFavorites,
+    required this.onToggleFavorite,
+    required this.onSelect,
+  });
+
+  final AnnouncementSource selected;
+  final Set<String> initialFavorites;
+  final Future<Set<String>> Function(AnnouncementSource) onToggleFavorite;
+  final ValueChanged<AnnouncementSource> onSelect;
+
+  @override
+  State<_AnnouncementSourceMenu> createState() =>
+      _AnnouncementSourceMenuState();
+}
+
+class _AnnouncementSourceMenuState extends State<_AnnouncementSourceMenu> {
+  late Set<String> _favorites = {...widget.initialFavorites};
+  bool _favoritesExpanded = true;
+  late bool _campusExpanded =
+      widget.selected.group == AnnouncementSourceGroup.campus;
+  late bool _collegeExpanded =
+      widget.selected.group == AnnouncementSourceGroup.college;
+  bool _saving = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final favoriteSources = AnnouncementSource.all
+        .where((source) => _favorites.contains(source.id))
+        .toList();
+    final campusSources =
+        AnnouncementSource.inGroup(AnnouncementSourceGroup.campus);
+    final collegeSources =
+        AnnouncementSource.inGroup(AnnouncementSourceGroup.college);
+    return Material(
+      elevation: 12,
+      borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
+      color: Theme.of(context).colorScheme.surface,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 320,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.72,
+        ),
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          children: [
+            _sectionHeader('收藏', _favoritesExpanded,
+                () => setState(() => _favoritesExpanded = !_favoritesExpanded)),
+            if (_favoritesExpanded)
+              if (favoriteSources.isEmpty)
+                const ListTile(title: Text('暂无收藏'))
+              else
+                for (final source in favoriteSources) _sourceRow(source),
+            _sectionHeader('校级与公共服务', _campusExpanded,
+                () => setState(() => _campusExpanded = !_campusExpanded)),
+            if (_campusExpanded)
+              for (final source in campusSources) _sourceRow(source),
+            _sectionHeader('学院与培养单位', _collegeExpanded,
+                () => setState(() => _collegeExpanded = !_collegeExpanded)),
+            if (_collegeExpanded)
+              for (final source in collegeSources) _sourceRow(source),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionHeader(String title, bool expanded, VoidCallback onTap) {
+    return ListTile(
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+      trailing: Icon(expanded ? Icons.expand_less : Icons.expand_more),
+      onTap: onTap,
+    );
+  }
+
+  Widget _sourceRow(AnnouncementSource source) {
+    final favorite = _favorites.contains(source.id);
+    return ListTile(
+      title: Text(source.name),
+      selected: widget.selected == source,
+      onTap: () => widget.onSelect(source),
+      trailing: IconButton(
+        tooltip: favorite ? '取消收藏${source.name}' : '收藏${source.name}',
+        icon: Icon(
+          favorite ? Icons.star : Icons.star_border,
+          color: favorite ? Theme.of(context).colorScheme.primary : null,
+        ),
+        onPressed: _saving ? null : () => _toggleFavorite(source),
+      ),
+    );
+  }
+
+  Future<void> _toggleFavorite(AnnouncementSource source) async {
+    setState(() => _saving = true);
+    try {
+      final favorites = await widget.onToggleFavorite(source);
+      if (mounted) setState(() => _favorites = favorites);
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('收藏保存失败，请重试')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 }
 
 class AnnouncementDetailPage extends StatefulWidget {
@@ -621,8 +679,8 @@ class _AnnouncementDetailPageState extends State<AnnouncementDetailPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('在浏览器中打开？'),
-        content: const Text('将跳转到浏览器查看这条公告的原网页。'),
+        title: const Text('跳转浏览器'),
+        content: const Text('将在浏览器中打开公告'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -630,7 +688,7 @@ class _AnnouncementDetailPageState extends State<AnnouncementDetailPage> {
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('打开浏览器'),
+            child: const Text('确认'),
           ),
         ],
       ),
@@ -818,6 +876,10 @@ class _AnnouncementTileState extends State<_AnnouncementTile>
   Widget _tile(String? preview) {
     final item = widget.item;
     final colors = context.shuyoColors;
+    final metadata = [
+      if (item.column.isNotEmpty) item.column,
+      if (item.dateText.isNotEmpty) item.dateText,
+    ].join(' · ');
     return InkWell(
       onTap: widget.onTap,
       child: ConstrainedBox(
@@ -856,11 +918,11 @@ class _AnnouncementTileState extends State<_AnnouncementTile>
                           ),
                         ),
                       ),
-                    if (item.dateText.isNotEmpty)
+                    if (metadata.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
-                          item.dateText,
+                          metadata,
                           style: TextStyle(
                             color: colors.textMuted,
                             fontSize: 12.5,

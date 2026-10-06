@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuyo/core/app_tab.dart';
+import 'package:shuyo/data/models/announcement_source.dart';
 import 'package:shuyo/data/repositories/academic_schedule_repository.dart';
 import 'package:shuyo/data/repositories/client_backend_repository.dart';
 import 'package:shuyo/data/services/academic_schedule_notification_service.dart';
@@ -341,6 +342,26 @@ void main() {
     expect(find.text('通知设置'), findsNothing);
     expect(find.text('课表提醒'), findsNothing);
     expect(find.text('关于ShuYo'), findsOneWidget);
+  });
+
+  testWidgets('default announcement setting saves one college source',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await _pumpSettings(tester);
+    expect(tester.getTopLeft(find.text('主题切换')).dy,
+        lessThan(tester.getTopLeft(find.text('默认公告')).dy));
+    expect(tester.getTopLeft(find.text('默认公告')).dy,
+        lessThan(tester.getTopLeft(find.text('启动显示')).dy));
+    await tester.tap(find.text('默认公告'));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.radio_button_checked), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('材料科学与工程学院'), 200);
+    await tester.tap(find.text('材料科学与工程学院'));
+    await tester.pumpAndSettle();
+    expect((await ClientSettingsService().loadDefaultAnnouncementSource()).id,
+        'mat');
+    expect(find.byIcon(Icons.radio_button_checked), findsOneWidget);
+    expect(AnnouncementSource.byId('mat').name, '材料科学与工程学院');
   });
 
   testWidgets('WebVPN settings shares the account manager state',

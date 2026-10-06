@@ -88,6 +88,7 @@ class AnnouncementListItem {
     this.dateText = '',
     this.publishedAt,
     this.sourceId = AnnouncementSource.officialId,
+    this.column = '',
   });
 
   final String title;
@@ -96,6 +97,7 @@ class AnnouncementListItem {
   final String dateText;
   final DateTime? publishedAt;
   final String sourceId;
+  final String column;
 
   JsonMap toJson() {
     return {
@@ -105,6 +107,7 @@ class AnnouncementListItem {
       'dateText': dateText,
       'publishedAt': publishedAt?.toIso8601String(),
       'sourceId': sourceId,
+      'column': column,
     };
   }
 
@@ -118,6 +121,7 @@ class AnnouncementListItem {
       sourceId: stringValue(json['sourceId']).isEmpty
           ? AnnouncementSource.officialId
           : stringValue(json['sourceId']),
+      column: stringValue(json['column']),
     );
   }
 }

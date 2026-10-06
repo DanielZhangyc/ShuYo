@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/app_tab.dart';
+import '../models/announcement_source.dart';
 import '../../shared/theme/custom_background.dart';
 
 class ClientNotificationSettings {
@@ -52,8 +53,21 @@ class ClientSettingsService {
   static const followSystemThemeKey = 'client.theme.follow_system';
   static const customBackgroundKey = 'client.theme.custom_background';
   static const startupTabKey = 'client.startup.tab';
+  static const defaultAnnouncementSourceKey = 'announcements.defaultSource';
 
   final Future<SharedPreferences> Function() _preferencesLoader;
+
+  Future<AnnouncementSource> loadDefaultAnnouncementSource() async {
+    final prefs = await _preferencesLoader();
+    return AnnouncementSource.byId(
+      prefs.getString(defaultAnnouncementSourceKey),
+    );
+  }
+
+  Future<void> saveDefaultAnnouncementSource(AnnouncementSource source) async {
+    final prefs = await _preferencesLoader();
+    await prefs.setString(defaultAnnouncementSourceKey, source.id);
+  }
 
   Future<ClientNotificationSettings> loadNotificationSettings() async {
     final prefs = await _preferencesLoader();

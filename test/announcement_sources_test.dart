@@ -34,7 +34,8 @@ void main() {
           '图书馆通知</a><span>2026-10-06</span></li></ul></div>',
     };
 
-    for (final source in AnnouncementSource.all) {
+    for (final source
+        in AnnouncementSource.inGroup(AnnouncementSourceGroup.campus)) {
       final items = AnnouncementApiClient.parseAnnouncementList(
         samples[source.id]!,
         baseUrl: source.listUrl,
@@ -46,6 +47,191 @@ void main() {
       expect(items.single.publishedAt, DateTime(2026, 10, 6));
       expect(items.single.sourceId, source.id);
     }
+  });
+
+  test('college catalog and additional HTML layouts parse correctly', () {
+    expect(AnnouncementSource.inGroup(AnnouncementSourceGroup.campus),
+        hasLength(7));
+    expect(AnnouncementSource.inGroup(AnnouncementSourceGroup.college),
+        hasLength(33));
+    expect(
+        AnnouncementSource.all.any((source) => source.id == 'modart'), isFalse);
+    expect(
+        AnnouncementSource.all.any((source) => source.id == 'shvfs'), isFalse);
+    final samples = <String, String>{
+      'cie': '<ul class="listPage"><li><a href="/info/1.htm">学院通知'
+          '</a><span>2026/10/06</span></li></ul>',
+      'cla': '<ul class="sj-list-ul"><li id="line_u1_0">'
+          '<a href="/info/1.htm">文学院通知<p>2026-10-06</p></a></li></ul>',
+      'ece': '<ul class="rightList"><li><a href="/info/1.htm">'
+          '环化学院通知<span>2026-10-06</span></a></li></ul>',
+      'mat': '<ul class="rightList"><li><a href="/info/1.htm">'
+          '材料学院通知<span>2026-10-06</span></a></li></ul>',
+      'mba': '<ul class="news-list"><li class="news-item" '
+          "onclick=\"window.open('/info/1.htm','_self')\">"
+          '<div class="news-title">MBA通知</div><div class="date-box">'
+          '<span class="date-day">06</span><span class="date-ym">2026-10'
+          '</span></div></li></ul>',
+      'scicol': '<li id="line_u1_0"><a href="/info/1.htm">'
+          '理学院通知<i>2026-10-06</i></a></li>',
+      'smes': '<li id="line_u1_0"><a href="/info/1.htm">'
+          '力工学院通知<span>2026-10-06</span></a></li>',
+      'sjc': '<div class="jjyRight fr"><li class="clearfix">'
+          '<a href="/info/1.htm">新传学院通知</a>'
+          '<span class="fr">2026-10-06</span></li></div>',
+    };
+    for (final entry in samples.entries) {
+      final source = AnnouncementSource.byId(entry.key);
+      final items = AnnouncementApiClient.parseAnnouncementList(
+        entry.value,
+        baseUrl: source.listUrl,
+        source: source,
+      );
+      expect(items, hasLength(1), reason: entry.key);
+      expect(items.single.publishedAt, DateTime(2026, 10, 6));
+      expect(items.single.title, isNot(contains('2026-10-06')));
+    }
+  });
+
+  test('new school list formats and two computer columns parse', () {
+    const addedIds = <String>{
+      'cs',
+      'ai',
+      'medicine',
+      'music',
+      'safa',
+      'cce',
+      'zhgy',
+      'sfa',
+      'mkszyxy',
+      'law',
+      'schim',
+      'soe',
+      'silc',
+      'auto',
+      'bio',
+      'ulisboas',
+      'utseus',
+    };
+    expect(addedIds, hasLength(17));
+    for (final id in addedIds) {
+      expect(
+          AnnouncementSource.byId(id).group, AnnouncementSourceGroup.college);
+    }
+    final samples = <String, String>{
+      'cs': '<div class="tzgg"><li><a href="/info/1.htm">'
+          '<div class="tz-d"><b>06</b><span>2026-10</span></div>'
+          '<div class="tz-tx"><h3>重要通知</h3></div></a></li></div>',
+      'ai': '<ul class="listUL"><ul class="listUL"><li>'
+          '<a href="/info/1.htm"><div class="whitespace">未来技术学院通知</div>'
+          '<p class="day">2026年10月06日</p></a></li></ul></ul>',
+      'medicine': '<ul class="listPageList"><li>'
+          '<a href="/info/1.htm"><p>医学院通知</p><span>摘要</span></a>'
+          '<div>2026-10-06</div></li></ul>',
+      'cce': '<div class="listR-lb"><li><a href="/info/1.htm">'
+          '继续教育通知</a><i>2026-10-06</i></li></div>',
+    };
+    for (final entry in samples.entries) {
+      final source = AnnouncementSource.byId(entry.key);
+      final items = AnnouncementApiClient.parseAnnouncementList(
+        entry.value,
+        baseUrl: source.listUrl,
+        source: source,
+      );
+      expect(items, hasLength(1), reason: entry.key);
+      expect(items.single.publishedAt, DateTime(2026, 10, 6));
+    }
+    final computer = AnnouncementSource.byId('cs');
+    expect(computer.listUrls, hasLength(2));
+    expect(computer.columnNames, ['新闻动态', '重要通知']);
+    final news = AnnouncementApiClient.parseAnnouncementList(
+      '<div class="xw-lt"><li><a href="https://mp.weixin.qq.com/s/x">'
+      '<div class="xw-tx"><h3>学院新闻</h3><p>新闻摘要</p></div>'
+      '<div class="xw-date"><b>05</b><span>2026-10</span></div>'
+      '</a></li></div>',
+      baseUrl: computer.listUrls.first,
+      source: computer,
+      column: '新闻动态',
+    );
+    expect(news.single.summary, '新闻摘要');
+    expect(news.single.column, '新闻动态');
+    expect(news.single.publishedAt, DateTime(2026, 10, 5));
+  });
+
+  test('undated college lists keep source order without guessing from titles',
+      () async {
+    final source = AnnouncementSource.byId('sfa');
+    const html = '<div class="right"><ul>'
+        '<li class="notice-item"><a class="notice-title" href="/a.htm">'
+        '2025-2026学年第一条通知</a></li>'
+        '<li class="notice-item"><a class="notice-title" href="/b.htm">'
+        '第二条公告</a></li></ul></div>';
+    final client =
+        AnnouncementApiClient(httpClient: MockClient((request) async {
+      return http.Response.bytes(utf8.encode(html), 200);
+    }));
+    final items = await client.fetchAnnouncements(source: source);
+    expect(items.map((item) => item.title), ['2025-2026学年第一条通知', '第二条公告']);
+    expect(items.every((item) => item.publishedAt == null), isTrue);
+    final sinoEuropean = AnnouncementApiClient.parseAnnouncementList(
+      '<div class="content-box fr zsxx">'
+      '<li id="line_u1_0"><a href="/info/1.htm">'
+      '2027年推免公告</a></li></div>',
+      baseUrl: AnnouncementSource.byId('utseus').listUrl,
+      source: AnnouncementSource.byId('utseus'),
+    );
+    expect(sinoEuropean.single.publishedAt, isNull);
+    expect(sinoEuropean.single.title, '2027年推免公告');
+  });
+
+  test('student columns from one college are merged by date', () async {
+    final source = AnnouncementSource.byId('mat');
+    final first = '<ul class="rightList"><li><a href="/a.htm">'
+        '本科生奖学金通知<span>2026-10-05</span></a></li></ul>';
+    final second = '<ul class="rightList"><li><a href="/b.htm">'
+        '研究生奖学金通知<span>2026-10-06</span></a></li></ul>';
+    final requests = <String>[];
+    final client =
+        AnnouncementApiClient(httpClient: MockClient((request) async {
+      requests.add(request.url.toString());
+      final body =
+          request.url.toString() == source.listUrls.first ? first : second;
+      return http.Response.bytes(utf8.encode(body), 200);
+    }));
+    final items = await client.fetchAnnouncements(source: source);
+    expect(requests, unorderedEquals(source.listUrls));
+    expect(items.map((item) => item.title), ['研究生奖学金通知', '本科生奖学金通知']);
+    expect(items.map((item) => item.column), ['通知公告(研究生)', '通知公告(本科生)']);
+    expect(AnnouncementListItem.fromJson(items.first.toJson()).column,
+        '通知公告(研究生)');
+  });
+
+  test('selected college columns retain every title regardless of topic',
+      () async {
+    final source = AnnouncementSource.byId('ece');
+    final first = '<ul class="rightList">'
+        '<li><a href="/news.htm">学院教学新闻<span>2026-10-06</span></a></li>'
+        '<li><a href="/teacher.htm">关于教师课程建设的通知'
+        '<span>2026-10-05</span></a></li></ul>';
+    final second = '<ul class="rightList"><li><a href="/student.htm">'
+        '研究生奖学金通知<span>2026-10-04</span></a></li></ul>';
+    final client =
+        AnnouncementApiClient(httpClient: MockClient((request) async {
+      final body =
+          request.url.toString() == source.listUrls.first ? first : second;
+      return http.Response.bytes(utf8.encode(body), 200);
+    }));
+    final items = await client.fetchAnnouncements(source: source);
+    expect(items.map((item) => item.title), [
+      '学院教学新闻',
+      '关于教师课程建设的通知',
+      '研究生奖学金通知',
+    ]);
+    expect(items.map((item) => item.column), [
+      '本科生教学',
+      '本科生教学',
+      '研究生教学',
+    ]);
   });
 
   test('detail parser keeps text, tables and links in the article body', () {
@@ -69,6 +255,32 @@ void main() {
     ]);
     expect(detail.blocks.where((block) => block.isLink).single.value,
         'https://xgb.shu.edu.cn/files/result.pdf');
+  });
+
+  test('film attachments outside the body and WeChat text remain available',
+      () {
+    final film = AnnouncementApiClient.parseAnnouncementDetail(
+      '<div class="v_news_content"><p>详见附件</p></div>'
+      '<a href="/system/_content/download.jsp?'
+      'urltype=news.DownloadAttachUrl&amp;wbfileid=1">公告.pdf</a>',
+      url: 'https://sfa.shu.edu.cn/info/1.htm',
+    );
+    expect(film.blocks.any((block) => block.isLink && block.label == '公告.pdf'),
+        isTrue);
+
+    final wechat = AnnouncementApiClient.parseAnnouncementDetail(
+      '<h1 id="activity-name">学院新闻</h1>'
+      '<div id="js_content"><p>正文内容</p>'
+      '<p><img data-src="https://example.com/image.jpg"></p></div>',
+      url: 'https://mp.weixin.qq.com/s/example',
+    );
+    expect(wechat.title, '学院新闻');
+    expect(wechat.blocks.any((block) => block.isText && block.value == '正文内容'),
+        isTrue);
+    expect(
+        wechat.blocks.any((block) =>
+            block.isImage && block.value == 'https://example.com/image.jpg'),
+        isTrue);
   });
 
   test('detail parser displays PDF pages and retains the original attachment',
@@ -99,8 +311,7 @@ void main() {
     expect(pdf.value, 'https://gs.shu.edu.cn/__local/notice.pdf');
   });
 
-  test('fetch follows next link, sorts dates and removes staff-only rows',
-      () async {
+  test('fetch follows next link and retains teacher-titled notices', () async {
     final today = DateTime.now();
     final date = '${today.year}-${today.month.toString().padLeft(2, '0')}-'
         '${today.day.toString().padLeft(2, '0')}';
@@ -130,7 +341,10 @@ void main() {
       source: AnnouncementSource.byId('bksy'),
     );
     expect(requested, hasLength(2));
-    expect(items.map((item) => item.title), ['本科生选课通知']);
+    expect(items.map((item) => item.title), [
+      '关于教师教学设计竞赛的通知',
+      '本科生选课通知',
+    ]);
   });
 
   test('fetch stops after three pages and returns at most thirty items',
@@ -190,6 +404,19 @@ void main() {
             .single
             .title,
         '官网旧缓存');
+  });
+
+  test('favorites persist independently and allow multiple sources', () async {
+    SharedPreferences.setMockInitialValues({});
+    final repository = AnnouncementRepository();
+    await repository.toggleFavoriteSource(AnnouncementSource.byId('bksy'));
+    await repository.toggleFavoriteSource(AnnouncementSource.byId('mat'));
+    expect(await AnnouncementRepository().favoriteSourceIds(), {'bksy', 'mat'});
+    expect(
+        (await repository.defaultSource()).id, AnnouncementSource.officialId);
+
+    await repository.toggleFavoriteSource(AnnouncementSource.byId('bksy'));
+    expect(await AnnouncementRepository().favoriteSourceIds(), {'mat'});
   });
 
   test('detail previews are queued three at a time and reused', () async {

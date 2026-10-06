@@ -8,6 +8,7 @@ import '../models/announcement.dart';
 import '../models/announcement_source.dart';
 import '../models/common.dart';
 import '../services/announcement_api_client.dart';
+import '../services/client_settings_service.dart';
 
 class AnnouncementHomeSummary {
   const AnnouncementHomeSummary(this.text);
@@ -27,8 +28,10 @@ class AnnouncementRepository {
   static const _listCacheKey = 'announcements.list.cache';
   static const _lastRefreshKey = 'announcements.lastRefreshAt';
   static const _cacheVersionKey = 'announcements.cacheVersion';
-  static const _defaultSourceKey = 'announcements.defaultSource';
-  static const _cacheVersion = 3;
+  static const _defaultSourceKey =
+      ClientSettingsService.defaultAnnouncementSourceKey;
+  static const _favoritesKey = 'announcements.favoriteSources';
+  static const _cacheVersion = 4;
 
   final AnnouncementApiClient _apiClient;
   final Future<SharedPreferences> Function() _preferencesLoader;
@@ -91,7 +94,9 @@ class AnnouncementRepository {
               ? '[PDF文件]'
               : detail.blocks.any((block) => block.isImage)
                   ? '[图片]'
-                  : null
+                  : detail.blocks.any((block) => block.isTable)
+                      ? '[表格]'
+                      : null
           : text.length > 110
               ? '${text.substring(0, 110)}…'
               : text;
@@ -115,6 +120,22 @@ class AnnouncementRepository {
   Future<void> setDefaultSource(AnnouncementSource source) async {
     final prefs = await _preferencesLoader();
     await prefs.setString(_defaultSourceKey, source.id);
+  }
+
+  Future<Set<String>> favoriteSourceIds() async {
+    final prefs = await _preferencesLoader();
+    final known = AnnouncementSource.all.map((source) => source.id).toSet();
+    return (prefs.getStringList(_favoritesKey) ?? const <String>[])
+        .where(known.contains)
+        .toSet();
+  }
+
+  Future<Set<String>> toggleFavoriteSource(AnnouncementSource source) async {
+    final prefs = await _preferencesLoader();
+    final ids = await favoriteSourceIds();
+    if (!ids.add(source.id)) ids.remove(source.id);
+    await prefs.setStringList(_favoritesKey, ids.toList());
+    return ids;
   }
 
   Future<List<AnnouncementListItem>> loadCachedAnnouncements({

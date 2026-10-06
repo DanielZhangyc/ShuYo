@@ -885,6 +885,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ),
       ),
     );
+    if (mounted) {
+      unawaited(_loadAnnouncementSummaryFromCache());
+      unawaited(_refreshAnnouncementSummaryQuietly());
+    }
   }
 
   Future<void> _changeStartupTab(AppTab tab) async {

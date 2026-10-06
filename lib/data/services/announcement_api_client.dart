@@ -40,30 +40,24 @@ class AnnouncementApiClient {
   Future<List<AnnouncementListItem>> fetchAnnouncements({
     AnnouncementSource source = AnnouncementSource.official,
   }) async {
-    final found = <AnnouncementListItem>[];
-    final visited = <String>{};
-    String? pageUrl = source.listUrl;
-    for (var page = 0; page < maxPages && pageUrl != null; page++) {
-      if (!visited.add(pageUrl)) break;
-      http.Response response;
+    final columns =
+        await Future.wait(List.generate(source.listUrls.length, (index) async {
+      final startUrl = source.listUrls[index];
+      final column =
+          index < source.columnNames.length ? source.columnNames[index] : '';
       try {
-        response = await _getHtml(pageUrl);
-      } on Object {
-        if (found.isEmpty) rethrow;
-        break;
+        return (
+          items: await _fetchColumn(startUrl, source, column),
+          error: null as Object?
+        );
+      } on Object catch (error) {
+        return (items: <AnnouncementListItem>[], error: error);
       }
-      final html = _decodeHtml(response);
-      final pageItems =
-          parseAnnouncementList(html, baseUrl: pageUrl, source: source);
-      if (pageItems.isEmpty) {
-        if (found.isEmpty) {
-          throw const AnnouncementApiException('公告页面结构已变化，请稍后再试');
-        }
-        break;
-      }
-      found.addAll(pageItems);
-      pageUrl = _nextPageUrl(html, baseUrl: pageUrl, source: source);
+    }));
+    if (columns.every((column) => column.error != null)) {
+      throw columns.first.error!;
     }
+    final found = columns.expand((column) => column.items);
 
     final today = DateTime.now();
     final cutoff =
@@ -73,18 +67,61 @@ class AnnouncementApiClient {
       if (item.publishedAt != null && item.publishedAt!.isBefore(cutoff)) {
         continue;
       }
-      if (_isStaffOnly(item, source)) continue;
       unique.putIfAbsent(item.url, () => item);
     }
     final items = unique.values.toList();
+    final sourceOrder = {
+      for (var index = 0; index < items.length; index++)
+        items[index].url: index,
+    };
     items.sort((a, b) {
       final left = a.publishedAt;
       final right = b.publishedAt;
-      if (left == null) return right == null ? 0 : 1;
+      if (left == null) {
+        return right == null
+            ? sourceOrder[a.url]!.compareTo(sourceOrder[b.url]!)
+            : 1;
+      }
       if (right == null) return -1;
-      return right.compareTo(left);
+      final dateOrder = right.compareTo(left);
+      return dateOrder != 0
+          ? dateOrder
+          : sourceOrder[a.url]!.compareTo(sourceOrder[b.url]!);
     });
     return items.take(maxItems).toList(growable: false);
+  }
+
+  Future<List<AnnouncementListItem>> _fetchColumn(
+    String startUrl,
+    AnnouncementSource source,
+    String column,
+  ) async {
+    final found = <AnnouncementListItem>[];
+    final visited = <String>{};
+    String? pageUrl = startUrl;
+    final pageLimit = source.listUrls.length > 1 ? 2 : maxPages;
+    for (var page = 0; page < pageLimit && pageUrl != null; page++) {
+      if (!visited.add(pageUrl)) break;
+      http.Response response;
+      try {
+        response = await _getHtml(pageUrl);
+      } on Object {
+        if (found.isEmpty) rethrow;
+        break;
+      }
+      final html = _decodeHtml(response);
+      final pageItems = parseAnnouncementList(html,
+          baseUrl: pageUrl, source: source, column: column);
+      if (pageItems.isEmpty) {
+        if (found.isEmpty) {
+          throw const AnnouncementApiException('公告页面结构已变化，请稍后再试');
+        }
+        break;
+      }
+      found.addAll(pageItems);
+      pageUrl = _nextPageUrl(html, baseUrl: pageUrl, source: source);
+    }
+    return found;
   }
 
   Future<AnnouncementDetail> fetchDetail(AnnouncementListItem item) async {
@@ -102,6 +139,7 @@ class AnnouncementApiClient {
     String html, {
     required String baseUrl,
     AnnouncementSource source = AnnouncementSource.official,
+    String column = '',
   }) {
     final document = html_parser.parse(html);
     final rows = switch (source.format) {
@@ -124,39 +162,134 @@ class AnnouncementApiClient {
       AnnouncementListFormat.rightList =>
         document.querySelector('div.right-list')?.querySelectorAll('li') ??
             const <dom.Element>[],
+      AnnouncementListFormat.rightListUl =>
+        document.querySelector('ul.rightList')?.querySelectorAll('li') ??
+            const <dom.Element>[],
+      AnnouncementListFormat.vsbNewList =>
+        document.querySelectorAll('li[id^="line_u"]'),
+      AnnouncementListFormat.listPage =>
+        document.querySelector('ul.listPage')?.querySelectorAll('li') ??
+            const <dom.Element>[],
+      AnnouncementListFormat.sjList => document
+              .querySelector('ul.sj-list-ul')
+              ?.querySelectorAll('li[id^="line_u"]') ??
+          const <dom.Element>[],
+      AnnouncementListFormat.bareSpanList =>
+        document.querySelectorAll('li[id^="line_u"]'),
+      AnnouncementListFormat.mbaList => document
+              .querySelector('ul.news-list')
+              ?.querySelectorAll('li.news-item') ??
+          const <dom.Element>[],
+      AnnouncementListFormat.sjcList => document
+              .querySelector('div.jjyRight.fr')
+              ?.querySelectorAll('li.clearfix') ??
+          const <dom.Element>[],
+      AnnouncementListFormat.nestedListUl =>
+        document.querySelector('ul.listUL ul.listUL')?.querySelectorAll('li') ??
+            const <dom.Element>[],
+      AnnouncementListFormat.xwLt =>
+        document.querySelector('div.xw-lt, div.tzgg')?.querySelectorAll('li') ??
+            const <dom.Element>[],
+      AnnouncementListFormat.listPageList =>
+        document.querySelector('ul.listPageList')?.querySelectorAll('li') ??
+            const <dom.Element>[],
+      AnnouncementListFormat.listRLb =>
+        document.querySelector('div.listR-lb')?.querySelectorAll('li') ??
+            const <dom.Element>[],
+      AnnouncementListFormat.filmNotice =>
+        document.querySelectorAll('div.right li.notice-item'),
+      AnnouncementListFormat.contentBoxList => document
+              .querySelector('div.content-box.fr.zsxx')
+              ?.querySelectorAll('li[id^="line_u"]') ??
+          const <dom.Element>[],
     };
     final items = <AnnouncementListItem>[];
     for (final row in rows) {
       final anchor = switch (source.format) {
         AnnouncementListFormat.artList => row.querySelector('a.linkfont1'),
+        AnnouncementListFormat.filmNotice =>
+          row.querySelector('a.notice-title'),
         _ => row.localName == 'a' ? row : row.querySelector('a'),
       };
-      if (anchor == null) continue;
+      if (anchor == null && source.format != AnnouncementListFormat.mbaList) {
+        continue;
+      }
       final titleNode = switch (source.format) {
         AnnouncementListFormat.shuHome => row.querySelector('.bt'),
         AnnouncementListFormat.artList => row.querySelector('a.linkfont1'),
+        AnnouncementListFormat.mbaList => row.querySelector('div.news-title'),
+        AnnouncementListFormat.nestedListUl => row.querySelector('.whitespace'),
+        AnnouncementListFormat.xwLt => row.querySelector('h3'),
+        AnnouncementListFormat.listPageList => anchor?.querySelector('p'),
         _ => anchor,
       };
-      final title = _cleanText(titleNode?.text);
-      final url = _resolveUrl(baseUrl, anchor.attributes['href'] ?? '');
-      if (title.isEmpty || url.isEmpty) continue;
       final dateNode = switch (source.format) {
         AnnouncementListFormat.shuHome => row.querySelector('.sj'),
         AnnouncementListFormat.artList => row.querySelector('span.linkfont1'),
         AnnouncementListFormat.vsbTable => _secondTableCell(row),
         AnnouncementListFormat.centreList =>
           row.querySelector('p.list-centre-right-down-p'),
-        AnnouncementListFormat.rightList => row.querySelector('span'),
+        AnnouncementListFormat.rightList ||
+        AnnouncementListFormat.rightListUl ||
+        AnnouncementListFormat.listPage ||
+        AnnouncementListFormat.bareSpanList =>
+          row.querySelector('span'),
+        AnnouncementListFormat.vsbNewList => row.querySelector('i'),
+        AnnouncementListFormat.sjList => row.querySelector('p'),
+        AnnouncementListFormat.mbaList => row.querySelector('div.date-box'),
+        AnnouncementListFormat.sjcList => row.querySelector('span.fr'),
+        AnnouncementListFormat.nestedListUl => row.querySelector('.day'),
+        AnnouncementListFormat.xwLt => row.querySelector('.xw-date, .tz-d'),
+        AnnouncementListFormat.listPageList => row.querySelector('div'),
+        AnnouncementListFormat.listRLb => row.querySelector('i'),
+        AnnouncementListFormat.filmNotice ||
+        AnnouncementListFormat.contentBoxList =>
+          null,
         AnnouncementListFormat.onlyList => null,
       };
-      final rawDate = _cleanText(dateNode?.text);
-      final publishedAt = _parseDate(rawDate.isEmpty ? row.text : rawDate);
+      final rawDate = switch (source.format) {
+        AnnouncementListFormat.mbaList => _mbaDate(row),
+        AnnouncementListFormat.xwLt => _xwLtDate(row),
+        _ => _cleanText(dateNode?.text),
+      };
+      var title = _cleanText(titleNode?.text);
+      if (rawDate.isNotEmpty &&
+          title.endsWith(rawDate) &&
+          (source.format == AnnouncementListFormat.sjList ||
+              source.format == AnnouncementListFormat.rightListUl ||
+              source.format == AnnouncementListFormat.vsbNewList ||
+              source.format == AnnouncementListFormat.bareSpanList)) {
+        title = title.substring(0, title.length - rawDate.length).trim();
+      }
+      final href = source.format == AnnouncementListFormat.mbaList
+          ? RegExp(r'''window\.open\(["']([^"']+)["']''')
+                  .firstMatch(row.attributes['onclick'] ?? '')
+                  ?.group(1) ??
+              ''
+          : anchor?.attributes['href'] ?? '';
+      final url = _resolveUrl(baseUrl, href);
+      if (title.isEmpty || url.isEmpty) continue;
+      final dateInput = rawDate.isNotEmpty
+          ? rawDate
+          : source.format == AnnouncementListFormat.filmNotice ||
+                  source.format == AnnouncementListFormat.contentBoxList
+              ? ''
+              : row.text;
+      final publishedAt = _parseDate(dateInput);
       items.add(AnnouncementListItem(
         title: title,
         url: url,
-        summary: source.format == AnnouncementListFormat.shuHome
-            ? _cleanText(row.querySelector('.zy')?.text)
-            : '',
+        summary: switch (source.format) {
+          AnnouncementListFormat.shuHome =>
+            _cleanText(row.querySelector('.zy')?.text),
+          AnnouncementListFormat.xwLt =>
+            _cleanText(row.querySelector('.xw-tx p, .tz-tx p')?.text),
+          AnnouncementListFormat.listPageList =>
+            _cleanText(anchor?.querySelector('span')?.text),
+          AnnouncementListFormat.filmNotice =>
+            _cleanText(row.querySelector('.notice-content')?.text),
+          _ => '',
+        },
         dateText: publishedAt == null
             ? rawDate
             : '${publishedAt.year.toString().padLeft(4, '0')}-'
@@ -164,6 +297,7 @@ class AnnouncementApiClient {
                 '${publishedAt.day.toString().padLeft(2, '0')}',
         publishedAt: publishedAt,
         sourceId: source.id,
+        column: column,
       ));
     }
     return items;
@@ -182,6 +316,22 @@ class AnnouncementApiClient {
       AnnouncementListFormat.vsbTable => 'span.p_next a',
       AnnouncementListFormat.centreList => 'a.Next',
       AnnouncementListFormat.rightList => 'div.right-list a',
+      AnnouncementListFormat.rightListUl ||
+      AnnouncementListFormat.listPage =>
+        'span.p_pages a',
+      AnnouncementListFormat.vsbNewList ||
+      AnnouncementListFormat.sjList ||
+      AnnouncementListFormat.bareSpanList ||
+      AnnouncementListFormat.mbaList ||
+      AnnouncementListFormat.sjcList =>
+        'a.Next',
+      AnnouncementListFormat.nestedListUl ||
+      AnnouncementListFormat.listPageList ||
+      AnnouncementListFormat.listRLb ||
+      AnnouncementListFormat.contentBoxList =>
+        'a.Next',
+      AnnouncementListFormat.xwLt => 'span.p_pages a',
+      AnnouncementListFormat.filmNotice => 'span.p_next a',
     };
     final links = document.querySelectorAll(selector);
     for (final link in links) {
@@ -203,23 +353,22 @@ class AnnouncementApiClient {
     return cells.length > 1 ? cells[1] : null;
   }
 
-  static bool _isStaffOnly(
-    AnnouncementListItem item,
-    AnnouncementSource source,
-  ) {
-    if (!source.studentOnly) return false;
-    final title = item.title;
-    if (source.id == 'bksy') {
-      return RegExp(
-        '教职工|教师|教学设计竞赛|教材跃升|本科教学学术研究|'
-        '课程思政教学改革|通识示范课程立项|本科专业动态优化|'
-        '人工智能赋能教育教学专项',
-      ).hasMatch(title);
+  static String _mbaDate(dom.Element row) {
+    final day = _cleanText(row.querySelector('.date-day')?.text);
+    final yearMonth = _cleanText(row.querySelector('.date-ym')?.text);
+    if (day.isNotEmpty && yearMonth.isNotEmpty) {
+      return '$yearMonth-$day';
     }
-    if (source.id == 'xgb') {
-      return RegExp('辅导员|思政工作研究').hasMatch(title);
-    }
-    return false;
+    return _cleanText(row.querySelector('div.date-box')?.text);
+  }
+
+  static String _xwLtDate(dom.Element row) {
+    final box = row.querySelector('.xw-date, .tz-d');
+    final day = _cleanText(box?.querySelector('b')?.text);
+    final yearMonth = _cleanText(box?.querySelector('span')?.text);
+    return day.isNotEmpty && yearMonth.isNotEmpty
+        ? '$yearMonth-$day'
+        : _cleanText(box?.text);
   }
 
   Future<http.Response> _getHtml(String url) async {
@@ -246,34 +395,34 @@ class AnnouncementApiClient {
   }) {
     final document = html_parser.parse(html);
     final root = document.querySelector('.nry');
-    final title = _cleanText(root?.querySelector('h1')?.text);
+    final title = _cleanText(
+      root?.querySelector('h1')?.text ??
+          document.querySelector('#activity-name')?.text,
+    );
     final metadata = _parseMetadata(root?.querySelector('.xx'));
     final dateText =
         metadata.dateText.isNotEmpty ? metadata.dateText : fallbackDateText;
     final contentRoot = root?.querySelector('.v_news_content') ??
         document.querySelector('.v_news_content') ??
-        document.querySelector('#vsb_content');
+        document.querySelector('#vsb_content') ??
+        document.querySelector('#js_content');
     final blocks = contentRoot == null
         ? <AnnouncementContentBlock>[]
         : _parseContentBlocks(contentRoot, baseUrl: url);
-    final attachmentRoot = document.querySelector('td.NewsBody');
-    if (attachmentRoot != null) {
-      final linked = blocks
-          .where((block) => block.isLink)
-          .map((block) => block.value)
-          .toSet();
-      for (final anchor in attachmentRoot.querySelectorAll('a[href]')) {
-        final href = anchor.attributes['href'] ?? '';
-        if (!href.contains('DownloadAttachUrl')) continue;
-        final link = _resolveUrl(url, href);
-        if (link.isEmpty || !linked.add(link)) continue;
-        blocks.add(AnnouncementContentBlock.link(
-          link,
-          label: _cleanText(anchor.text).isEmpty
-              ? '查看附件'
-              : _cleanText(anchor.text),
-        ));
-      }
+    final linked = blocks
+        .where((block) => block.isLink)
+        .map((block) => block.value)
+        .toSet();
+    for (final anchor in document.querySelectorAll('a[href]')) {
+      final href = anchor.attributes['href'] ?? '';
+      if (!href.contains('DownloadAttachUrl')) continue;
+      final link = _resolveUrl(url, href);
+      if (link.isEmpty || !linked.add(link)) continue;
+      blocks.add(AnnouncementContentBlock.link(
+        link,
+        label:
+            _cleanText(anchor.text).isEmpty ? '查看附件' : _cleanText(anchor.text),
+      ));
     }
     return AnnouncementDetail(
       title: title.isNotEmpty ? title : fallbackTitle,
@@ -296,6 +445,7 @@ class AnnouncementApiClient {
 
     void addImage(dom.Element image) {
       final src = image.attributes['orisrc'] ??
+          image.attributes['data-src'] ??
           image.attributes['src'] ??
           image.attributes['vurl'] ??
           '';

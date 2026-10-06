@@ -31,6 +31,7 @@ class _FakeAnnouncementRepository extends AnnouncementRepository {
   int detailRequestCount = 0;
   final previewRequests = <String>[];
   AnnouncementSource currentDefault = AnnouncementSource.official;
+  final favoriteIds = <String>{};
   final requestedSources = <String>[];
 
   @override
@@ -48,6 +49,15 @@ class _FakeAnnouncementRepository extends AnnouncementRepository {
   @override
   Future<void> setDefaultSource(AnnouncementSource source) async {
     currentDefault = source;
+  }
+
+  @override
+  Future<Set<String>> favoriteSourceIds() async => {...favoriteIds};
+
+  @override
+  Future<Set<String>> toggleFavoriteSource(AnnouncementSource source) async {
+    if (!favoriteIds.add(source.id)) favoriteIds.remove(source.id);
+    return {...favoriteIds};
   }
 
   @override
@@ -97,42 +107,103 @@ Future<void> _openDetail(
 }
 
 void main() {
-  testWidgets('source switch is temporary until starred as default',
+  testWidgets('favorites are independent from the current and default source',
       (tester) async {
     final repository = _repositoryWith();
     await tester.pumpWidget(
-      MaterialApp(home: AnnouncementsPage(repository: repository)),
+      MaterialApp(
+        home: AnnouncementsPage(key: UniqueKey(), repository: repository),
+      ),
     );
     await tester.pumpAndSettle();
     expect(repository.requestedSources, ['shu']);
 
     await tester.tap(find.byTooltip('选择公告来源'));
     await tester.pumpAndSettle();
-    expect(find.text('公告来源'), findsOneWidget);
+    expect(find.text('收藏'), findsOneWidget);
     expect(
-        tester.getTopLeft(find.text('公告来源')).dx,
+        tester.getTopLeft(find.text('收藏')).dx,
         greaterThan(
             tester.view.physicalSize.width / tester.view.devicePixelRatio / 2));
     expect(find.byType(ModalBarrier), findsWidgets);
-    expect(find.byIcon(Icons.star), findsOneWidget);
+    expect(find.byIcon(Icons.star), findsNothing);
     expect(find.textContaining('设为默认'), findsNothing);
-    await tester.tap(find.byTooltip('将本科生院设为默认'));
+    await tester.tap(find.byTooltip('收藏本科生院'));
     await tester.pumpAndSettle();
-    expect(repository.currentDefault.id, 'bksy');
+    expect(repository.favoriteIds, {'bksy'});
+    expect(repository.currentDefault.id, 'shu');
     expect(repository.requestedSources, ['shu']);
-    expect(find.text('公告来源'), findsOneWidget);
-    expect(find.byIcon(Icons.star), findsOneWidget);
+    expect(find.text('收藏'), findsOneWidget);
+    expect(find.byIcon(Icons.star), findsNWidgets(2));
+    expect(find.text('本科生院'), findsNWidgets(2));
+    final star = find.byIcon(Icons.star).first;
+    expect(tester.widget<Icon>(star).color,
+        Theme.of(tester.element(star)).colorScheme.primary);
     expect(find.text(_listTitle), findsOneWidget);
 
-    await tester.tap(find.text('本科生院'));
+    await tester.tap(find.byTooltip('收藏本科生处'));
+    await tester.pumpAndSettle();
+    expect(repository.favoriteIds, {'bksy', 'xgb'});
+    expect(find.byIcon(Icons.star), findsNWidgets(4));
+
+    await tester.tap(find.text('本科生院').first);
     await tester.pumpAndSettle();
     expect(repository.requestedSources.last, 'bksy');
 
     await tester.pumpWidget(
+      MaterialApp(
+        home: AnnouncementsPage(key: UniqueKey(), repository: repository),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(repository.requestedSources.last, 'shu');
+  });
+
+  testWidgets('source menu scrolls and college group folds', (tester) async {
+    final repository = _repositoryWith();
+    await tester.pumpWidget(
       MaterialApp(home: AnnouncementsPage(repository: repository)),
     );
     await tester.pumpAndSettle();
-    expect(repository.requestedSources.last, 'bksy');
+    await tester.tap(find.byTooltip('选择公告来源'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getSize(find.byType(ListView).last).height,
+      lessThan(
+          tester.view.physicalSize.height / tester.view.devicePixelRatio * 0.8),
+    );
+    expect(find.text('国际教育学院'), findsNothing);
+    await tester.drag(find.byType(ListView).last, const Offset(0, -380));
+    await tester.pumpAndSettle();
+    expect(find.text('学院与培养单位'), findsOneWidget);
+    await tester.tap(find.text('学院与培养单位'));
+    await tester.pumpAndSettle();
+    expect(find.text('国际教育学院'), findsOneWidget);
+    await tester.tap(find.text('学院与培养单位'));
+    await tester.pumpAndSettle();
+    expect(find.text('国际教育学院'), findsNothing);
+  });
+
+  testWidgets('merged college notices show their original column',
+      (tester) async {
+    final repository = _FakeAnnouncementRepository(
+      items: const [
+        AnnouncementListItem(
+          title: '研究生奖学金通知',
+          url: 'https://ece.shu.edu.cn/info/1.htm',
+          sourceId: 'ece',
+          column: '研究生教学',
+          summary: '奖学金申报安排',
+          dateText: '2026-10-06',
+        ),
+      ],
+      details: const {},
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: AnnouncementsPage(repository: repository)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('研究生教学 · 2026-10-06'), findsOneWidget);
   });
 
   testWidgets('previews for later rows start after scrolling', (tester) async {
@@ -257,11 +328,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('查看原文'));
     await tester.pumpAndSettle();
-    expect(find.text('在浏览器中打开？'), findsOneWidget);
-    expect(find.text('打开浏览器'), findsOneWidget);
+    expect(find.text('跳转浏览器'), findsOneWidget);
+    expect(find.text('确认'), findsOneWidget);
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
-    expect(find.text('在浏览器中打开？'), findsNothing);
+    expect(find.text('跳转浏览器'), findsNothing);
   });
 
   testWidgets('announcement separators remain in presets and hide in custom',

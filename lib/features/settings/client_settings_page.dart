@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/client_app_info.dart';
 import '../../core/app_tab.dart';
 import '../../core/client_update_policy.dart';
+import '../../data/models/announcement_source.dart';
 import '../../data/repositories/client_backend_repository.dart';
 import '../../data/services/academic_schedule_notification_service.dart';
 import '../../data/services/app_store_version_service.dart';
@@ -89,6 +90,17 @@ class ClientSettingsPage extends StatelessWidget {
               ),
             ),
           ),
+          if (!isDemo)
+            _SettingsRow(
+              title: '默认公告',
+              onTap: () => Navigator.of(context).push<void>(
+                shuyoRoute(
+                  builder: (context) => _DefaultAnnouncementPage(
+                    settingsService: settingsService,
+                  ),
+                ),
+              ),
+            ),
           _SettingsRow(
             title: '启动显示',
             onTap: () => Navigator.of(context).push<void>(
@@ -161,6 +173,90 @@ class ClientSettingsPage extends StatelessWidget {
     if (confirmed) {
       await onExitDemo?.call();
       if (context.mounted) Navigator.of(context).pop();
+    }
+  }
+}
+
+class _DefaultAnnouncementPage extends StatefulWidget {
+  const _DefaultAnnouncementPage({required this.settingsService});
+
+  final ClientSettingsService settingsService;
+
+  @override
+  State<_DefaultAnnouncementPage> createState() =>
+      _DefaultAnnouncementPageState();
+}
+
+class _DefaultAnnouncementPageState extends State<_DefaultAnnouncementPage> {
+  late final Future<AnnouncementSource> _initialSource =
+      widget.settingsService.loadDefaultAnnouncementSource();
+  AnnouncementSource? _selected;
+  bool _saving = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('默认公告')),
+      body: FutureBuilder<AnnouncementSource>(
+        future: _initialSource,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return const Center(child: Text('默认公告设置加载失败'));
+          }
+          final selected = _selected ?? snapshot.data!;
+          return ListView(
+            children: [
+              for (final group in AnnouncementSourceGroup.values) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+                  child: Text(
+                    group == AnnouncementSourceGroup.campus
+                        ? '校级与公共服务'
+                        : '学院与培养单位',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                for (final source in AnnouncementSource.inGroup(group))
+                  ListTile(
+                    title: Text(source.name),
+                    onTap: _saving ? null : () => _save(source),
+                    trailing: Icon(
+                      source == selected
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                      color: source == selected
+                          ? Theme.of(context).colorScheme.primary
+                          : null,
+                    ),
+                  ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _save(AnnouncementSource source) async {
+    if (_selected == source) return;
+    setState(() => _saving = true);
+    try {
+      await widget.settingsService.saveDefaultAnnouncementSource(source);
+      if (mounted) setState(() => _selected = source);
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('默认公告保存失败，请重试')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 }
