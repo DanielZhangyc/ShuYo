@@ -28,6 +28,7 @@ import '../data/services/academic_schedule_display_settings_service.dart';
 import '../data/services/academic_schedule_notification_service.dart';
 import '../data/services/academic_schedule_widget_service.dart';
 import '../data/services/client_settings_service.dart';
+import '../data/services/student_identity_service.dart';
 import '../data/services/unified_account_service.dart';
 import '../data/services/there_booking_client.dart';
 import '../data/services/webvpn_session_store.dart';
@@ -170,6 +171,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final UnifiedAccountService _unifiedAccountService =
       widget.unifiedAccountService ?? UnifiedAccountService();
   final _clientBackendRepository = ClientBackendRepository();
+  final _studentIdentityService = StudentIdentityService();
 
   @override
   void initState() {
@@ -241,6 +243,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         if (!mounted) return;
         unawaited(_refreshAnnouncementSummaryQuietly());
         unawaited(_checkClientBackendPrompts());
+        unawaited(_studentIdentityService.retryPendingRevocations());
       });
     }
   }
@@ -277,6 +280,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _widgetClickSubscription?.cancel();
     _directBookingClient?.dispose();
     _webVpnBookingClient?.dispose();
+    _studentIdentityService.dispose();
     widget.onboardingController.setWebVpnChangeHandler(null);
     widget.onboardingController.setProfileChangeHandlers();
     widget.onboardingController.setAccountLogoutHandlers();
@@ -497,12 +501,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       }
       if (!mounted) return;
       if (!firstLogin) {
+        unawaited(_studentIdentityService.ensureAfterCampusLogin());
         _showSnack('登录已恢复，请再次点击刷新更新数据');
         return;
       }
       await _syncScheduleAfterAcademicLogin();
       if (!mounted || !_hasAcademicSession) return;
-      unawaited(_syncAcademicExtrasAfterLogin());
+      unawaited(() async {
+        await _syncAcademicExtrasAfterLogin();
+        await _studentIdentityService.ensureAfterCampusLogin();
+      }());
     } finally {
       _completingAcademicLogin = false;
     }
@@ -867,6 +875,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           settingsService: _clientSettingsService,
           scheduleNotificationService: _scheduleNotificationService,
           backendRepository: _clientBackendRepository,
+          studentIdentityService: _studentIdentityService,
           selectedThemeId: widget.selectedThemeId,
           followSystemTheme: widget.followSystemTheme,
           onThemeChanged: widget.onThemeChanged,
@@ -906,6 +915,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // Continue clearing every local credential.
     }
     var failed = false;
+    try {
+      await _studentIdentityService.signOut();
+    } on Object {
+      failed = true;
+    }
     try {
       await _academicAuthService.clearAccount();
     } on Object {

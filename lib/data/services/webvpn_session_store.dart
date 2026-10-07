@@ -4,14 +4,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/webvpn_urls.dart';
+import 'secure_app_store.dart';
 
 class WebVpnSessionStore {
   WebVpnSessionStore({
     Future<SharedPreferences> Function()? preferencesLoader,
+    SecureAppStore? secureStore,
     WebViewCookieManager? cookieManager,
     Future<List<WebViewCookie>> Function(Uri domain)? cookieLoader,
     Future<void> Function(WebViewCookie cookie)? cookieSetter,
-  })  : _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance,
+  })  : _secureStore =
+            secureStore ?? SecureAppStore(preferencesLoader: preferencesLoader),
         _cookieManager = cookieManager ??
             (cookieLoader == null || cookieSetter == null
                 ? WebViewCookieManager()
@@ -23,17 +26,22 @@ class WebVpnSessionStore {
 
   static const cachedCookiesKey = 'academic.auth.cached_cookies.webvpn';
 
-  final Future<SharedPreferences> Function() _preferencesLoader;
+  final SecureAppStore _secureStore;
   final WebViewCookieManager? _cookieManager;
   late final Future<List<WebViewCookie>> Function(Uri domain) _cookieLoader;
   late final Future<void> Function(WebViewCookie cookie) _cookieSetter;
 
   Future<void> clearCachedCookiesForReauthentication() async {
-    await (await _preferencesLoader()).remove(cachedCookiesKey);
+    await _secureStore.delete(cachedCookiesKey);
   }
 
   Future<bool> hasStoredSession() async {
-    final raw = (await _preferencesLoader()).getString(cachedCookiesKey);
+    String? raw;
+    try {
+      raw = await _secureStore.read(cachedCookiesKey);
+    } on Object {
+      // Continue with the WebView cookie if secure storage is unavailable.
+    }
     if (raw != null && raw.isNotEmpty) {
       try {
         final decoded = jsonDecode(raw);

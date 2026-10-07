@@ -17,6 +17,7 @@ import '../../data/repositories/client_backend_repository.dart';
 import '../../data/services/academic_schedule_notification_service.dart';
 import '../../data/services/app_store_version_service.dart';
 import '../../data/services/client_settings_service.dart';
+import '../../data/services/student_identity_service.dart';
 import '../../shared/shuyo_text_styles.dart';
 import '../../shared/navigation/shuyo_route.dart';
 import '../../shared/theme/shuyo_theme.dart';
@@ -26,6 +27,7 @@ import '../../shared/widgets/empty_state.dart';
 import '../../shared/widgets/webvpn_toggle.dart';
 import 'client_feedback_page.dart';
 import 'identity_probe_page.dart';
+import 'student_identity_page.dart';
 import '../onboarding/startup_onboarding.dart';
 
 class ClientSettingsPage extends StatelessWidget {
@@ -34,6 +36,7 @@ class ClientSettingsPage extends StatelessWidget {
     required this.settingsService,
     required this.scheduleNotificationService,
     required this.backendRepository,
+    this.studentIdentityService,
     required this.selectedThemeId,
     required this.followSystemTheme,
     required this.onThemeChanged,
@@ -54,6 +57,7 @@ class ClientSettingsPage extends StatelessWidget {
   final ClientSettingsService settingsService;
   final AcademicScheduleNotificationService scheduleNotificationService;
   final ClientBackendRepository backendRepository;
+  final StudentIdentityService? studentIdentityService;
   final String selectedThemeId;
   final bool followSystemTheme;
   final Future<void> Function(String themeId) onThemeChanged;
@@ -135,6 +139,17 @@ class ClientSettingsPage extends StatelessWidget {
               ),
             ),
           ),
+          if (!isDemo && studentIdentityService != null)
+            _SettingsRow(
+              title: 'ShuYo 身份',
+              onTap: () => Navigator.of(context).push<void>(
+                shuyoRoute(
+                  builder: (_) => StudentIdentityPage(
+                    service: studentIdentityService!,
+                  ),
+                ),
+              ),
+            ),
           if (kDebugMode && !isDemo)
             _SettingsRow(
               title: '学号核验实验',

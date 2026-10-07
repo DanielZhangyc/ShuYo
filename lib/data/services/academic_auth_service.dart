@@ -12,6 +12,7 @@ import '../../core/client_user_agent.dart';
 import '../../core/webvpn_urls.dart';
 import 'academic_account_store.dart';
 import 'http_timeout.dart';
+import 'secure_app_store.dart';
 
 enum WebVpnSessionStatus { valid, loginRequired, unavailable }
 
@@ -20,6 +21,7 @@ class AcademicAuthService {
     WebViewCookieManager? cookieManager,
     Future<SharedPreferences> Function()? preferencesLoader,
     AcademicAccountStore? accountStore,
+    SecureAppStore? secureStore,
     Future<List<WebViewCookie>> Function(Uri domain)? cookieLoader,
     Future<void> Function(WebViewCookie cookie)? cookieSetter,
     Future<WebVpnSessionStatus> Function(String cookieHeader)?
@@ -31,6 +33,8 @@ class AcademicAuthService {
                 ? WebViewCookieManager()
                 : null),
         _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance,
+        _secureStore =
+            secureStore ?? SecureAppStore(preferencesLoader: preferencesLoader),
         _accountStore = accountStore ??
             AcademicAccountStore(preferencesLoader: preferencesLoader) {
     _cookieLoader =
@@ -52,6 +56,7 @@ class AcademicAuthService {
 
   final WebViewCookieManager? _cookieManager;
   final Future<SharedPreferences> Function() _preferencesLoader;
+  final SecureAppStore _secureStore;
   final AcademicAccountStore _accountStore;
   late final Future<List<WebViewCookie>> Function(Uri domain) _cookieLoader;
   late final Future<void> Function(WebViewCookie cookie) _cookieSetter;
@@ -108,7 +113,7 @@ class AcademicAuthService {
       }
     }
     await Future.wait([
-      prefs.remove(_cachedDirectCookiesKey),
+      _secureStore.delete(_cachedDirectCookiesKey).catchError((Object _) {}),
       prefs.setBool(_explicitlySignedOutKey, true),
     ]);
     return const {};
@@ -541,8 +546,13 @@ class AcademicAuthService {
   Future<Map<String, List<WebViewCookie>>> _loadCachedCookies({
     required bool webVpn,
   }) async {
-    final prefs = await _preferencesLoader();
-    final raw = prefs.getString(_cacheKey(webVpn));
+    String? raw;
+    try {
+      raw = await _secureStore.read(_cacheKey(webVpn));
+    } on Object {
+      // Keychain/Keystore failure must not block the live WebView session.
+      return const {};
+    }
     if (raw == null || raw.isEmpty) return const {};
     try {
       final decoded = jsonDecode(raw);
@@ -621,8 +631,12 @@ class AcademicAuthService {
           )
           .toList();
     }
-    final prefs = await _preferencesLoader();
-    await prefs.setString(_cacheKey(webVpn), jsonEncode(encoded));
+    try {
+      await _secureStore.write(_cacheKey(webVpn), jsonEncode(encoded));
+    } on Object {
+      // The live WebView cookie still works for this run. Never fall back to
+      // persisting a school session in plain SharedPreferences.
+    }
   }
 
   Future<void> _restoreCookies(
