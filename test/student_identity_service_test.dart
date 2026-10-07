@@ -29,7 +29,8 @@ class _SchoolAuth extends AcademicAuthService {
   int reads = 0;
 
   @override
-  Future<String?> cookieHeaderForIdentityProbe({required Uri targetUri}) async {
+  Future<String?> cookieHeaderForIdentityVerification(
+      {required Uri targetUri}) async {
     reads++;
     return 'JSESSIONID=school-session';
   }

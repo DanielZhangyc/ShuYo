@@ -392,7 +392,8 @@ class AcademicAuthService {
       _cookieHeader(targetUri: targetUri, persistSession: true);
 
   /// Reads the existing session for a manual probe without updating login state.
-  Future<String?> cookieHeaderForIdentityProbe({required Uri targetUri}) =>
+  Future<String?> cookieHeaderForIdentityVerification(
+          {required Uri targetUri}) =>
       _cookieHeader(targetUri: targetUri, persistSession: false);
 
   Future<String?> _cookieHeader({

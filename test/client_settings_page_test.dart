@@ -623,7 +623,7 @@ class _FakeAcademicAuthService implements AcademicAuthService {
   Future<String?> cookieHeader({Uri? targetUri}) async => null;
 
   @override
-  Future<String?> cookieHeaderForIdentityProbe(
+  Future<String?> cookieHeaderForIdentityVerification(
           {required Uri targetUri}) async =>
       null;
 

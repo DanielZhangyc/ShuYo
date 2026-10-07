@@ -112,7 +112,8 @@ void main() {
     expect(header, contains('route=node-a'));
   });
 
-  test('identity probe reads a cookie without changing campus login state',
+  test(
+      'identity verification reads a cookie without changing campus login state',
       () async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('academic.auth.explicitly_signed_out', true);
@@ -127,7 +128,7 @@ void main() {
       cookieSetter: (_) async {},
     );
 
-    final header = await service.cookieHeaderForIdentityProbe(
+    final header = await service.cookieHeaderForIdentityVerification(
       targetUri: AcademicUrlResolver.uri(
         '/jwglxt/xsxy/xsxyqk_cxXsxyqkIndex.html',
       ),

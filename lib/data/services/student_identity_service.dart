@@ -143,8 +143,8 @@ class StudentIdentityService {
     final schoolUri = AcademicUrlResolver.uri(
       AcademicProgressApiClient.studentIdentityPath,
     );
-    final schoolCookie =
-        await _schoolAuth.cookieHeaderForIdentityProbe(targetUri: schoolUri);
+    final schoolCookie = await _schoolAuth.cookieHeaderForIdentityVerification(
+        targetUri: schoolUri);
     if (schoolCookie == null || schoolCookie.isEmpty) {
       throw const StudentIdentityException('当前教务会话不可用，请重新登录校园账户。',
           code: 'no_school_session');
