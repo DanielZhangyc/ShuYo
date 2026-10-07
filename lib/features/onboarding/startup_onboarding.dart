@@ -875,7 +875,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
             context,
             icon: Icons.school_outlined,
             title: '上大校园账户',
-            description: '用于访问课程表等教务服务',
+            description: '用于访问课程表等校园服务',
             statusLabel: _academicLoggedIn
                 ? '已登录'
                 : _academicSessionExpired
