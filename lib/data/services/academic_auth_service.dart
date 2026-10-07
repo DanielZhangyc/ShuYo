@@ -383,12 +383,22 @@ class AcademicAuthService {
   /// the same `webvpn-token` name. Collapsing all domains by name can select
   /// the portal token for an academic request and produces a valid HTTP 200
   /// login page instead of the authenticated response.
-  Future<String?> cookieHeader({Uri? targetUri}) async {
+  Future<String?> cookieHeader({Uri? targetUri}) =>
+      _cookieHeader(targetUri: targetUri, persistSession: true);
+
+  /// Reads the existing session for a manual probe without updating login state.
+  Future<String?> cookieHeaderForIdentityProbe({required Uri targetUri}) =>
+      _cookieHeader(targetUri: targetUri, persistSession: false);
+
+  Future<String?> _cookieHeader({
+    Uri? targetUri,
+    required bool persistSession,
+  }) async {
     final webVpn = AcademicUrlResolver.usesWebVpn;
     final cached = await _loadCachedCookies(webVpn: webVpn);
     final live = await _loadLiveCookies(webVpn: webVpn);
     final merged = _mergeCookieGroups(cached, live);
-    await _persistCookies(merged, webVpn: webVpn);
+    if (persistSession) await _persistCookies(merged, webVpn: webVpn);
 
     final values = <String, _CookieCandidate>{};
     final groups = targetUri == null
@@ -427,7 +437,7 @@ class AcademicAuthService {
       'cookie selection target=$target selected=$selected '
       '${_describeCookieSources(cached: cached, live: live)}',
     );
-    await markLoggedIn();
+    if (persistSession) await markLoggedIn();
     return values.entries
         .map((entry) => '${entry.key}=${entry.value.cookie.value}')
         .join('; ');

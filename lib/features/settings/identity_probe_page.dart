@@ -109,8 +109,8 @@ class _IdentityProbePageState extends State<IdentityProbePage> {
       final uri = AcademicUrlResolver.uri(
         AcademicProgressApiClient.studentIdentityPath,
       );
-      final schoolCookie =
-          await AcademicAuthService().cookieHeader(targetUri: uri);
+      final schoolCookie = await AcademicAuthService()
+          .cookieHeaderForIdentityProbe(targetUri: uri);
       if (!mounted) return;
       if (schoolCookie == null || schoolCookie.isEmpty) {
         setState(() => _result = '未找到教务会话，请先重新登录校园账户。');

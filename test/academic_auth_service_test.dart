@@ -112,6 +112,32 @@ void main() {
     expect(header, contains('route=node-a'));
   });
 
+  test('identity probe reads a cookie without changing campus login state',
+      () async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('academic.auth.explicitly_signed_out', true);
+    final service = AcademicAuthService(
+      cookieLoader: (_) async => [
+        WebViewCookie(
+          name: 'JSESSIONID',
+          value: 'test-session',
+          domain: AcademicConstants.host,
+        ),
+      ],
+      cookieSetter: (_) async {},
+    );
+
+    final header = await service.cookieHeaderForIdentityProbe(
+      targetUri: AcademicUrlResolver.uri(
+        '/jwglxt/xsxy/xsxyqk_cxXsxyqkIndex.html',
+      ),
+    );
+
+    expect(header, contains('JSESSIONID=test-session'));
+    expect(prefs.getBool('academic.auth.explicitly_signed_out'), isTrue);
+    expect(prefs.getString('academic.auth.cached_cookies.direct'), isNull);
+  });
+
   test('live academic cookies replace stale cached values across paths',
       () async {
     final academic = Uri.parse(AcademicConstants.baseUrl);

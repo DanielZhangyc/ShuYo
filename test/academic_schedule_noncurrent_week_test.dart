@@ -374,6 +374,11 @@ class _FakeAcademicAuthService implements AcademicAuthService {
   Future<String?> cookieHeader({Uri? targetUri}) async => null;
 
   @override
+  Future<String?> cookieHeaderForIdentityProbe(
+          {required Uri targetUri}) async =>
+      null;
+
+  @override
   Future<bool> hasWebVpnSession() async => false;
 
   @override
