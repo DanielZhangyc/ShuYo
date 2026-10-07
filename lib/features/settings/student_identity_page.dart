@@ -43,18 +43,15 @@ class _StudentIdentityPageState extends State<StudentIdentityPage> {
           return ListView(
             padding: const EdgeInsets.all(20),
             children: [
-              Text(session == null
-                  ? '尚未核实学号'
-                  : '已核实学号 ${session.maskedStudentId}'),
-              const SizedBox(height: 10),
-              Text(session == null
-                  ? '校园登录和本地课表不受影响。核实学号后，可在后续版本中用同一账户管理反馈与课表分享。'
-                  : '这台设备的 ShuYo 身份有效至 ${_date(session.expiresAt)}。学校会话失效不会立即退出 ShuYo 身份。'),
-              const SizedBox(height: 20),
-              FilledButton(
-                onPressed: _busy ? null : _verify,
-                child: Text(session == null ? '核实当前学号' : '重新核实学号'),
-              ),
+              Text(
+                  session == null ? '未认证' : '已认证 · ${session.maskedStudentId}'),
+              if (session == null) ...[
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: _busy ? null : _verify,
+                  child: const Text('尝试认证'),
+                ),
+              ],
               if (session != null) ...[
                 const SizedBox(height: 10),
                 OutlinedButton(
@@ -82,43 +79,22 @@ class _StudentIdentityPageState extends State<StudentIdentityPage> {
   }
 
   Future<void> _verify() async {
-    final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('核实学号'),
-            content: const Text(
-              'ShuYo 会将当前教务会话临时发送到自己的服务器，用于向学校核实学号。'
-              '服务器不保存学校会话；会加密保存真实学号，总管理员可按需查看。'
-              '这台设备的 ShuYo 身份最长保留 90 天，可随时退出。'
-              '核验失败不影响校园登录或本地课表。',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('取消'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('同意并核实'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!confirmed || !mounted) return;
     setState(() {
       _busy = true;
       _message = null;
     });
     try {
-      await widget.service.grantConsent();
-      final session = await widget.service.bindCurrentStudent(force: true);
-      if (mounted) setState(() => _message = '核实成功：${session.maskedStudentId}');
+      if (!await widget.service.hasConsent()) {
+        if (mounted) setState(() => _message = '请先在账号管理中确认身份验证。');
+        return;
+      }
+      await widget.service.bindCurrentStudent();
+      if (mounted) setState(() => _message = '身份已认证');
       _refresh();
-    } on StudentIdentityException catch (error) {
-      if (mounted) setState(() => _message = error.message);
     } on Object {
-      if (mounted) setState(() => _message = '暂时无法核实学号，请稍后重试。');
+      if (mounted) {
+        setState(() => _message = '当前暂时无法验证您的身份，请稍后再试');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -207,7 +183,4 @@ class _StudentIdentityPageState extends State<StudentIdentityPage> {
       if (mounted) setState(() => _busy = false);
     }
   }
-
-  String _date(DateTime value) =>
-      '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
 }

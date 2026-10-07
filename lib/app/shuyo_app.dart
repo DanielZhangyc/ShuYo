@@ -18,6 +18,7 @@ import '../data/services/academic_auth_service.dart';
 import '../data/services/academic_schedule_display_settings_service.dart';
 import '../data/services/app_data_migration_service.dart';
 import '../data/services/client_settings_service.dart';
+import '../data/services/student_identity_service.dart';
 import '../data/services/unified_account_service.dart';
 import '../data/services/webvpn_session_store.dart';
 import 'app_shell.dart';
@@ -44,6 +45,7 @@ class ShuYoApp extends StatefulWidget {
 
 class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
   final _settingsService = ClientSettingsService();
+  final _studentIdentityService = StudentIdentityService();
   final _dataMigrationService = AppDataMigrationService();
   final _onboardingController = StartupOnboardingController();
   late Future<_StartupData> _startupFuture;
@@ -76,6 +78,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _studentIdentityService.dispose();
     _onboardingController.dispose();
     super.dispose();
   }
@@ -136,6 +139,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
             },
             onDemoLogin: _activateDemoMode,
             controller: _onboardingController,
+            studentIdentityService: demo ? null : _studentIdentityService,
             child: AppShell(
               key: ValueKey('app-shell-${demo ? 'demo' : 'normal'}'),
               initialWebVpnEnabled: demo ? false : data.webVpnEnabled,
@@ -166,6 +170,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
               isDemo: demo,
               demoData: _demoData,
               onboardingController: _onboardingController,
+              studentIdentityService: demo ? null : _studentIdentityService,
               onExitDemo: demo ? _exitDemoMode : null,
             ),
           );

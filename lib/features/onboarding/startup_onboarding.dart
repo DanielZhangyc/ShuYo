@@ -8,9 +8,11 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../data/models/client_backend.dart';
 import '../../data/models/classroom.dart';
 import '../../data/services/client_settings_service.dart';
+import '../../data/services/student_identity_service.dart';
 import '../../shared/navigation/shuyo_route.dart';
 import '../../shared/widgets/webvpn_toggle.dart';
 import '../auth/native_login_page.dart';
+import '../settings/student_identity_page.dart';
 
 class StartupOnboardingController extends ChangeNotifier {
   bool _academicLoggedIn = false;
@@ -197,6 +199,7 @@ class StartupOnboarding extends StatefulWidget {
     required this.controller,
     this.settingsService,
     this.notificationPermissionRequester,
+    this.studentIdentityService,
   });
 
   final Widget child;
@@ -209,6 +212,7 @@ class StartupOnboarding extends StatefulWidget {
   final StartupOnboardingController controller;
   final ClientSettingsService? settingsService;
   final Future<bool?> Function()? notificationPermissionRequester;
+  final StudentIdentityService? studentIdentityService;
 
   @override
   State<StartupOnboarding> createState() => _StartupOnboardingState();
@@ -227,6 +231,8 @@ class _StartupOnboardingState extends State<StartupOnboarding>
   bool _accountManagerMode = false;
   bool _webVpnExpanded = false;
   bool _changingWebVpn = false;
+  bool _choosingIdentity = false;
+  bool _verifyingIdentity = false;
   late bool _academicLoggedIn = widget.initialAcademicLoggedIn;
   late bool _academicSessionExpired = widget.initialAcademicSessionExpired;
   late bool _webVpnEnabled = widget.controller.webVpnEnabled;
@@ -236,6 +242,9 @@ class _StartupOnboardingState extends State<StartupOnboarding>
   late int _handledOpenRequest;
   Timer? _panelNoticeTimer;
   String? _panelNotice;
+  int get _loginPageIndex => widget.studentIdentityService == null ? 2 : 3;
+  bool get _onIdentityPage =>
+      widget.studentIdentityService != null && _page == 2;
 
   @override
   void initState() {
@@ -303,7 +312,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
     setState(() {
       _visible = true;
       _accountManagerMode = true;
-      _page = 2;
+      _page = _loginPageIndex;
       _academicLoggedIn = widget.controller.academicLoggedIn;
       _academicSessionExpired = widget.controller.academicSessionExpired;
       _webVpnEnabled = widget.controller.webVpnEnabled;
@@ -312,10 +321,91 @@ class _StartupOnboardingState extends State<StartupOnboarding>
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _pageController.hasClients) {
-        _pageController.jumpToPage(2);
+        _pageController.jumpToPage(_loginPageIndex);
       }
       if (mounted) _panelAnimationController.forward(from: 0);
+      if (mounted) unawaited(_maybePresentOldUserIdentityChoice());
     });
+  }
+
+  Future<void> _maybePresentOldUserIdentityChoice() async {
+    final service = widget.studentIdentityService;
+    if (service == null) return;
+    try {
+      await service.refreshLocalStatus();
+      final answered = await service.hasAnsweredConsent();
+      if (!mounted ||
+          !_accountManagerMode ||
+          !_visible ||
+          answered ||
+          service.isVerified) {
+        return;
+      }
+      await _showIdentityChoicePage();
+    } on Object {
+      // Account manager stays usable if local identity storage is unavailable.
+    }
+  }
+
+  Future<void> _showIdentityChoicePage() async {
+    if (!mounted || widget.studentIdentityService == null) return;
+    await _pageController.animateToPage(2,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic);
+    if (mounted) setState(() => _page = 2);
+  }
+
+  Future<void> _chooseIdentity(bool confirmed) async {
+    final service = widget.studentIdentityService;
+    if (service == null || _choosingIdentity) return;
+    setState(() => _choosingIdentity = true);
+    try {
+      if (confirmed) {
+        await service.grantConsent();
+      } else {
+        await service.declineConsent();
+      }
+      if (!mounted) return;
+      await _pageController.animateToPage(_loginPageIndex,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic);
+      if (!mounted) return;
+      setState(() => _page = _loginPageIndex);
+      if (confirmed && _accountManagerMode && _academicLoggedIn) {
+        unawaited(service.ensureAfterCampusLogin());
+      }
+    } on Object {
+      if (mounted) _showPanelNotice('暂时无法保存选择，请重试');
+    } finally {
+      if (mounted) setState(() => _choosingIdentity = false);
+    }
+  }
+
+  Future<void> _openIdentityStatus() async {
+    final service = widget.studentIdentityService;
+    if (service == null || _verifyingIdentity) return;
+    try {
+      await service.refreshLocalStatus();
+      if (!mounted) return;
+      if (service.isVerified) {
+        await Navigator.of(context).push<void>(
+          shuyoRoute(builder: (_) => StudentIdentityPage(service: service)),
+        );
+        return;
+      }
+      if (!await service.hasConsent()) {
+        await _showIdentityChoicePage();
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _verifyingIdentity = true);
+      await service.bindCurrentStudent();
+      if (mounted) _showPanelNotice('身份已认证');
+    } on Object {
+      if (mounted) _showPanelNotice('当前暂时无法验证您的身份，请稍后再试');
+    } finally {
+      if (mounted) setState(() => _verifyingIdentity = false);
+    }
   }
 
   Future<void> _continue() async {
@@ -330,7 +420,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
       }
     }
     if (!mounted) return;
-    if (_page < 2) {
+    if (_page < _loginPageIndex) {
       await _pageController.nextPage(
         duration: const Duration(milliseconds: 320),
         curve: Curves.easeOutCubic,
@@ -471,6 +561,15 @@ class _StartupOnboardingState extends State<StartupOnboarding>
 
   Future<void> _goBack() async {
     if (_page <= 0) return;
+    if (_accountManagerMode) {
+      if (_onIdentityPage) {
+        await _pageController.animateToPage(_loginPageIndex,
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeOutCubic);
+        if (mounted) setState(() => _page = _loginPageIndex);
+      }
+      return;
+    }
     await _pageController.previousPage(
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeOutCubic,
@@ -608,7 +707,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
 
   Widget _panel(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final showFooter = _accountManagerMode || _page < 2;
+    final showFooter = _accountManagerMode || _page < _loginPageIndex;
     return Material(
       key: const ValueKey('startup-onboarding-panel'),
       color: colors.surface,
@@ -642,7 +741,8 @@ class _StartupOnboardingState extends State<StartupOnboarding>
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
-                      if (_page > 0)
+                      if (_page > 0 &&
+                          (!_accountManagerMode || _onIdentityPage))
                         Positioned(
                           left: 8,
                           top: 4,
@@ -674,33 +774,60 @@ class _StartupOnboardingState extends State<StartupOnboarding>
                   children: [
                     _welcome(context),
                     _notifications(context),
+                    if (widget.studentIdentityService != null)
+                      _identityChoice(context),
                     _login(context),
                   ],
                 ),
               ),
               SizedBox(
                 key: const ValueKey('startup-onboarding-footer'),
-                height: 78,
+                height: _onIdentityPage ? 164 : 78,
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(24, 8, 24, 18),
-                  child: showFooter
-                      ? FilledButton(
-                          onPressed: _continue,
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size.fromHeight(52),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                  child: _onIdentityPage
+                      ? Column(
+                          children: [
+                            TextButton(
+                              onPressed: _choosingIdentity
+                                  ? null
+                                  : () => _chooseIdentity(false),
+                              child: const Text('暂不'),
                             ),
-                          ),
-                          child: Text(
-                            _accountManagerMode && _page == 2
-                                ? '完成'
-                                : _page == 2
-                                    ? '开始使用'
-                                    : '继续',
-                          ),
+                            FilledButton(
+                              onPressed: _choosingIdentity
+                                  ? null
+                                  : () => _chooseIdentity(true),
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size.fromHeight(52),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: const Text('确认'),
+                            ),
+                            const SizedBox(height: 5),
+                            _identityPrivacyNotice(context),
+                          ],
                         )
-                      : const SizedBox.shrink(),
+                      : showFooter
+                          ? FilledButton(
+                              onPressed: _continue,
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size.fromHeight(52),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: Text(
+                                _accountManagerMode && _page == _loginPageIndex
+                                    ? '完成'
+                                    : _page == _loginPageIndex
+                                        ? '开始使用'
+                                        : '继续',
+                              ),
+                            )
+                          : const SizedBox.shrink(),
                 ),
               ),
             ],
@@ -743,6 +870,43 @@ class _StartupOnboardingState extends State<StartupOnboarding>
         ],
       );
 
+  Widget _identityChoice(BuildContext context) => _content(
+        context,
+        '身份验证',
+        null,
+        [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+            child: Text(
+              '为避免身份冒用，ShuYo将验证你的校园身份，认证后可使用分享课程表、课程评价等功能。',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 16,
+                height: 1.5,
+              ),
+            ),
+          ),
+        ],
+      );
+
+  Widget _identityPrivacyNotice(BuildContext context) => Center(
+        child: Text.rich(
+          TextSpan(
+            text: '点击即同意',
+            children: [
+              _link(context, '隐私政策', 'https://shuyo.work/doc/privacy.html'),
+              const TextSpan(text: '中的数据处理'),
+            ],
+          ),
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontSize: 12,
+          ),
+        ),
+      );
+
   Widget _login(BuildContext context) => _pageLayout(
         context,
         header: Column(
@@ -782,6 +946,20 @@ class _StartupOnboardingState extends State<StartupOnboarding>
                 : _openAcademicLogin,
           ),
           if (_accountManagerMode) ...[
+            if (widget.studentIdentityService != null)
+              AnimatedBuilder(
+                animation: widget.studentIdentityService!,
+                builder: (context, _) => _accountTile(
+                  context,
+                  icon: Icons.verified_user_outlined,
+                  title: 'ShuYo 身份',
+                  description: '用于反馈、课表分享等功能',
+                  statusLabel:
+                      widget.studentIdentityService!.isVerified ? '已认证' : '未认证',
+                  busy: _verifyingIdentity,
+                  onTap: _verifyingIdentity ? null : _openIdentityStatus,
+                ),
+              ),
             _webVpnSection(context),
           ],
         ],

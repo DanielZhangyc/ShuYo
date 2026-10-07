@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -61,7 +62,7 @@ class StudentIdentitySession {
   }
 }
 
-class StudentIdentityService {
+class StudentIdentityService extends ChangeNotifier {
   StudentIdentityService({
     SecureAppStore? secureStore,
     AcademicAccountStore? accountStore,
@@ -78,6 +79,7 @@ class StudentIdentityService {
   static const _sessionKey = 'shuyo.student.session.v1';
   static const _pendingRevocationsKey = 'shuyo.student.pending_revocations.v1';
   static const _consentKey = 'shuyo.student.identity.consent.v1';
+  static const _consentChoiceKey = 'shuyo.student.identity.choice.v1';
 
   final SecureAppStore _secureStore;
   final AcademicAccountStore _accountStore;
@@ -87,25 +89,71 @@ class StudentIdentityService {
   final Future<SharedPreferences> Function() _preferencesLoader;
   final http.Client _httpClient;
   int _epoch = 0;
+  bool _isVerified = false;
+  bool _disposed = false;
 
-  void dispose() => _httpClient.close();
+  bool get isVerified => _isVerified;
+
+  void _setVerified(bool value) {
+    if (_disposed) return;
+    if (_isVerified == value) return;
+    _isVerified = value;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _httpClient.close();
+    super.dispose();
+  }
 
   Future<bool> hasConsent() async =>
       (await _preferencesLoader()).getBool(_consentKey) ?? false;
 
-  Future<void> grantConsent() async =>
-      (await _preferencesLoader()).setBool(_consentKey, true);
+  Future<bool> hasAnsweredConsent() async {
+    final prefs = await _preferencesLoader();
+    return prefs.getBool(_consentChoiceKey) == true ||
+        prefs.getBool(_consentKey) == true;
+  }
+
+  Future<void> grantConsent() async {
+    final prefs = await _preferencesLoader();
+    await prefs.setBool(_consentKey, true);
+    await prefs.setBool(_consentChoiceKey, true);
+  }
+
+  Future<void> declineConsent() async {
+    final prefs = await _preferencesLoader();
+    await prefs.setBool(_consentKey, false);
+    await prefs.setBool(_consentChoiceKey, true);
+  }
+
+  Future<void> refreshLocalStatus() async {
+    try {
+      _setVerified(await loadLocalSession() != null);
+    } on Object {
+      _setVerified(false);
+    }
+  }
 
   Future<StudentIdentitySession?> loadLocalSession() async {
     final raw = await _secureStore.read(_sessionKey);
-    if (raw == null) return null;
+    if (raw == null) {
+      _setVerified(false);
+      return null;
+    }
     try {
       final session = StudentIdentitySession.fromJson(jsonDecode(raw));
-      if (session != null && !session.isExpired) return session;
+      if (session != null && !session.isExpired) {
+        _setVerified(true);
+        return session;
+      }
     } on Object {
       // Damaged secure storage should not block the rest of the app.
     }
     await _secureStore.delete(_sessionKey);
+    _setVerified(false);
     return null;
   }
 
@@ -182,6 +230,7 @@ class StudentIdentityService {
       await _revokeOrQueue(session.token);
       throw const StudentIdentityException('校园账户已退出，请重新核验。');
     }
+    _setVerified(true);
     return session;
   }
 
@@ -199,9 +248,24 @@ class StudentIdentityService {
     } on StudentIdentityException catch (error) {
       if (error.code == 'unauthorized') {
         await _secureStore.delete(_sessionKey);
+        _setVerified(false);
         return null;
       }
       rethrow;
+    }
+  }
+
+  /// Call before a feature that requires a verified student. A valid ShuYo
+  /// session is reused; only an absent or rejected session triggers a single
+  /// campus verification attempt after the user has consented.
+  Future<bool> ensureForProtectedAction() async {
+    if (!await hasConsent()) return false;
+    try {
+      if (await checkCurrentSession() != null) return true;
+      await bindCurrentStudent();
+      return true;
+    } on Object {
+      return false;
     }
   }
 
@@ -220,6 +284,7 @@ class StudentIdentityService {
     );
     _epoch++;
     await _secureStore.delete(_sessionKey);
+    _setVerified(false);
   }
 
   Future<void> deleteAccount() async {
@@ -229,11 +294,14 @@ class StudentIdentityService {
     _epoch++;
     await _secureStore.delete(_sessionKey);
     await (await _preferencesLoader()).remove(_consentKey);
+    await (await _preferencesLoader()).remove(_consentChoiceKey);
+    _setVerified(false);
   }
 
   Future<void> _clearCurrentSession() async {
     final session = await loadLocalSession();
     await _secureStore.delete(_sessionKey);
+    _setVerified(false);
     if (session != null) await _revokeOrQueue(session.token);
   }
 

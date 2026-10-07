@@ -46,6 +46,9 @@ void main() {
     await accounts.saveStudentId('23123456');
     var enrollmentCount = 0;
     final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/student/session') {
+        return http.Response('{"success":true,"data":{}}', 200);
+      }
       if (request.url.path == '/api/v1/student/sessions') {
         enrollmentCount++;
         final body = jsonDecode(request.body) as Map<String, dynamic>;
@@ -73,6 +76,7 @@ void main() {
     );
     await service.ensureAfterCampusLogin();
     expect(school.reads, 0);
+    expect(await service.ensureForProtectedAction(), isFalse);
     await service.grantConsent();
     await service.ensureAfterCampusLogin();
     expect(school.reads, 1);
@@ -80,6 +84,8 @@ void main() {
     expect((await service.loadLocalSession())?.studentId, '23123456');
     await service.ensureAfterCampusLogin();
     expect(enrollmentCount, 1);
+    expect(await service.ensureForProtectedAction(), isTrue);
+    expect(school.reads, 1);
     service.dispose();
   });
 }

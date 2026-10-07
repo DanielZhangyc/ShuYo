@@ -71,6 +71,7 @@ class AppShell extends StatefulWidget {
     this.progressRepository,
     this.rankingRepository,
     this.academicAuthService,
+    this.studentIdentityService,
     this.unifiedAccountService,
     this.initialOpenSchedule = false,
     this.initialStartupTab = AppTab.home,
@@ -102,6 +103,7 @@ class AppShell extends StatefulWidget {
   final AcademicProgressRepository? progressRepository;
   final AcademicRankingRepository? rankingRepository;
   final AcademicAuthService? academicAuthService;
+  final StudentIdentityService? studentIdentityService;
   final UnifiedAccountService? unifiedAccountService;
   final bool initialOpenSchedule;
   final AppTab initialStartupTab;
@@ -171,7 +173,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final UnifiedAccountService _unifiedAccountService =
       widget.unifiedAccountService ?? UnifiedAccountService();
   final _clientBackendRepository = ClientBackendRepository();
-  final _studentIdentityService = StudentIdentityService();
+  late final StudentIdentityService _studentIdentityService =
+      widget.studentIdentityService ?? StudentIdentityService();
 
   @override
   void initState() {
@@ -244,6 +247,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         unawaited(_refreshAnnouncementSummaryQuietly());
         unawaited(_checkClientBackendPrompts());
         unawaited(_studentIdentityService.retryPendingRevocations());
+        unawaited(_studentIdentityService.refreshLocalStatus());
       });
     }
   }
@@ -280,7 +284,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _widgetClickSubscription?.cancel();
     _directBookingClient?.dispose();
     _webVpnBookingClient?.dispose();
-    _studentIdentityService.dispose();
+    if (widget.studentIdentityService == null) {
+      _studentIdentityService.dispose();
+    }
     widget.onboardingController.setWebVpnChangeHandler(null);
     widget.onboardingController.setProfileChangeHandlers();
     widget.onboardingController.setAccountLogoutHandlers();
@@ -875,7 +881,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           settingsService: _clientSettingsService,
           scheduleNotificationService: _scheduleNotificationService,
           backendRepository: _clientBackendRepository,
-          studentIdentityService: _studentIdentityService,
           selectedThemeId: widget.selectedThemeId,
           followSystemTheme: widget.followSystemTheme,
           onThemeChanged: widget.onThemeChanged,

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shuyo/data/services/student_identity_service.dart';
 import 'package:shuyo/features/onboarding/startup_onboarding.dart';
 import 'package:shuyo/shared/widgets/webvpn_toggle.dart';
 
@@ -271,5 +272,107 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('欢迎使用ShuYo'), findsOneWidget);
     expect(find.textContaining('乐乎'), findsNothing);
+  });
+
+  testWidgets('new users can defer identity verification after notifications',
+      (tester) async {
+    final controller = StartupOnboardingController();
+    final identity = StudentIdentityService();
+    addTearDown(controller.dispose);
+    addTearDown(identity.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: StartupOnboarding(
+        initiallyCompleted: false,
+        initialAcademicLoggedIn: false,
+        onAcademicLoginCompleted: () {},
+        notificationPermissionRequester: () async => false,
+        studentIdentityService: identity,
+        controller: controller,
+        child: const Scaffold(body: Text('主页')),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('继续'));
+    await tester.pumpAndSettle();
+    expect(find.text('开启通知权限'), findsOneWidget);
+    await tester.tap(find.text('继续'));
+    await tester.pumpAndSettle();
+    expect(find.text('身份验证'), findsOneWidget);
+    expect(
+      find.text('为避免身份冒用，ShuYo将验证你的校园身份，认证后可使用分享课程表、课程评价等功能。'),
+      findsOneWidget,
+    );
+    expect(tester.getTopLeft(find.text('暂不')).dy,
+        lessThan(tester.getTopLeft(find.text('确认')).dy));
+    expect(tester.getTopLeft(find.text('隐私政策')).dy,
+        greaterThan(tester.getBottomLeft(find.text('确认')).dy));
+    await tester.tap(find.text('暂不'));
+    await tester.pumpAndSettle();
+    expect(await identity.hasAnsweredConsent(), isTrue);
+    expect(await identity.hasConsent(), isFalse);
+    expect(find.text('账号管理'), findsOneWidget);
+    expect(find.text('上大校园账户'), findsOneWidget);
+  });
+
+  testWidgets('existing users get the same identity choice once',
+      (tester) async {
+    final controller = StartupOnboardingController();
+    final identity = StudentIdentityService();
+    addTearDown(controller.dispose);
+    addTearDown(identity.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: StartupOnboarding(
+        initiallyCompleted: true,
+        initialAcademicLoggedIn: false,
+        onAcademicLoginCompleted: () {},
+        studentIdentityService: identity,
+        controller: controller,
+        child: const Scaffold(body: Text('主页')),
+      ),
+    ));
+    controller.openAccountManager(academicLoggedIn: false);
+    await tester.pumpAndSettle();
+    expect(find.text('身份验证'), findsOneWidget);
+    await tester.tap(find.text('确认'));
+    await tester.pumpAndSettle();
+    expect(await identity.hasConsent(), isTrue);
+    expect(find.text('ShuYo 身份'), findsOneWidget);
+    expect(find.text('未认证'), findsOneWidget);
+    controller.dismissAccountManager();
+    await tester.pumpAndSettle();
+    controller.openAccountManager(academicLoggedIn: false);
+    await tester.pumpAndSettle();
+    expect(find.text('身份验证'), findsNothing);
+  });
+
+  testWidgets('declining once leaves an account-manager retry entry',
+      (tester) async {
+    final controller = StartupOnboardingController();
+    final identity = StudentIdentityService();
+    addTearDown(controller.dispose);
+    addTearDown(identity.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: StartupOnboarding(
+        initiallyCompleted: true,
+        initialAcademicLoggedIn: false,
+        onAcademicLoginCompleted: () {},
+        studentIdentityService: identity,
+        controller: controller,
+        child: const Scaffold(body: Text('主页')),
+      ),
+    ));
+    controller.openAccountManager(academicLoggedIn: false);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('暂不'));
+    await tester.pumpAndSettle();
+    expect(await identity.hasConsent(), isFalse);
+    controller.dismissAccountManager();
+    await tester.pumpAndSettle();
+    controller.openAccountManager(academicLoggedIn: false);
+    await tester.pumpAndSettle();
+    expect(find.text('未认证'), findsOneWidget);
+    await tester.tap(find.text('未认证'));
+    await tester.pumpAndSettle();
+    expect(find.text('身份验证'), findsOneWidget);
   });
 }
