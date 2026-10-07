@@ -317,8 +317,13 @@ void main() {
     );
     expect(tester.getTopLeft(find.text('暂不')).dy,
         lessThan(tester.getTopLeft(find.text('确认')).dy));
-    expect(tester.getTopLeft(find.text('隐私政策')).dy,
-        greaterThan(tester.getBottomLeft(find.text('确认')).dy));
+    expect(
+      tester.getTopLeft(find.widgetWithText(FilledButton, '确认')).dy -
+          tester.getBottomLeft(find.widgetWithText(TextButton, '暂不')).dy,
+      closeTo(14, 1),
+    );
+    expect(find.text('隐私政策'), findsNothing);
+    expect(find.textContaining('点击即同意'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.tap(find.text('暂不'));
     await tester.pumpAndSettle();
@@ -355,8 +360,7 @@ void main() {
     final status = find.byKey(const ValueKey('student-identity-status'));
     expect(status, findsOneWidget);
     expect(
-      find.descendant(
-          of: status, matching: find.byIcon(Icons.check_circle)),
+      find.descendant(of: status, matching: find.byIcon(Icons.cancel)),
       findsOneWidget,
     );
     expect(tester.getTopLeft(status).dy,
@@ -367,6 +371,40 @@ void main() {
     controller.openAccountManager(academicLoggedIn: false);
     await tester.pumpAndSettle();
     expect(find.text('身份验证'), findsNothing);
+  });
+
+  testWidgets('account manager back button returns to earlier pages',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'shuyo.student.identity.choice.v1': true,
+    });
+    final controller = StartupOnboardingController();
+    final identity = StudentIdentityService();
+    addTearDown(controller.dispose);
+    addTearDown(identity.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: StartupOnboarding(
+        initiallyCompleted: true,
+        initialAcademicLoggedIn: false,
+        onAcademicLoginCompleted: () {},
+        studentIdentityService: identity,
+        controller: controller,
+        child: const Scaffold(body: Text('主页')),
+      ),
+    ));
+    controller.openAccountManager(academicLoggedIn: false);
+    await tester.pumpAndSettle();
+    expect(find.text('账号管理'), findsOneWidget);
+    await tester.tap(find.byTooltip('返回上一页'));
+    await tester.pumpAndSettle();
+    expect(find.text('身份验证'), findsOneWidget);
+    await tester.tap(find.byTooltip('返回上一页'));
+    await tester.pumpAndSettle();
+    expect(find.text('开启通知权限'), findsOneWidget);
+    await tester.tap(find.byTooltip('返回上一页'));
+    await tester.pumpAndSettle();
+    expect(find.text('欢迎使用ShuYo'), findsOneWidget);
+    expect(find.byTooltip('返回上一页'), findsNothing);
   });
 
   testWidgets('declining once leaves an account-manager retry entry',
@@ -441,6 +479,10 @@ void main() {
     expect(
       tester.widget<Text>(find.text('已认证')).style?.color,
       Theme.of(tester.element(status)).colorScheme.primary,
+    );
+    expect(
+      find.descendant(of: status, matching: find.byIcon(Icons.check_circle)),
+      findsOneWidget,
     );
   });
 }

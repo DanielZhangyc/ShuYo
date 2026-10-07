@@ -541,15 +541,6 @@ class _StartupOnboardingState extends State<StartupOnboarding>
 
   Future<void> _goBack() async {
     if (_page <= 0) return;
-    if (_accountManagerMode) {
-      if (_onIdentityPage) {
-        await _pageController.animateToPage(_loginPageIndex,
-            duration: const Duration(milliseconds: 280),
-            curve: Curves.easeOutCubic);
-        if (mounted) setState(() => _page = _loginPageIndex);
-      }
-      return;
-    }
     await _pageController.previousPage(
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeOutCubic,
@@ -721,8 +712,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
-                      if (_page > 0 &&
-                          (!_accountManagerMode || _onIdentityPage))
+                      if (_page > 0)
                         Positioned(
                           left: 8,
                           top: 4,
@@ -763,56 +753,34 @@ class _StartupOnboardingState extends State<StartupOnboarding>
               SizedBox(
                 key: const ValueKey('startup-onboarding-footer'),
                 height: 78,
-                child: _onIdentityPage
-                    ? Stack(
-                        children: [
-                          Positioned(
-                            left: 24,
-                            right: 24,
-                            top: 8,
-                            height: 52,
-                            child: FilledButton(
-                              onPressed: _choosingIdentity
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 18),
+                  child: showFooter
+                      ? FilledButton(
+                          onPressed: _onIdentityPage
+                              ? (_choosingIdentity
                                   ? null
-                                  : () => _chooseIdentity(true),
-                              style: FilledButton.styleFrom(
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                              child: const Text('确认'),
+                                  : () => _chooseIdentity(true))
+                              : _continue,
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(52),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
                             ),
                           ),
-                          Positioned(
-                            left: 24,
-                            right: 24,
-                            bottom: 0,
-                            child: _identityPrivacyNotice(context),
+                          child: Text(
+                            _onIdentityPage
+                                ? '确认'
+                                : _accountManagerMode &&
+                                        _page == _loginPageIndex
+                                    ? '完成'
+                                    : _page == _loginPageIndex
+                                        ? '开始使用'
+                                        : '继续',
                           ),
-                        ],
-                      )
-                    : Padding(
-                        padding: const EdgeInsets.fromLTRB(24, 8, 24, 18),
-                        child: showFooter
-                            ? FilledButton(
-                                onPressed: _continue,
-                                style: FilledButton.styleFrom(
-                                  minimumSize: const Size.fromHeight(52),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                ),
-                                child: Text(
-                                  _accountManagerMode &&
-                                          _page == _loginPageIndex
-                                      ? '完成'
-                                      : _page == _loginPageIndex
-                                          ? '开始使用'
-                                          : '继续',
-                                ),
-                              )
-                            : const SizedBox.shrink(),
-                      ),
+                        )
+                      : const SizedBox.shrink(),
+                ),
               ),
             ],
           ),
@@ -878,23 +846,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
             child: const Text('暂不'),
           ),
         ),
-      );
-
-  Widget _identityPrivacyNotice(BuildContext context) => Center(
-        child: Text.rich(
-          TextSpan(
-            text: '点击即同意',
-            children: [
-              _link(context, '隐私政策', 'https://shuyo.work/doc/privacy.html'),
-              const TextSpan(text: '中的数据处理'),
-            ],
-          ),
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-            fontSize: 12,
-          ),
-        ),
+        pageFooterBottomPadding: 6,
       );
 
   Widget _login(BuildContext context) => _pageLayout(
@@ -967,7 +919,8 @@ class _StartupOnboardingState extends State<StartupOnboarding>
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.check_circle, size: 18, color: color),
+                  Icon(verified ? Icons.check_circle : Icons.cancel,
+                      size: 18, color: color),
                   const SizedBox(width: 6),
                   Text(
                     verified ? '已认证' : '未认证',
@@ -1323,12 +1276,13 @@ class _StartupOnboardingState extends State<StartupOnboarding>
 
   Widget _content(
       BuildContext context, String title, String? subtitle, List<Widget> items,
-      {Widget? pageFooter}) {
+      {Widget? pageFooter, double pageFooterBottomPadding = 12}) {
     return _pageLayout(
       context,
       header: _pageHeader(context, title: title, subtitle: subtitle),
       bottomChildren: items,
       pageFooter: pageFooter,
+      pageFooterBottomPadding: pageFooterBottomPadding,
     );
   }
 
@@ -1337,6 +1291,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
     required Widget header,
     required List<Widget> bottomChildren,
     Widget? pageFooter,
+    double pageFooterBottomPadding = 12,
     double headerSpacing = 32,
   }) {
     return Column(
@@ -1356,7 +1311,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
         ),
         if (pageFooter != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+            padding: EdgeInsets.fromLTRB(24, 0, 24, pageFooterBottomPadding),
             child: pageFooter,
           ),
       ],
