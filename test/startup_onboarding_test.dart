@@ -297,12 +297,20 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
+    final welcomeButton =
+        tester.getRect(find.widgetWithText(FilledButton, '继续'));
     await tester.tap(find.text('继续'));
     await tester.pumpAndSettle();
     expect(find.text('开启通知权限'), findsOneWidget);
+    final notificationButton =
+        tester.getRect(find.widgetWithText(FilledButton, '继续'));
+    expect(notificationButton, welcomeButton);
     await tester.tap(find.text('继续'));
     await tester.pumpAndSettle();
     expect(find.text('身份验证'), findsOneWidget);
+    final identityButton =
+        tester.getRect(find.widgetWithText(FilledButton, '确认'));
+    expect(identityButton, welcomeButton);
     expect(
       find.text('为避免身份冒用，ShuYo将验证你的校园身份，认证后可使用分享课程表、课程评价等功能。'),
       findsOneWidget,

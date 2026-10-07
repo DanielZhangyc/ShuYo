@@ -762,53 +762,57 @@ class _StartupOnboardingState extends State<StartupOnboarding>
               ),
               SizedBox(
                 key: const ValueKey('startup-onboarding-footer'),
-                height: _onIdentityPage ? 164 : 78,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 18),
-                  child: _onIdentityPage
-                      ? Column(
-                          children: [
-                            TextButton(
-                              onPressed: _choosingIdentity
-                                  ? null
-                                  : () => _chooseIdentity(false),
-                              child: const Text('暂不'),
-                            ),
-                            FilledButton(
+                height: 78,
+                child: _onIdentityPage
+                    ? Stack(
+                        children: [
+                          Positioned(
+                            left: 24,
+                            right: 24,
+                            top: 8,
+                            height: 52,
+                            child: FilledButton(
                               onPressed: _choosingIdentity
                                   ? null
                                   : () => _chooseIdentity(true),
                               style: FilledButton.styleFrom(
-                                minimumSize: const Size.fromHeight(52),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                               ),
                               child: const Text('确认'),
                             ),
-                            const SizedBox(height: 5),
-                            _identityPrivacyNotice(context),
-                          ],
-                        )
-                      : showFooter
-                          ? FilledButton(
-                              onPressed: _continue,
-                              style: FilledButton.styleFrom(
-                                minimumSize: const Size.fromHeight(52),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
+                          ),
+                          Positioned(
+                            left: 24,
+                            right: 24,
+                            bottom: 0,
+                            child: _identityPrivacyNotice(context),
+                          ),
+                        ],
+                      )
+                    : Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 8, 24, 18),
+                        child: showFooter
+                            ? FilledButton(
+                                onPressed: _continue,
+                                style: FilledButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(52),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
                                 ),
-                              ),
-                              child: Text(
-                                _accountManagerMode && _page == _loginPageIndex
-                                    ? '完成'
-                                    : _page == _loginPageIndex
-                                        ? '开始使用'
-                                        : '继续',
-                              ),
-                            )
-                          : const SizedBox.shrink(),
-                ),
+                                child: Text(
+                                  _accountManagerMode &&
+                                          _page == _loginPageIndex
+                                      ? '完成'
+                                      : _page == _loginPageIndex
+                                          ? '开始使用'
+                                          : '继续',
+                                ),
+                              )
+                            : const SizedBox.shrink(),
+                      ),
               ),
             ],
           ),
@@ -868,6 +872,12 @@ class _StartupOnboardingState extends State<StartupOnboarding>
             ),
           ),
         ],
+        pageFooter: Center(
+          child: TextButton(
+            onPressed: _choosingIdentity ? null : () => _chooseIdentity(false),
+            child: const Text('暂不'),
+          ),
+        ),
       );
 
   Widget _identityPrivacyNotice(BuildContext context) => Center(
