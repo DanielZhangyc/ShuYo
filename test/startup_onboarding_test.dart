@@ -276,6 +276,10 @@ void main() {
 
   testWidgets('new users can defer identity verification after notifications',
       (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final controller = StartupOnboardingController();
     final identity = StudentIdentityService();
     addTearDown(controller.dispose);
@@ -306,6 +310,7 @@ void main() {
         lessThan(tester.getTopLeft(find.text('确认')).dy));
     expect(tester.getTopLeft(find.text('隐私政策')).dy,
         greaterThan(tester.getBottomLeft(find.text('确认')).dy));
+    expect(tester.takeException(), isNull);
     await tester.tap(find.text('暂不'));
     await tester.pumpAndSettle();
     expect(await identity.hasAnsweredConsent(), isTrue);
