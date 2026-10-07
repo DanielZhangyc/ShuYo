@@ -27,3 +27,4 @@ ios/.symlinks/
 .widget_preview/
 
 /docs
+.DS_Store
