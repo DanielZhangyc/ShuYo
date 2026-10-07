@@ -186,10 +186,21 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
 
   Future<void> _chooseSource() async {
     Set<String> favorites;
+    AnnouncementMenuExpansion expansion;
     try {
-      favorites = await widget.repository.favoriteSourceIds();
+      final settings = await Future.wait<Object>([
+        widget.repository.favoriteSourceIds(),
+        widget.repository.menuExpansion(),
+      ]);
+      favorites = settings[0] as Set<String>;
+      expansion = settings[1] as AnnouncementMenuExpansion;
     } on Object {
       favorites = <String>{};
+      expansion = (
+        favorites: true,
+        campus: true,
+        college: false,
+      );
     }
     if (!mounted || _source == null) return;
     final choice = await showGeneralDialog<AnnouncementSource>(
@@ -218,7 +229,9 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
             child: _AnnouncementSourceMenu(
               selected: _source!,
               initialFavorites: favorites,
+              initialExpansion: expansion,
               onToggleFavorite: widget.repository.toggleFavoriteSource,
+              onExpansionChanged: widget.repository.saveMenuExpansion,
               onSelect: (source) => Navigator.of(menuContext).pop(source),
             ),
           ),
@@ -272,13 +285,17 @@ class _AnnouncementSourceMenu extends StatefulWidget {
   const _AnnouncementSourceMenu({
     required this.selected,
     required this.initialFavorites,
+    required this.initialExpansion,
     required this.onToggleFavorite,
+    required this.onExpansionChanged,
     required this.onSelect,
   });
 
   final AnnouncementSource selected;
   final Set<String> initialFavorites;
+  final AnnouncementMenuExpansion initialExpansion;
   final Future<Set<String>> Function(AnnouncementSource) onToggleFavorite;
+  final Future<void> Function(AnnouncementMenuSection, bool) onExpansionChanged;
   final ValueChanged<AnnouncementSource> onSelect;
 
   @override
@@ -289,11 +306,9 @@ class _AnnouncementSourceMenu extends StatefulWidget {
 class _AnnouncementSourceMenuState extends State<_AnnouncementSourceMenu> {
   late Set<String> _favorites = {...widget.initialFavorites};
   final ScrollController _scrollController = ScrollController();
-  bool _favoritesExpanded = true;
-  late bool _campusExpanded =
-      widget.selected.group == AnnouncementSourceGroup.campus;
-  late bool _collegeExpanded =
-      widget.selected.group == AnnouncementSourceGroup.college;
+  late bool _favoritesExpanded = widget.initialExpansion.favorites;
+  late bool _campusExpanded = widget.initialExpansion.campus;
+  late bool _collegeExpanded = widget.initialExpansion.college;
   bool _saving = false;
 
   @override
@@ -332,11 +347,8 @@ class _AnnouncementSourceMenuState extends State<_AnnouncementSourceMenu> {
               shrinkWrap: true,
               padding: const EdgeInsets.symmetric(vertical: 8),
               children: [
-                _sectionHeader(
-                    '收藏',
-                    _favoritesExpanded,
-                    () => setState(
-                        () => _favoritesExpanded = !_favoritesExpanded)),
+                _sectionHeader('收藏', _favoritesExpanded,
+                    () => _toggleSection(AnnouncementMenuSection.favorites)),
                 if (_favoritesExpanded)
                   if (favoriteSources.isEmpty)
                     const ListTile(
@@ -346,11 +358,11 @@ class _AnnouncementSourceMenuState extends State<_AnnouncementSourceMenu> {
                   else
                     for (final source in favoriteSources) _sourceRow(source),
                 _sectionHeader('校级与公共服务', _campusExpanded,
-                    () => setState(() => _campusExpanded = !_campusExpanded)),
+                    () => _toggleSection(AnnouncementMenuSection.campus)),
                 if (_campusExpanded)
                   for (final source in campusSources) _sourceRow(source),
                 _sectionHeader('学院与培养单位', _collegeExpanded,
-                    () => setState(() => _collegeExpanded = !_collegeExpanded)),
+                    () => _toggleSection(AnnouncementMenuSection.college)),
                 if (_collegeExpanded)
                   for (final source in collegeSources) _sourceRow(source),
               ],
@@ -368,6 +380,28 @@ class _AnnouncementSourceMenuState extends State<_AnnouncementSourceMenu> {
       trailing: Icon(expanded ? Icons.expand_less : Icons.expand_more),
       onTap: onTap,
     );
+  }
+
+  void _toggleSection(AnnouncementMenuSection section) {
+    late final bool expanded;
+    setState(() {
+      switch (section) {
+        case AnnouncementMenuSection.favorites:
+          expanded = _favoritesExpanded = !_favoritesExpanded;
+        case AnnouncementMenuSection.campus:
+          expanded = _campusExpanded = !_campusExpanded;
+        case AnnouncementMenuSection.college:
+          expanded = _collegeExpanded = !_collegeExpanded;
+      }
+    });
+    unawaited(widget.onExpansionChanged(section, expanded).catchError(
+      (Object error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('分组状态保存失败，请重试')),
+        );
+      },
+    ));
   }
 
   Widget _sourceRow(AnnouncementSource source) {

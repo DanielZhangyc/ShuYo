@@ -32,6 +32,7 @@ class _FakeAnnouncementRepository extends AnnouncementRepository {
   final previewRequests = <String>[];
   AnnouncementSource currentDefault = AnnouncementSource.official;
   final favoriteIds = <String>{};
+  final sectionExpansion = <AnnouncementMenuSection, bool>{};
   final requestedSources = <String>[];
 
   @override
@@ -58,6 +59,21 @@ class _FakeAnnouncementRepository extends AnnouncementRepository {
   Future<Set<String>> toggleFavoriteSource(AnnouncementSource source) async {
     if (!favoriteIds.add(source.id)) favoriteIds.remove(source.id);
     return {...favoriteIds};
+  }
+
+  @override
+  Future<AnnouncementMenuExpansion> menuExpansion() async => (
+        favorites: sectionExpansion[AnnouncementMenuSection.favorites] ?? true,
+        campus: sectionExpansion[AnnouncementMenuSection.campus] ?? true,
+        college: sectionExpansion[AnnouncementMenuSection.college] ?? false,
+      );
+
+  @override
+  Future<void> saveMenuExpansion(
+    AnnouncementMenuSection section,
+    bool expanded,
+  ) async {
+    sectionExpansion[section] = expanded;
   }
 
   @override
@@ -182,6 +198,44 @@ void main() {
     await tester.tap(find.text('学院与培养单位'));
     await tester.pumpAndSettle();
     expect(find.text('国际教育学院'), findsNothing);
+    expect(
+        repository.sectionExpansion[AnnouncementMenuSection.college], isFalse);
+  });
+
+  testWidgets('source menu restores all group states when reopened',
+      (tester) async {
+    final repository = _repositoryWith();
+    await tester.pumpWidget(
+      MaterialApp(home: AnnouncementsPage(repository: repository)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('选择公告来源'));
+    await tester.pumpAndSettle();
+    expect(find.text('暂无收藏'), findsOneWidget);
+    expect(find.text('上海大学官网'), findsOneWidget);
+    expect(find.text('国际教育学院'), findsNothing);
+
+    await tester.tap(find.text('收藏'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('校级与公共服务'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('学院与培养单位'));
+    await tester.pumpAndSettle();
+    expect(repository.sectionExpansion, {
+      AnnouncementMenuSection.favorites: false,
+      AnnouncementMenuSection.campus: false,
+      AnnouncementMenuSection.college: true,
+    });
+
+    await tester.tapAt(const Offset(20, 300));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('选择公告来源'));
+    await tester.pumpAndSettle();
+    expect(find.text('暂无收藏'), findsNothing);
+    expect(find.text('上海大学官网'), findsNothing);
+    await tester.drag(find.byType(ListView).last, const Offset(0, -250));
+    await tester.pumpAndSettle();
+    expect(find.text('国际教育学院'), findsOneWidget);
   });
 
   testWidgets('source menu stays narrow with a dismissible left mask',

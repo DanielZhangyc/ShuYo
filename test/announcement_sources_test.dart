@@ -419,6 +419,20 @@ void main() {
     expect(await AnnouncementRepository().favoriteSourceIds(), {'mat'});
   });
 
+  test('menu group expansion persists across repository instances', () async {
+    SharedPreferences.setMockInitialValues({});
+    final first = AnnouncementRepository();
+    expect(await first.menuExpansion(),
+        (favorites: true, campus: true, college: false));
+    await first.saveMenuExpansion(AnnouncementMenuSection.favorites, false);
+    await first.saveMenuExpansion(AnnouncementMenuSection.campus, false);
+    await first.saveMenuExpansion(AnnouncementMenuSection.college, true);
+
+    final second = AnnouncementRepository();
+    expect(await second.menuExpansion(),
+        (favorites: false, campus: false, college: true));
+  });
+
   test('detail previews are queued three at a time and reused', () async {
     final api = _QueuedPreviewApiClient();
     final repository = AnnouncementRepository(apiClient: api);

@@ -16,6 +16,14 @@ class AnnouncementHomeSummary {
   final String text;
 }
 
+enum AnnouncementMenuSection { favorites, campus, college }
+
+typedef AnnouncementMenuExpansion = ({
+  bool favorites,
+  bool campus,
+  bool college,
+});
+
 class AnnouncementRepository {
   AnnouncementRepository({
     AnnouncementApiClient? apiClient,
@@ -31,6 +39,7 @@ class AnnouncementRepository {
   static const _defaultSourceKey =
       ClientSettingsService.defaultAnnouncementSourceKey;
   static const _favoritesKey = 'announcements.favoriteSources';
+  static const _menuExpansionKey = 'announcements.menu.expanded';
   static const _cacheVersion = 4;
 
   final AnnouncementApiClient _apiClient;
@@ -136,6 +145,23 @@ class AnnouncementRepository {
     if (!ids.add(source.id)) ids.remove(source.id);
     await prefs.setStringList(_favoritesKey, ids.toList());
     return ids;
+  }
+
+  Future<AnnouncementMenuExpansion> menuExpansion() async {
+    final prefs = await _preferencesLoader();
+    return (
+      favorites: prefs.getBool('$_menuExpansionKey.favorites') ?? true,
+      campus: prefs.getBool('$_menuExpansionKey.campus') ?? true,
+      college: prefs.getBool('$_menuExpansionKey.college') ?? false,
+    );
+  }
+
+  Future<void> saveMenuExpansion(
+    AnnouncementMenuSection section,
+    bool expanded,
+  ) async {
+    final prefs = await _preferencesLoader();
+    await prefs.setBool('$_menuExpansionKey.${section.name}', expanded);
   }
 
   Future<List<AnnouncementListItem>> loadCachedAnnouncements({
