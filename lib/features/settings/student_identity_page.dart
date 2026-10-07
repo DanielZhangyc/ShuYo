@@ -65,6 +65,10 @@ class _StudentIdentityPageState extends State<StudentIdentityPage> {
                   onPressed: _busy ? null : _revokeAll,
                   child: const Text('退出所有设备'),
                 ),
+                TextButton(
+                  onPressed: _busy ? null : _deleteAccount,
+                  child: const Text('删除 ShuYo 账户'),
+                ),
               ],
               if (_message != null) ...[
                 const SizedBox(height: 16),
@@ -162,6 +166,43 @@ class _StudentIdentityPageState extends State<StudentIdentityPage> {
       if (mounted) setState(() => _message = error.message);
     } on Object {
       if (mounted) setState(() => _message = '操作失败，请稍后重试。');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _deleteAccount() async {
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('删除 ShuYo 账户？'),
+            content: const Text(
+              '将删除服务器保存的加密学号与所有设备的 ShuYo 身份。'
+              '不会删除校园账户或手机上的课表。此操作不能撤销。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('删除账户'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await widget.service.deleteAccount();
+      if (mounted) setState(() => _message = 'ShuYo 账户已删除。');
+      _refresh();
+    } on StudentIdentityException catch (error) {
+      if (mounted) setState(() => _message = error.message);
+    } on Object {
+      if (mounted) setState(() => _message = '删除失败，请稍后重试。');
     } finally {
       if (mounted) setState(() => _busy = false);
     }

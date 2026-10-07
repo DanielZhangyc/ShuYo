@@ -222,6 +222,15 @@ class StudentIdentityService {
     await _secureStore.delete(_sessionKey);
   }
 
+  Future<void> deleteAccount() async {
+    final session = await loadLocalSession();
+    if (session == null) return;
+    await _request('DELETE', '/api/v1/student/account', token: session.token);
+    _epoch++;
+    await _secureStore.delete(_sessionKey);
+    await (await _preferencesLoader()).remove(_consentKey);
+  }
+
   Future<void> _clearCurrentSession() async {
     final session = await loadLocalSession();
     await _secureStore.delete(_sessionKey);
