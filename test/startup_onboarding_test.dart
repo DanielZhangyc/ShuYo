@@ -348,7 +348,7 @@ void main() {
     expect(status, findsOneWidget);
     expect(
       find.descendant(
-          of: status, matching: find.byIcon(Icons.check_circle_outline)),
+          of: status, matching: find.byIcon(Icons.check_circle)),
       findsOneWidget,
     );
     expect(tester.getTopLeft(status).dy,

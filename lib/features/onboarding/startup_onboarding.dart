@@ -957,7 +957,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.check_circle_outline, size: 18, color: color),
+                  Icon(Icons.check_circle, size: 18, color: color),
                   const SizedBox(width: 6),
                   Text(
                     verified ? '已认证' : '未认证',
