@@ -20,7 +20,7 @@ class AcademicProgressApiClient {
   })  : _authService = authService ?? AcademicAuthService(),
         _httpClient = httpClient ?? IOClient(HttpClient());
 
-  static const _indexPath =
+  static const studentIdentityPath =
       '/jwglxt/xsxy/xsxyqk_cxXsxyqkIndex.html?echarts=1&gnmkdm=N105515&layout=default';
   static const _coursePath =
       '/jwglxt/xsxy/xsxyqk_cxJxzxjhxfyqKcxx.html?gnmkdm=N105515';
@@ -35,7 +35,7 @@ class AcademicProgressApiClient {
   /// QR authentication has no typed username. Resolve only the authenticated
   /// identity; do not fetch course details or update any academic data cache.
   Future<String> fetchAuthenticatedStudentId() async {
-    final indexUri = AcademicUrlResolver.uri(_indexPath);
+    final indexUri = AcademicUrlResolver.uri(studentIdentityPath);
     final cookie = await _authService.cookieHeader(targetUri: indexUri);
     if (cookie == null || cookie.isEmpty) {
       throw const AcademicAuthException('请先登录上大校园账户');
@@ -53,7 +53,7 @@ class AcademicProgressApiClient {
   }
 
   Future<AcademicProgress> fetchProgress() async {
-    final indexUri = AcademicUrlResolver.uri(_indexPath);
+    final indexUri = AcademicUrlResolver.uri(studentIdentityPath);
     final cookie = await _authService.cookieHeader(targetUri: indexUri);
     if (cookie == null || cookie.isEmpty) {
       throw const AcademicAuthException('请先登录上大校园账户');

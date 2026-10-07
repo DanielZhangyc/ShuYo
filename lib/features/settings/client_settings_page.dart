@@ -25,6 +25,7 @@ import '../../shared/widgets/client_update_prompt.dart';
 import '../../shared/widgets/empty_state.dart';
 import '../../shared/widgets/webvpn_toggle.dart';
 import 'client_feedback_page.dart';
+import 'identity_probe_page.dart';
 import '../onboarding/startup_onboarding.dart';
 
 class ClientSettingsPage extends StatelessWidget {
@@ -134,6 +135,13 @@ class ClientSettingsPage extends StatelessWidget {
               ),
             ),
           ),
+          if (kDebugMode && !isDemo)
+            _SettingsRow(
+              title: '学号核验实验',
+              onTap: () => Navigator.of(context).push<void>(
+                shuyoRoute(builder: (_) => const IdentityProbePage()),
+              ),
+            ),
           if (isDemo && onExitDemo != null)
             _SettingsRow(
               title: '退出演示',
