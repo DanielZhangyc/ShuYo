@@ -232,7 +232,6 @@ class _StartupOnboardingState extends State<StartupOnboarding>
   bool _webVpnExpanded = false;
   bool _changingWebVpn = false;
   bool _choosingIdentity = false;
-  bool _verifyingIdentity = false;
   late bool _academicLoggedIn = widget.initialAcademicLoggedIn;
   late bool _academicSessionExpired = widget.initialAcademicSessionExpired;
   late bool _webVpnEnabled = widget.controller.webVpnEnabled;
@@ -381,31 +380,12 @@ class _StartupOnboardingState extends State<StartupOnboarding>
     }
   }
 
-  Future<void> _openIdentityStatus() async {
+  void _openIdentityStatus() {
     final service = widget.studentIdentityService;
-    if (service == null || _verifyingIdentity) return;
-    try {
-      await service.refreshLocalStatus();
-      if (!mounted) return;
-      if (service.isVerified) {
-        await Navigator.of(context).push<void>(
-          shuyoRoute(builder: (_) => StudentIdentityPage(service: service)),
-        );
-        return;
-      }
-      if (!await service.hasConsent()) {
-        await _showIdentityChoicePage();
-        return;
-      }
-      if (!mounted) return;
-      setState(() => _verifyingIdentity = true);
-      await service.bindCurrentStudent();
-      if (mounted) _showPanelNotice('身份已认证');
-    } on Object {
-      if (mounted) _showPanelNotice('当前暂时无法验证您的身份，请稍后再试');
-    } finally {
-      if (mounted) setState(() => _verifyingIdentity = false);
-    }
+    if (service == null) return;
+    Navigator.of(context).push<void>(
+      shuyoRoute(builder: (_) => StudentIdentityPage(service: service)),
+    );
   }
 
   Future<void> _continue() async {
@@ -919,6 +899,10 @@ class _StartupOnboardingState extends State<StartupOnboarding>
             ),
             if (_accountManagerMode) ...[
               const SizedBox(height: 8),
+              if (widget.studentIdentityService != null) ...[
+                _identityStatusUnderTitle(context),
+                const SizedBox(height: 6),
+              ],
               _profileRow(context),
             ],
           ],
@@ -946,24 +930,51 @@ class _StartupOnboardingState extends State<StartupOnboarding>
                 : _openAcademicLogin,
           ),
           if (_accountManagerMode) ...[
-            if (widget.studentIdentityService != null)
-              AnimatedBuilder(
-                animation: widget.studentIdentityService!,
-                builder: (context, _) => _accountTile(
-                  context,
-                  icon: Icons.verified_user_outlined,
-                  title: 'ShuYo 身份',
-                  description: '用于反馈、课表分享等功能',
-                  statusLabel:
-                      widget.studentIdentityService!.isVerified ? '已认证' : '未认证',
-                  busy: _verifyingIdentity,
-                  onTap: _verifyingIdentity ? null : _openIdentityStatus,
-                ),
-              ),
             _webVpnSection(context),
           ],
         ],
       );
+
+  Widget _identityStatusUnderTitle(BuildContext context) {
+    final service = widget.studentIdentityService!;
+    return AnimatedBuilder(
+      animation: service,
+      builder: (context, _) {
+        final verified = service.isVerified;
+        final colors = Theme.of(context).colorScheme;
+        final color = verified
+            ? colors.primary
+            : Theme.of(context).brightness == Brightness.dark
+                ? colors.onSurface
+                : Colors.black;
+        return Center(
+          child: InkWell(
+            key: const ValueKey('student-identity-status'),
+            borderRadius: BorderRadius.circular(12),
+            onTap: _openIdentityStatus,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.check_circle_outline, size: 18, color: color),
+                  const SizedBox(width: 6),
+                  Text(
+                    verified ? '已认证' : '未认证',
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   Widget _profileRow(BuildContext context) {
     final color = Theme.of(context).colorScheme.onSurfaceVariant;

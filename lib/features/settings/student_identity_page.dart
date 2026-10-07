@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/services/student_identity_service.dart';
 
@@ -85,8 +86,8 @@ class _StudentIdentityPageState extends State<StudentIdentityPage> {
     });
     try {
       if (!await widget.service.hasConsent()) {
-        if (mounted) setState(() => _message = '请先在账号管理中确认身份验证。');
-        return;
+        if (!mounted || !await _confirmIdentityConsent()) return;
+        await widget.service.grantConsent();
       }
       await widget.service.bindCurrentStudent();
       if (mounted) setState(() => _message = '身份已认证');
@@ -99,6 +100,40 @@ class _StudentIdentityPageState extends State<StudentIdentityPage> {
       if (mounted) setState(() => _busy = false);
     }
   }
+
+  Future<bool> _confirmIdentityConsent() async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('身份验证'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '为避免身份冒用，ShuYo将验证你的校园身份，认证后可使用分享课程表、课程评价等功能。',
+              ),
+              TextButton(
+                onPressed: () => launchUrl(
+                  Uri.parse('https://shuyo.work/doc/privacy.html'),
+                  mode: LaunchMode.externalApplication,
+                ),
+                child: const Text('隐私政策'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('暂不'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('确认'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
 
   Future<void> _signOut() async {
     setState(() => _busy = true);

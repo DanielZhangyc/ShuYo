@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -341,8 +342,18 @@ void main() {
     await tester.tap(find.text('确认'));
     await tester.pumpAndSettle();
     expect(await identity.hasConsent(), isTrue);
-    expect(find.text('ShuYo 身份'), findsOneWidget);
     expect(find.text('未认证'), findsOneWidget);
+    expect(tester.widget<Text>(find.text('未认证')).style?.color, Colors.black);
+    final status = find.byKey(const ValueKey('student-identity-status'));
+    expect(status, findsOneWidget);
+    expect(
+      find.descendant(
+          of: status, matching: find.byIcon(Icons.check_circle_outline)),
+      findsOneWidget,
+    );
+    expect(tester.getTopLeft(status).dy,
+        greaterThan(tester.getBottomLeft(find.text('账号管理')).dy));
+    expect(tester.getCenter(status).dx, closeTo(400, 1));
     controller.dismissAccountManager();
     await tester.pumpAndSettle();
     controller.openAccountManager(academicLoggedIn: false);
@@ -378,6 +389,50 @@ void main() {
     expect(find.text('未认证'), findsOneWidget);
     await tester.tap(find.text('未认证'));
     await tester.pumpAndSettle();
+    expect(find.text('ShuYo 身份'), findsOneWidget);
+    await tester.tap(find.text('尝试认证'));
+    await tester.pumpAndSettle();
     expect(find.text('身份验证'), findsOneWidget);
+    expect(await identity.hasConsent(), isFalse);
+    await tester.tap(find.text('暂不'));
+    await tester.pumpAndSettle();
+    expect(await identity.hasConsent(), isFalse);
+  });
+
+  testWidgets('verified status uses the theme color below the title',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'shuyo.student.identity.consent.v1': true,
+      'shuyo.student.session.v1': jsonEncode({
+        'token': 'a' * 43,
+        'studentId': '23123456',
+        'maskedStudentId': '23****56',
+        'expiresAt': '2099-01-01T00:00:00Z',
+      }),
+    });
+    final controller = StartupOnboardingController();
+    final identity = StudentIdentityService();
+    addTearDown(controller.dispose);
+    addTearDown(identity.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: StartupOnboarding(
+        initiallyCompleted: true,
+        initialAcademicLoggedIn: false,
+        onAcademicLoginCompleted: () {},
+        studentIdentityService: identity,
+        controller: controller,
+        child: const Scaffold(body: Text('主页')),
+      ),
+    ));
+    controller.openAccountManager(academicLoggedIn: false);
+    await tester.pumpAndSettle();
+    expect(find.text('已认证'), findsOneWidget);
+    final status = find.byKey(const ValueKey('student-identity-status'));
+    expect(tester.getTopLeft(status).dy,
+        greaterThan(tester.getBottomLeft(find.text('账号管理')).dy));
+    expect(
+      tester.widget<Text>(find.text('已认证')).style?.color,
+      Theme.of(tester.element(status)).colorScheme.primary,
+    );
   });
 }
