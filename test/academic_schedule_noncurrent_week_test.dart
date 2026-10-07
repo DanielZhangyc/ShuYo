@@ -16,6 +16,39 @@ void main() {
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  testWidgets('schedule info shows the cached synchronization time',
+      (tester) async {
+    final repository = AcademicScheduleRepository();
+    await tester.pumpWidget(MaterialApp(
+      home: AcademicSchedulePage(
+        repository: repository,
+        notificationService:
+            AcademicScheduleNotificationService(repository: repository),
+        widgetService: AcademicScheduleWidgetService(repository: repository),
+        onLoginRequired: () async {},
+        initialState: AcademicScheduleCacheState(
+          schedule: _schedule,
+          weekState: ScheduleWeekState(
+            currentWeek: 1,
+            anchorMonday:
+                AcademicScheduleRepository.startOfWeek(DateTime.now()),
+          ),
+        ),
+      ),
+    ));
+
+    await tester.tap(find.byTooltip('课表信息说明'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        '应用每次获取的课表信息为当时教务系统中数据，并非实时更新\n\n'
+        '因此当发生课程变更、教室变更等情况，需手动进行刷新\n\n'
+        '同步于 2026-08-31 00:00',
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('custom photo uses stronger theme color for schedule dates',
       (tester) async {
     const background = CustomBackground(

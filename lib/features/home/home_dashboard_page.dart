@@ -77,7 +77,7 @@ class HomeDashboardPage extends StatelessWidget {
               : hasAcademicAccount
                   ? _greeting()
                   : academicSessionExpired
-                      ? '登录已失效，本地数据仍可查看'
+                      ? '登录已失效，请重新登录'
                       : '登录后同步个人数据',
           trailing: isAcademicLoginCompleting
               ? const SizedBox(

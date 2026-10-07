@@ -139,7 +139,7 @@ void main() {
       (tester) async {
     await tester.pumpWidget(page(loggedIn: false, expired: true));
     expect(find.text('重新登录'), findsOneWidget);
-    expect(find.text('登录已失效，本地数据仍可查看'), findsOneWidget);
+    expect(find.text('登录已失效，请重新登录'), findsOneWidget);
     expect(find.text('今日无课'), findsOneWidget);
   });
 }

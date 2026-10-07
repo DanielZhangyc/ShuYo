@@ -1306,12 +1306,15 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
   }
 
   Future<void> _showScheduleDataInfo() async {
+    final fetchedAt = _schedule?.fetchedAt;
+    final syncText =
+        fetchedAt == null ? '' : '同步于 ${_scheduleDateText(fetchedAt)}';
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('课表信息说明'),
-        content: const Text(
-          '应用每次获取的课表信息为当时教务系统中数据，并非实时更新\n\n因此当发生课程变更、教室变更等情况，需手动进行刷新',
+        content: Text(
+          '应用每次获取的课表信息为当时教务系统中数据，并非实时更新\n\n因此当发生课程变更、教室变更等情况，需手动进行刷新\n\n$syncText',
         ),
         actions: [
           TextButton(
@@ -1321,6 +1324,12 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
         ],
       ),
     );
+  }
+
+  String _scheduleDateText(DateTime date) {
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${date.year}-${two(date.month)}-${two(date.day)} '
+        '${two(date.hour)}:${two(date.minute)}';
   }
 
   String _notificationSettingsSaveMessage({
