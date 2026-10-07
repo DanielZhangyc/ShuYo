@@ -403,6 +403,7 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 8,
                                   ),
+                                  splashFactory: NoSplash.splashFactory,
                                 ),
                                 child: Text(_countdown > 0
                                     ? '重发 ${_countdown}s'
