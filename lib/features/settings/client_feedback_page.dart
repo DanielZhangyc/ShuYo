@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/models/client_backend.dart';
 import '../../data/repositories/client_backend_repository.dart';
+import '../../data/services/student_identity_service.dart';
 import '../../shared/compact_number.dart';
 import '../../shared/shuyo_text_styles.dart';
 import '../../shared/navigation/shuyo_route.dart';
@@ -86,23 +87,6 @@ class _ClientFeedbackPageState extends State<ClientFeedbackPage> {
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               children: [
-                if (widget.repository.studentIdentityService != null) ...[
-                  _Section(
-                    title: '账户反馈',
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                            '新版反馈与已核验的学生账户绑定，可在自己的设备上查看回复并关闭反馈。旧版反馈仍可凭本机保存的查询令牌查看。'),
-                        TextButton(
-                          onPressed: _openIdentity,
-                          child: const Text('查看或核验 ShuYo 身份'),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                ],
                 _ComposerCard(
                   formKey: _formKey,
                   titleController: _titleController,
@@ -194,6 +178,15 @@ class _ClientFeedbackPageState extends State<ClientFeedbackPage> {
       _titleController.clear();
       _showSnack(context, '反馈已提交');
       await _refresh(force: false);
+    } on StudentIdentityException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('提交前请先完成身份验证'),
+            action: SnackBarAction(label: '去验证', onPressed: _openIdentity),
+          ),
+        );
+      }
     } on Object catch (error) {
       if (mounted) {
         _showSnack(context, '提交失败：$error');
