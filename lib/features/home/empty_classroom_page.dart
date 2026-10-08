@@ -36,6 +36,7 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
   ClassroomSectionRange? _selectedRange;
   String? _selectedCampus;
   late DateTime _selectedDate = widget.initialDate ?? DateTime.now();
+  bool _loadingOptions = false;
   bool _refreshingOptions = false;
   String _keyword = '';
   bool _initialSelectionApplied = false;
@@ -43,7 +44,30 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
   @override
   void initState() {
     super.initState();
-    _loadFuture = _loadOptions();
+    final snapshot = widget.repository.optionsSnapshot;
+    if (snapshot == null || snapshot.buildings.isEmpty) {
+      _loadFuture = _loadOptions();
+      return;
+    }
+    // Reopening the page can show the options kept in memory on the first
+    // frame instead of the loading state; loading them again would only
+    // return that same instance.
+    _applyOptionsSnapshot(snapshot);
+    _loadFuture = Future<void>.value();
+  }
+
+  /// Restores the options and their matching selections and starts the query
+  /// they describe right away.
+  void _applyOptionsSnapshot(ClassroomSearchOptions options) {
+    final now = DateTime.now();
+    _options = options;
+    _selectedCampus = _validCampus(options);
+    _selectedBuilding = _validBuilding(options);
+    _selectedDate = widget.initialDate ??
+        widget.repository.defaultDateFor(options, now: now);
+    _selectedRange = widget.repository.defaultRangeFor(options, now: now);
+    _initialSelectionApplied = true;
+    _search();
   }
 
   @override
@@ -66,7 +90,16 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
           const SizedBox(width: 2),
         ],
       ),
-      body: FutureBuilder<void>(
+      body: _loadedBody(),
+    );
+  }
+
+  /// Renders the query controls as soon as options exist, and waits on
+  /// [_loadFuture] only when none were remembered.
+  Widget _loadedBody() {
+    final options = _options;
+    if (options == null) {
+      return FutureBuilder<void>(
         future: _loadFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
@@ -87,36 +120,38 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
               ),
             );
           }
-          final options = _options;
-          if (options == null || options.buildings.isEmpty) {
-            return const EmptyState(
-              icon: Icons.meeting_room_outlined,
-              title: '暂无教学楼',
-              message: '空教室系统没有返回可查询的教学楼。',
-            );
-          }
-          return Column(
-            children: [
-              _SearchControls(
-                options: options,
-                selectedCampus: _selectedCampus,
-                selectedBuilding: _selectedBuilding,
-                selectedRange: _selectedRange,
-                selectedDate: _selectedDate,
-                ranges: widget.repository.defaultRanges(options.sections),
-                onCampusChanged: _setCampus,
-                onBuildingChanged: _setBuilding,
-                onRangeChanged: _setRange,
-                onPreviousRange: () => _stepRange(-1),
-                onNextRange: () => _stepRange(1),
-                onDateChanged: _setDate,
-                onKeywordChanged: (value) => setState(() => _keyword = value),
-              ),
-              Expanded(child: _resultBody()),
-            ],
-          );
+          // Options arrive through setState; a finished load without them
+          // cannot render the controls.
+          return const SizedBox.shrink();
         },
-      ),
+      );
+    }
+    if (options.buildings.isEmpty) {
+      return const EmptyState(
+        icon: Icons.meeting_room_outlined,
+        title: '暂无教学楼',
+        message: '空教室系统没有返回可查询的教学楼。',
+      );
+    }
+    return Column(
+      children: [
+        _SearchControls(
+          options: options,
+          selectedCampus: _selectedCampus,
+          selectedBuilding: _selectedBuilding,
+          selectedRange: _selectedRange,
+          selectedDate: _selectedDate,
+          ranges: widget.repository.defaultRanges(options.sections),
+          onCampusChanged: _setCampus,
+          onBuildingChanged: _setBuilding,
+          onRangeChanged: _setRange,
+          onPreviousRange: () => _stepRange(-1),
+          onNextRange: () => _stepRange(1),
+          onDateChanged: _setDate,
+          onKeywordChanged: (value) => setState(() => _keyword = value),
+        ),
+        Expanded(child: _resultBody()),
+      ],
     );
   }
 
@@ -164,10 +199,16 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
   }
 
   Future<void> _loadOptions({bool force = false}) async {
-    if (_refreshingOptions) {
+    if (_loadingOptions) {
       return;
     }
-    setState(() => _refreshingOptions = true);
+    _loadingOptions = true;
+    // Only an explicit refresh needs the toolbar spinner: a first load is
+    // covered by the body indicator, and a cached snapshot paints instantly.
+    final showRefreshSpinner = force && _options != null;
+    if (showRefreshSpinner) {
+      setState(() => _refreshingOptions = true);
+    }
     try {
       final options = await widget.repository.loadOptions(forceRefresh: force);
       if (!mounted) {
@@ -193,7 +234,8 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
       await widget.onWebVpnExpired?.call();
       rethrow;
     } finally {
-      if (mounted) {
+      _loadingOptions = false;
+      if (showRefreshSpinner && mounted) {
         setState(() => _refreshingOptions = false);
       }
     }
