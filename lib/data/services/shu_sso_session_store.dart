@@ -1,24 +1,23 @@
 import 'dart:io';
 
-import 'package:webview_flutter/webview_flutter.dart';
-
 import '../../core/wecom_constants.dart';
+import 'session_cookie_jar.dart';
 
-/// The WebView cookie jar owns the SSO session. Business cookies remain scoped
+/// The session cookie jar owns the SSO session. Business cookies remain scoped
 /// to their own hosts and are never copied onto the identity host.
 class ShuSsoSessionStore {
-  ShuSsoSessionStore({WebViewCookieManager? cookieManager})
-      : _cookieManagerInstance = cookieManager;
+  ShuSsoSessionStore({SessionCookieJar? cookieJar})
+      : _cookieJarInstance = cookieJar;
 
-  WebViewCookieManager? _cookieManagerInstance;
-  WebViewCookieManager get _cookieManager =>
-      _cookieManagerInstance ??= WebViewCookieManager();
+  SessionCookieJar? _cookieJarInstance;
+  SessionCookieJar get _cookieJar =>
+      _cookieJarInstance ??= SessionCookieJar.shared;
 
   static final _identityUri = Uri.parse(WeComConstants.ssoBase);
 
   Future<List<({Cookie cookie, String domain, String path})>>
       sessionCookies() async {
-    final cookies = await _cookieManager.getCookies(domain: _identityUri);
+    final cookies = await _cookieJar.getCookies(domain: _identityUri);
     return [
       for (final cookie in cookies)
         if (cookie.name == WeComConstants.sessionCookieName &&
@@ -43,15 +42,13 @@ class ShuSsoSessionStore {
     ]) {
       try {
         final uri = Uri(scheme: 'https', host: host);
-        final cookies = await _cookieManager.getCookies(domain: uri);
+        final cookies = await _cookieJar.getCookies(domain: uri);
         for (final cookie in cookies) {
           if (cookie.name != WeComConstants.sessionCookieName) continue;
-          await _cookieManager.setCookie(WebViewCookie(
+          await _cookieJar.setCookie(SessionCookie(
             name: cookie.name,
             value: '',
-            domain: cookie.domain.isEmpty
-                ? host
-                : cookie.domain.replaceFirst(RegExp(r'^\.'), ''),
+            domain: cookie.domain.isEmpty ? host : cookie.domain,
             path: cookie.path.isEmpty ? '/' : cookie.path,
           ));
         }

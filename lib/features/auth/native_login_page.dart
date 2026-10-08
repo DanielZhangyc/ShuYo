@@ -15,12 +15,24 @@ import '../../data/services/wecom_auth_service.dart';
 import '../../data/demo/demo_session.dart';
 import '../../shared/navigation/shuyo_route.dart';
 import '../../shared/theme/shuyo_theme.dart';
-import 'webvpn_oauth_completion_page.dart';
 import 'wecom_scan_page.dart';
 
 enum NativeLoginDestination { academic, webVpn, there }
 
 enum NativeLoginResult { authenticated, demo }
+
+/// 该次登录是否已在扫码页内完成 WebVPN 握手。
+///
+/// 企微扫码登录 WebVPN 时，[WeComScanPage] 会在同一原生 Cookie 会话内自行走完
+/// `auth/start → auth/finish → user/info`，此时 [WeComRedeemResult.callbackUri]
+/// 是登录后的落地页，没有可兑换的 `code`。教务等其余目标只拿到授权码，仍须跟随
+/// 回调兑换会话。
+@visibleForTesting
+bool weComEstablishedWebVpnSession({
+  required NativeLoginDestination destination,
+  required WeComRedeemResult? weComRedeem,
+}) =>
+    weComRedeem != null && destination == NativeLoginDestination.webVpn;
 
 class NativeLoginPage extends StatefulWidget {
   const NativeLoginPage({
@@ -550,6 +562,8 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
         redeemed.callbackUri,
         weComRedeem: redeemed,
       );
+    } on AcademicNativeAuthException catch (error) {
+      _showError(error.message);
     } on WeComAuthException catch (error) {
       _showError(error.message);
     } on Object catch (error, stackTrace) {
@@ -611,12 +625,12 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
     }
   }
 
-  /// 完成登录：把会话 Cookie 装进 WebView，再加载 [callbackUri]。
+  /// 完成登录：用 [callbackUri] 走完 OAuth 回调并建立业务会话。
   ///
   /// [weComRedeem] 非空时表示这次回调来自企业微信扫码，SSO 会话 Cookie
   /// 由 [WeComAuthService.redeem] 单独取得，必须先并入 [_authService]，
-  /// 否则 [AcademicNativeAuthService.installCookiesInWebView] 无 cookie 可装，
-  /// WebView 加载 callbackUri 会被 SSO 重定向回登录页并最终超时。
+  /// 否则 [AcademicNativeAuthService.completeLogin] 无 cookie 可用，
+  /// 加载 callbackUri 会被 SSO 重定向回登录页并最终超时。
   Future<void> _completeLogin(
     Uri callbackUri, {
     WeComRedeemResult? weComRedeem,
@@ -643,9 +657,13 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
         ),
       );
     }
-    await _authService.installCookiesInWebView();
+    await _authService.resetPreviousSession();
     if (!mounted) return;
     if (widget.destination == NativeLoginDestination.there) {
+      // The booking client exchanges its own authorization code, so its flow
+      // needs the adopted cookies in the shared jar rather than a completed
+      // login.
+      await _authService.publishSessionCookies();
       final client = ThereBookingClient();
       try {
         final target = callbackUri.host == client.baseUri.host &&
@@ -681,17 +699,16 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
       }
       return;
     }
-    final completed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => ShuYoRouteSurface(
-          child: WebVpnOAuthCompletionPage(
-            callbackUri: callbackUri,
-            webVpnOnly: widget.destination == NativeLoginDestination.webVpn,
-          ),
-        ),
-      ),
-    );
-    if (completed != true || !mounted) return;
+    if (weComEstablishedWebVpnSession(
+      destination: widget.destination,
+      weComRedeem: weComRedeem,
+    )) {
+      // 会话已由扫码流程建立，直接把已收集的 Cookie 发布给共享会话罐。
+      await _authService.publishSessionCookies();
+    } else {
+      await _authService.completeLogin(callbackUri);
+    }
+    if (!mounted) return;
     final auth = AcademicAuthService();
     if (widget.destination == NativeLoginDestination.academic) {
       await auth.markLoggedIn();

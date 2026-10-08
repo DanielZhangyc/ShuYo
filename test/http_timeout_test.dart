@@ -11,7 +11,6 @@ void main() {
     expect(HttpTimeout.longPoll, const Duration(seconds: 45));
     expect(HttpTimeout.composed, const Duration(seconds: 20));
     expect(HttpTimeout.authentication, const Duration(seconds: 30));
-    expect(HttpTimeout.webViewPreparation, const Duration(seconds: 15));
     expect(HttpTimeout.oauthCompletion, const Duration(seconds: 45));
     expect(HttpTimeout.transfer, const Duration(seconds: 30));
     expect(HttpTimeout.streamIdle, const Duration(seconds: 10));

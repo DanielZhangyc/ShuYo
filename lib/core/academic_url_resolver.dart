@@ -35,7 +35,12 @@ class AcademicUrlResolver {
         uri.path.endsWith('/jwglxt/ticketlogin');
   }
 
-  static bool isPreparedWebVpnAcademicUrl(String value) {
+  /// True when [value] is a jwxt page that an authenticated session reaches.
+  ///
+  /// `/jwglxt/ticketlogin` and `/jwglxt/xtgl/login_slogin.html` belong to the
+  /// login exchange and answer with HTTP 200 even without a session, so
+  /// neither may be mistaken for a working one.
+  static bool isAcademicSessionUrl(String value) {
     final uri = Uri.tryParse(value);
     const expectedHost = AcademicConstants.host;
     if (uri == null || uri.host != expectedHost) {
@@ -43,6 +48,7 @@ class AcademicUrlResolver {
     }
     final path = uri.path;
     return path.startsWith('/jwglxt/') &&
+        !path.endsWith('/jwglxt/ticketlogin') &&
         !path.endsWith('/jwglxt/xtgl/login_slogin.html');
   }
 

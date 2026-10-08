@@ -1,35 +1,35 @@
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/webvpn_urls.dart';
 import 'secure_app_store.dart';
+import 'session_cookie_jar.dart';
 
 class WebVpnSessionStore {
   WebVpnSessionStore({
     Future<SharedPreferences> Function()? preferencesLoader,
     SecureAppStore? secureStore,
-    WebViewCookieManager? cookieManager,
-    Future<List<WebViewCookie>> Function(Uri domain)? cookieLoader,
-    Future<void> Function(WebViewCookie cookie)? cookieSetter,
+    SessionCookieJar? cookieJar,
+    Future<List<SessionCookie>> Function(Uri domain)? cookieLoader,
+    Future<void> Function(SessionCookie cookie)? cookieSetter,
   })  : _secureStore =
             secureStore ?? SecureAppStore(preferencesLoader: preferencesLoader),
-        _cookieManager = cookieManager ??
+        _cookieJar = cookieJar ??
             (cookieLoader == null || cookieSetter == null
-                ? WebViewCookieManager()
+                ? SessionCookieJar.shared
                 : null) {
     _cookieLoader =
-        cookieLoader ?? (domain) => _cookieManager!.getCookies(domain: domain);
-    _cookieSetter = cookieSetter ?? _cookieManager!.setCookie;
+        cookieLoader ?? (domain) => _cookieJar!.getCookies(domain: domain);
+    _cookieSetter = cookieSetter ?? _cookieJar!.setCookie;
   }
 
   static const cachedCookiesKey = 'academic.auth.cached_cookies.webvpn';
 
   final SecureAppStore _secureStore;
-  final WebViewCookieManager? _cookieManager;
-  late final Future<List<WebViewCookie>> Function(Uri domain) _cookieLoader;
-  late final Future<void> Function(WebViewCookie cookie) _cookieSetter;
+  final SessionCookieJar? _cookieJar;
+  late final Future<List<SessionCookie>> Function(Uri domain) _cookieLoader;
+  late final Future<void> Function(SessionCookie cookie) _cookieSetter;
 
   Future<void> clearCachedCookiesForReauthentication() async {
     await _secureStore.delete(cachedCookiesKey);
@@ -40,14 +40,14 @@ class WebVpnSessionStore {
     try {
       raw = await _secureStore.read(cachedCookiesKey);
     } on Object {
-      // Continue with the WebView cookie if secure storage is unavailable.
+      // Continue with the live cookie if secure storage is unavailable.
     }
     if (raw != null && raw.isNotEmpty) {
       try {
         final decoded = jsonDecode(raw);
         if (_containsWebVpnToken(decoded)) return true;
       } on Object {
-        // Fall through to the WebView copy if an older cache is malformed.
+        // Fall through to the live copy if an older cache is malformed.
       }
     }
     try {
@@ -76,22 +76,23 @@ class WebVpnSessionStore {
       final isPortalHost = domain.host == Uri.parse(WebVpnUrls.portal).host;
       final isProxiedIdentityHost = domain.host.contains('oauth-shu-edu-cn') ||
           domain.host.contains('newsso-shu-edu-cn');
-      List<WebViewCookie> cookies;
+      List<SessionCookie> cookies;
       try {
         cookies = await _cookieLoader(domain);
       } on Object {
         continue;
       }
       for (final cookie in cookies) {
-        // Do not write an empty webvpn-token to proxy subdomains. Android can
-        // retain it as a host-only shadow that overrides the next valid token.
+        // Never clear a name on a host that does not own it. An empty
+        // webvpn-token written to a proxy subdomain would drop a session the
+        // next login still needs.
         final belongsToWebVpnSession =
             (isPortalHost && cookie.name == 'webvpn-token') ||
                 (isProxiedIdentityHost && cookie.name == 'SHU_OAUTH2');
         if (!belongsToWebVpnSession) continue;
         try {
           await _cookieSetter(
-            WebViewCookie(
+            SessionCookie(
               name: cookie.name,
               value: '',
               domain: _normalizeCookieDomain(cookie.domain, domain.host),
@@ -100,7 +101,7 @@ class WebVpnSessionStore {
           );
         } on Object {
           // The persistent copy is already gone. Continue clearing the other
-          // known gateway domains even if one WebView operation fails.
+          // known gateway domains even if one cookie write fails.
         }
       }
     }

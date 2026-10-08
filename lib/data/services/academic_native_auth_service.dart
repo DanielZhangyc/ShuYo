@@ -4,13 +4,14 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:pointycastle/export.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/academic_url_resolver.dart';
 import '../../core/client_user_agent.dart';
 import 'academic_auth_service.dart';
 import 'academic_account_store.dart';
 import 'http_timeout.dart';
+import 'session_cookie_jar.dart';
+import 'webvpn_device_id.dart';
 import 'webvpn_session_store.dart';
 
 enum AcademicVerificationMethod { wecom, sms }
@@ -81,6 +82,7 @@ class AcademicNativeAuthService {
 
   static const _newssoPathMarker = '/oauth2/login/';
   static const _tenantId = '上海大学';
+  static const _maxRedirects = 16;
   static Uri get _academicEntry => AcademicUrlResolver.entryUri;
   static const _webVpnPortal = 'https://webvpn.shu.edu.cn';
   static const _webVpnHost = 'webvpn.shu.edu.cn';
@@ -93,6 +95,9 @@ class AcademicNativeAuthService {
   String? _params;
   String? _username;
   String? _encryptedPassword;
+  // The WebVPN challenge identifier the authorization code belongs to, kept
+  // between `auth/start` and the callback that has to finish the handshake.
+  String? _webVpnExternalId;
 
   void dispose() => _client.close(force: true);
 
@@ -103,8 +108,8 @@ class AcademicNativeAuthService {
   ///
   /// 企业微信扫码走的是独立的 `WeComAuthService`，不会经过本类的
   /// [login] 流程，因此 [_cookieStore] 是空的。必须在
-  /// [installCookiesInWebView] 之前把外部流程收集到的 Cookie 交给本类，
-  /// 否则 WebView 加载 callbackUri 时会因缺少会话而被重定向回登录页。
+  /// [completeLogin] 之前把外部流程收集到的 Cookie 交给本类，
+  /// 否则加载 callbackUri 时会因缺少会话而被重定向回登录页。
   void adoptSessionCookies(
     Iterable<({Cookie cookie, String domain, String path})> cookies,
   ) {
@@ -123,186 +128,53 @@ class AcademicNativeAuthService {
     }
   }
 
-  /// Transfers the native authentication cookies to the shared WebView store
-  /// before the OAuth callback is loaded there.
-  Future<void> installCookiesInWebView() async {
-    final manager = WebViewCookieManager();
+  /// Clears the business session that a new login replaces.
+  ///
+  /// Every campus login starts from the same clean state as an explicit logout:
+  /// an expired root-path `JSESSIONID` must not survive into the new session,
+  /// and a stale WebVPN token must not masquerade as the one the gateway is
+  /// about to issue.
+  Future<void> resetPreviousSession() async {
     if (_target == _NativeAuthTarget.academic) {
-      // Every campus login starts from the same clean authentication state as
-      // an explicit logout. This removes an expired root-path JSESSIONID before
-      // the callback creates its fresh /jwglxt session, while leaving WebVPN cookies untouched. Fresh cookies collected above are installed
-      // immediately afterwards.
       await AcademicAuthService().clearAccount(
         sessionExpired: await AcademicAccountStore().isSessionExpired(),
       );
-    } else if (_target == _NativeAuthTarget.webVpn) {
-      await WebVpnSessionStore().clearCachedCookiesForReauthentication();
-      await _clearWebVpnAuthCookies(manager);
+      return;
     }
-    final domains = <String>{};
-    final expectedByDomain = <String, Map<String, String>>{};
+    if (_target == _NativeAuthTarget.webVpn) {
+      await WebVpnSessionStore().clearCachedCookiesForReauthentication();
+      await _clearWebVpnAuthCookies();
+    }
+  }
+
+  /// Publishes the cookies this login collected to the shared jar.
+  ///
+  /// The API clients read that jar rather than this instance, so a completed
+  /// login has to hand its session over before anything else uses it.
+  Future<void> publishSessionCookies() async {
+    final published = <String>[];
     for (final stored in _cookieStore.entries) {
       final cookie = stored.cookie;
       if (cookie.value.isEmpty) continue;
-      domains.add(stored.domain);
-      expectedByDomain.putIfAbsent(
-          stored.domain, () => <String, String>{})[cookie.name] = cookie.value;
-      if (kDebugMode) {
-        debugPrint(
-          '[SHU_AUTH] cookie-install-pending '
-          '${_describeStoredCookie(cookie.name, stored.domain, stored.path, cookie.value)} '
-          'androidValue=${_describeCookieValue(_webViewCookieValue(cookie.value))}',
-        );
-      }
-      await manager.setCookie(
-        WebViewCookie(
+      published.add('${cookie.name}@${stored.domain}${stored.path}');
+      await SessionCookieJar.shared.setCookie(
+        SessionCookie(
           name: cookie.name,
-          value: _webViewCookieValue(cookie.value),
+          value: cookie.value,
           domain: stored.domain,
           path: stored.path,
         ),
       );
     }
-
     if (kDebugMode) {
-      debugPrint(
-        '[SHU_AUTH] install webview cookies '
-        'domains=${domains.toList()..sort()} '
-        'names=${expectedByDomain.map((key, value) => MapEntry(key, value.keys.toList()..sort()))}',
-      );
-    }
-
-    // Android's CookieManager.setCookie is fire-and-forget at the platform
-    // level. Give the network service time to commit the cookies, then read
-    // them back before the callback WebView starts navigating. This avoids a
-    // race where the OAuth callback immediately falls back to /auth/login.
-    for (var attempt = 0; attempt < 6; attempt++) {
-      await Future<void>.delayed(
-        attempt == 0
-            ? const Duration(milliseconds: 150)
-            : const Duration(milliseconds: 300),
-      );
-      var allVisible = true;
-      for (final domain in domains) {
-        List<WebViewCookie> visible;
-        try {
-          visible = await manager.getCookies(
-            domain: Uri.parse('https://$domain'),
-          );
-        } on Object {
-          allVisible = false;
-          continue;
-        }
-        final visibleValues = <String, String>{
-          for (final cookie in visible) cookie.name: cookie.value,
-        };
-        final expected = expectedByDomain[domain] ?? const <String, String>{};
-        for (final entry in expected.entries) {
-          final hasExpectedValue = visible.any(
-            (cookie) =>
-                cookie.name == entry.key &&
-                _cookieValueMatches(entry.value, cookie.value),
-          );
-          if (!hasExpectedValue) {
-            allVisible = false;
-          }
-        }
-        if (kDebugMode) {
-          final visibleDetails = visible
-              .where((cookie) => cookie.name.isNotEmpty)
-              .map(
-                (cookie) => _describeStoredCookie(
-                  cookie.name,
-                  _normalizeCookieDomain(cookie.domain, domain),
-                  cookie.path,
-                  cookie.value,
-                ),
-              )
-              .toList()
-            ..sort();
-          debugPrint(
-            '[SHU_AUTH] webview cookie-visible domain=$domain '
-            'names=${visibleValues.keys.toList()..sort()} '
-            'expected=${expected.keys.toList()..sort()} '
-            'valueLengths=${visibleValues.map((key, value) => MapEntry(key, value.length))} '
-            'expectedLengths=${expected.map((key, value) => MapEntry(key, value.length))}',
-          );
-          debugPrint(
-            '[SHU_AUTH] webview cookie-details domain=$domain '
-            'cookies=$visibleDetails',
-          );
-        }
-      }
-      if (allVisible || domains.isEmpty) {
-        // Android's CookieManager can report the newly written value before
-        // Chromium's network service has transferred the provisional cookie
-        // store. Starting the OAuth WebView immediately after that read can
-        // send a stale session. Allow one network-service turn to settle
-        // on Android; iOS does not need this extra delay.
-        if (defaultTargetPlatform == TargetPlatform.android) {
-          await Future<void>.delayed(const Duration(milliseconds: 500));
-        }
-        return;
-      }
-    }
-
-    // Some Android WebView/Chromium versions handle long, already-escaped
-    // session cookies differently from the plugin's normal encodeComponent
-    // path. If the decoded write above never becomes visible, retry the
-    // affected cookies with their original wire value. This is intentionally
-    // limited to the mismatch fallback so existing installations keep the
-    // historical behavior, while longer sessions survive the platform cookie bridge.
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      if (kDebugMode) {
-        debugPrint('[SHU_AUTH] cookie-install-fallback mode=raw');
-      }
-      for (final stored in _cookieStore.entries) {
-        final cookie = stored.cookie;
-        if (cookie.value.isEmpty) continue;
-        await manager.setCookie(
-          WebViewCookie(
-            name: cookie.name,
-            value: cookie.value,
-            domain: stored.domain,
-            path: stored.path,
-          ),
-        );
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      if (kDebugMode) {
-        for (final domain in domains) {
-          try {
-            final visible = await manager.getCookies(
-              domain: Uri.parse('https://$domain'),
-            );
-            final details = visible
-                .where((cookie) => cookie.name.isNotEmpty)
-                .map(
-                  (cookie) => _describeStoredCookie(
-                    cookie.name,
-                    _normalizeCookieDomain(cookie.domain, domain),
-                    cookie.path,
-                    cookie.value,
-                  ),
-                )
-                .toList()
-              ..sort();
-            debugPrint(
-              '[SHU_AUTH] webview cookie-fallback-details domain=$domain '
-              'cookies=$details',
-            );
-          } on Object catch (error) {
-            debugPrint(
-              '[SHU_AUTH] webview cookie-fallback-read-failed '
-              'domain=$domain type=${error.runtimeType}',
-            );
-          }
-        }
-      }
+      published.sort();
+      debugPrint('[SHU_AUTH] published session cookies $published');
     }
   }
 
-  Future<void> _clearWebVpnAuthCookies(WebViewCookieManager manager) async {
+  /// Removes the WebVPN and identity cookies left on the gateway hosts, so a
+  /// rejected login cannot be mistaken for a live session.
+  Future<void> _clearWebVpnAuthCookies() async {
     final domains = <Uri>[
       Uri.parse(_webVpnPortal),
       Uri.parse('https://oauth.shu.edu.cn'),
@@ -311,22 +183,24 @@ class AcademicNativeAuthService {
     ];
     for (final domain in domains) {
       try {
-        final cookies = await manager.getCookies(domain: domain);
+        final cookies = await SessionCookieJar.shared.getCookies(
+          domain: domain,
+        );
         for (final cookie in cookies) {
           if (cookie.name != 'webvpn-token' && cookie.name != 'SHU_OAUTH2') {
             continue;
           }
-          await manager.setCookie(
-            WebViewCookie(
+          await SessionCookieJar.shared.setCookie(
+            SessionCookie(
               name: cookie.name,
               value: '',
-              domain: _normalizeCookieDomain(cookie.domain, domain.host),
+              domain: cookie.domain.isEmpty ? domain.host : cookie.domain,
               path: cookie.path.isEmpty ? '/' : cookie.path,
             ),
           );
         }
       } on Object {
-        // Fresh cookies collected by the native flow are installed below.
+        // Fresh cookies collected by the native flow replace these afterwards.
       }
     }
   }
@@ -348,6 +222,11 @@ class AcademicNativeAuthService {
   }) async {
     _clearChallenge();
     final loginUri = await _discoverLoginUri();
+    if (isAuthorizedCallback(loginUri)) {
+      // 复用仍然有效的 SSO 会话，授权码已就绪，无需再提交凭据。
+      _validateUri(loginUri);
+      return AcademicLoginResult(callbackUri: loginUri);
+    }
     final params = _extractParams(loginUri);
     final encryptedPassword = AcademicPasswordEncryptor.encrypt(password);
     final response = await _jsonRequest(
@@ -462,6 +341,138 @@ class AcademicNativeAuthService {
     return callbackUri;
   }
 
+  /// Completes a login by following its OAuth callback over HTTP.
+  ///
+  /// A hidden WebView used to load [callbackUri] only so the platform cookie
+  /// store received its `Set-Cookie` headers. Following the redirect chain
+  /// reaches the same session, because no step of the exchange depends on page
+  /// script. The collected cookies are published to the shared jar before this
+  /// method returns.
+  Future<void> completeLogin(Uri callbackUri) {
+    return _runAuthenticationStage(
+      'complete-login',
+      HttpTimeout.oauthCompletion,
+      () => _completeLogin(callbackUri),
+    );
+  }
+
+  Future<void> _completeLogin(Uri callbackUri) async {
+    switch (_target) {
+      case _NativeAuthTarget.academic:
+        await _completeAcademicLogin(callbackUri);
+      case _NativeAuthTarget.there:
+        // The booking service exchanges its own code, so its callback never
+        // reaches the shared jar: see ThereBookingClient.completeOAuth.
+        throw const AcademicNativeAuthException(
+          'unsupportedTarget',
+          '图书馆预约需要使用专属登录流程',
+        );
+      case _NativeAuthTarget.webVpn:
+        await _completeWebVpnLogin(callbackUri);
+    }
+    await publishSessionCookies();
+  }
+
+  /// Follows the jwxt callback until it reaches a page only a live session can
+  /// serve.
+  Future<void> _completeAcademicLogin(Uri callbackUri) async {
+    var current = callbackUri;
+    var ticketReloaded = false;
+    for (var redirects = 0; redirects < _maxRedirects; redirects++) {
+      final response = await _request('GET', current);
+      final next = _redirectTarget(response, current);
+      await response.drain<void>().timeout(HttpTimeout.normal);
+      if (next != null) {
+        current = next;
+        continue;
+      }
+      if (!ticketReloaded &&
+          AcademicUrlResolver.isTicketLoginUrl(current.toString())) {
+        // The ticket page hands the session over through a page-level
+        // redirect, so no `Location` header follows it. Requesting the home
+        // page performs the same exchange.
+        ticketReloaded = true;
+        current = AcademicUrlResolver.homeUri;
+        continue;
+      }
+      if (!AcademicUrlResolver.isAcademicSessionUrl(current.toString())) {
+        throw const AcademicNativeAuthException(
+          'academicSessionNotEstablished',
+          '教务系统登录未完成，请重试',
+        );
+      }
+      return;
+    }
+    throw const AcademicNativeAuthException(
+      'tooManyRedirects',
+      '教务系统登录跳转次数过多',
+    );
+  }
+
+  /// Finishes the WebVPN handshake the callback page used to run.
+  ///
+  /// `auth/start` issued a challenge whose `code` reaches the callback, but the
+  /// gateway only creates the session once `auth/finish` presents that code
+  /// together with the device identity the challenge was issued to.
+  Future<void> _completeWebVpnLogin(Uri callbackUri) async {
+    final externalId = _webVpnExternalId;
+    final code = callbackUri.queryParameters['code'];
+    final state = callbackUri.queryParameters['state'];
+    if (externalId == null ||
+        code == null ||
+        code.isEmpty ||
+        state == null ||
+        state.isEmpty) {
+      throw const AcademicNativeAuthException(
+        'webVpnCallbackMismatch',
+        'WebVPN 授权回调校验失败，请重新尝试',
+      );
+    }
+    final portal = Uri.parse(_webVpnPortal);
+    final finish = await _jsonRequest(
+      'POST',
+      portal.resolve('/api/access/auth/finish'),
+      body: {
+        'externalId': externalId,
+        'data': jsonEncode({
+          'callbackUrl': portal.resolve('/callback/oauth2').toString(),
+          'code': code,
+          'deviceId': await WebVpnDeviceId.load(),
+          'state': state,
+        }),
+      },
+      referer: portal.resolve('/callback/oauth2'),
+    );
+    if (finish['code'] != 0) {
+      if (kDebugMode) {
+        debugPrint(
+          '[SHU_AUTH] webvpn auth/finish rejected '
+          'code=${finish['code']} message=${finish['message']}',
+        );
+      }
+      throw const AcademicNativeAuthException(
+        'webVpnFinishFailed',
+        'WebVPN 登录未完成，请重试',
+      );
+    }
+    final info = await _jsonRequest(
+      'GET',
+      portal.resolve('/api/access/user/info'),
+      referer: portal.resolve('/site-nav/'),
+    );
+    final data = info['data'];
+    final userId = data is Map ? data['userId']?.toString() : null;
+    if (info['code'] != 0 ||
+        userId == null ||
+        userId.isEmpty ||
+        userId == '0') {
+      throw const AcademicNativeAuthException(
+        'webVpnUserInfoMissing',
+        'WebVPN 未能确认登录身份，请重新尝试',
+      );
+    }
+  }
+
   Future<Uri> _discoverLoginUri() async {
     if (_target == _NativeAuthTarget.webVpn) {
       return _startWebVpnOAuth();
@@ -469,7 +480,7 @@ class AcademicNativeAuthService {
     var uri = _target == _NativeAuthTarget.there
         ? Uri.parse(_thereEntry)
         : _academicEntry;
-    for (var redirects = 0; redirects < 16; redirects++) {
+    for (var redirects = 0; redirects < _maxRedirects; redirects++) {
       final response = await _request('GET', uri);
       final location = response.headers.value(HttpHeaders.locationHeader);
       if (kDebugMode) {
@@ -565,6 +576,7 @@ class AcademicNativeAuthService {
         'WebVPN 当前未提供上海大学统一认证',
       );
     }
+    _webVpnExternalId = externalId;
     final state =
         base64Encode(utf8.encode(jsonEncode({'externalId': externalId})));
     final callbackUrl = portal.resolve('/callback/oauth2').toString();
@@ -603,7 +615,7 @@ class AcademicNativeAuthService {
     // when no SSO session exists, while an existing session may finish at the
     // WebVPN callback immediately.
     var current = loginUri;
-    for (var redirects = 0; redirects < 16; redirects++) {
+    for (var redirects = 0; redirects < _maxRedirects; redirects++) {
       final response = await _request('GET', current, referer: portal);
       final next = _redirectTarget(response, current);
       await response.drain<void>().timeout(HttpTimeout.normal);
@@ -622,6 +634,19 @@ class AcademicNativeAuthService {
     return uri.host == _webVpnHost &&
         uri.path == '/callback/oauth2' &&
         uri.queryParameters.containsKey('code');
+  }
+
+  /// Whether discovery already landed on a business callback carrying an
+  /// authorization code.
+  ///
+  /// A still-valid SSO session makes `authorize` answer with the business
+  /// callback instead of the login page. That callback already holds the `code`
+  /// the remaining handshake needs and has no login parameters to submit, so
+  /// the credential exchange has to be skipped.
+  @visibleForTesting
+  static bool isAuthorizedCallback(Uri uri) {
+    final code = uri.queryParameters['code'];
+    return code != null && code.isNotEmpty;
   }
 
   /// The gateway and some business entries point at a different SSO host.
@@ -777,65 +802,6 @@ class AcademicNativeAuthService {
 
   String _cookieHeader(Uri uri) => _cookieStore.headerFor(uri);
 
-  String _normalizeCookieDomain(String value, String fallbackHost) {
-    if (value.isEmpty) return fallbackHost;
-    final parsed = Uri.tryParse(value);
-    if (parsed != null && parsed.host.isNotEmpty) return parsed.host;
-    final withoutScheme = value.replaceFirst(RegExp(r'^https?://'), '');
-    final host = withoutScheme.split('/').first.split(':').first;
-    return host.isEmpty ? fallbackHost : host;
-  }
-
-  static bool _cookieValueMatches(String expected, String actual) {
-    if (expected == actual) return true;
-    try {
-      return Uri.decodeComponent(actual) == expected;
-    } on FormatException {
-      return false;
-    }
-  }
-
-  String _webViewCookieValue(String value) {
-    if (defaultTargetPlatform != TargetPlatform.android) return value;
-    // webview_flutter_android encodes the value once more inside
-    // AndroidWebViewCookieManager.setCookie. Native Set-Cookie values are
-    // already in their wire representation, so decode one existing layer
-    // before passing them to the plugin; otherwise session cookies can be
-    // double-encoded and rejected by the server.
-    try {
-      return Uri.decodeComponent(value);
-    } on FormatException {
-      return value;
-    }
-  }
-
-  String _describeStoredCookie(
-    String name,
-    String domain,
-    String path,
-    String value,
-  ) {
-    return 'name=$name domain=$domain path=${path.isEmpty ? '/' : path} '
-        '${_describeCookieValue(value)}';
-  }
-
-  String _describeCookieValue(String value) {
-    final digest = SHA1Digest()
-        .process(Uint8List.fromList(utf8.encode(value)))
-        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
-        .join();
-    return 'length=${value.length} decodedLength=${_decodedLength(value)} '
-        'sha1=${digest.substring(0, 12)}';
-  }
-
-  int _decodedLength(String value) {
-    try {
-      return Uri.decodeComponent(value).length;
-    } on FormatException {
-      return value.length;
-    }
-  }
-
   String _extractParams(Uri loginUri) {
     final index = loginUri.path.indexOf(_newssoPathMarker);
     if (index < 0) {
@@ -926,10 +892,8 @@ class _StoredCookie {
 
 /// 认证流程在内存中维护的 Cookie 容器。
 ///
-/// 抽成独立类是为了让「企业微信扫码取得的 SSO 会话 Cookie 是否正确并入
-/// 后续请求」这一行为可以脱离 WebView 平台单独测试
-/// （[AcademicNativeAuthService] 的构造函数会创建 [WebViewCookieManager]，
-/// 在纯 Dart 单元测试中不可用）。
+/// 抽成独立类是为了让「外部流程取得的会话 Cookie 是否正确并入后续请求」
+/// 这一行为可以脱离具体服务单独测试。
 class AcademicSessionCookieStore {
   final List<_StoredCookie> _cookies = [];
 
@@ -966,7 +930,7 @@ class AcademicSessionCookieStore {
         .join('; ');
   }
 
-  /// 当前持有的 Cookie 快照，供安装进 WebView 时使用。
+  /// 当前持有的 Cookie 快照，供写入会话 Cookie 罐时使用。
   List<({Cookie cookie, String domain, String path})> get entries => [
         for (final stored in _cookies)
           (cookie: stored.cookie, domain: stored.domain, path: stored.path),

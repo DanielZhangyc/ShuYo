@@ -28,10 +28,30 @@ void main() {
       isFalse,
     );
     expect(
-      AcademicUrlResolver.isPreparedWebVpnAcademicUrl(
+      AcademicUrlResolver.isAcademicSessionUrl(
         'https://${AcademicConstants.host}/jwglxt/xtgl/index_initMenu.html',
       ),
       isTrue,
+    );
+    // The login exchange answers with HTTP 200 on these paths even without a
+    // session, so neither may be read as a completed login.
+    expect(
+      AcademicUrlResolver.isAcademicSessionUrl(
+        'https://${AcademicConstants.host}/jwglxt/ticketlogin?uid=1',
+      ),
+      isFalse,
+    );
+    expect(
+      AcademicUrlResolver.isAcademicSessionUrl(
+        'https://${AcademicConstants.host}/jwglxt/xtgl/login_slogin.html',
+      ),
+      isFalse,
+    );
+    expect(
+      AcademicUrlResolver.isAcademicSessionUrl(
+        'https://${AcademicUrlResolver.webVpnHost}/jwglxt/xtgl/index_initMenu.html',
+      ),
+      isFalse,
     );
   });
 }

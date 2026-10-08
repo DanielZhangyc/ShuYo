@@ -2,26 +2,26 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+
+import 'session_cookie_jar.dart';
 
 /// Removes retired forum data while retaining campus services and settings.
 class AppDataMigrationService {
   AppDataMigrationService({
     Future<SharedPreferences> Function()? preferencesLoader,
     Future<Directory> Function()? cacheDirectoryLoader,
-    WebViewCookieManager? cookieManager,
-    Future<List<WebViewCookie>> Function(Uri)? cookieLoader,
-    Future<void> Function(WebViewCookie)? cookieSetter,
+    SessionCookieJar? cookieJar,
+    Future<List<SessionCookie>> Function(Uri)? cookieLoader,
+    Future<void> Function(SessionCookie)? cookieSetter,
   })  : _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance,
         _cacheDirectoryLoader =
             cacheDirectoryLoader ?? getApplicationCacheDirectory,
-        _cookieManager = cookieManager {
+        _cookieJar = cookieJar {
     _cookieLoader = cookieLoader ??
         (uri) =>
-            (_cookieManager ??= WebViewCookieManager()).getCookies(domain: uri);
+            (_cookieJar ??= SessionCookieJar.shared).getCookies(domain: uri);
     _cookieSetter = cookieSetter ??
-        (cookie) =>
-            (_cookieManager ??= WebViewCookieManager()).setCookie(cookie);
+        (cookie) => (_cookieJar ??= SessionCookieJar.shared).setCookie(cookie);
   }
 
   static const currentSchemaVersion = 4;
@@ -35,9 +35,9 @@ class AppDataMigrationService {
 
   final Future<SharedPreferences> Function() _preferencesLoader;
   final Future<Directory> Function() _cacheDirectoryLoader;
-  WebViewCookieManager? _cookieManager;
-  late final Future<List<WebViewCookie>> Function(Uri) _cookieLoader;
-  late final Future<void> Function(WebViewCookie) _cookieSetter;
+  SessionCookieJar? _cookieJar;
+  late final Future<List<SessionCookie>> Function(Uri) _cookieLoader;
+  late final Future<void> Function(SessionCookie) _cookieSetter;
 
   Future<void> migrateIfNeeded() async {
     final preferences = await _preferencesLoader();
@@ -70,17 +70,11 @@ class AppDataMigrationService {
       final cookies = await _cookieLoader(domain);
       for (final cookie in cookies) {
         if (!_forumCookieNames.contains(cookie.name)) continue;
-        final host = cookie.domain
-            .replaceFirst(RegExp(r'^https?://'), '')
-            .split('/')
-            .first
-            .split(':')
-            .first;
         await _cookieSetter(
-          WebViewCookie(
+          SessionCookie(
             name: cookie.name,
             value: '',
-            domain: host.isEmpty ? domain.host : host,
+            domain: cookie.domain.isEmpty ? domain.host : cookie.domain,
             path: cookie.path.isEmpty ? '/' : cookie.path,
           ),
         );

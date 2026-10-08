@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shuyo/data/services/session_cookie_jar.dart';
 import 'package:shuyo/data/services/webvpn_session_store.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -13,15 +13,15 @@ void main() {
       WebVpnSessionStore.cachedCookiesKey,
       '{"portal":[{"name":"webvpn-token","value":"stale","domain":"webvpn.shu.edu.cn","path":"/"}]}',
     );
-    final cleared = <WebViewCookie>[];
+    final cleared = <SessionCookie>[];
     final store = WebVpnSessionStore(
       cookieLoader: (domain) async => [
-        WebViewCookie(
+        SessionCookie(
           name: 'webvpn-token',
           value: 'stale',
           domain: domain.host,
         ),
-        WebViewCookie(
+        SessionCookie(
           name: 'SHU_OAUTH2',
           value: 'oauth-session',
           domain: domain.host,
