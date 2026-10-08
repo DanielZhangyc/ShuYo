@@ -212,6 +212,9 @@ class DemoClassroomRepository extends ClassroomRepository {
   final ClassroomBuildingSchedule schedule;
 
   @override
+  ClassroomSearchOptions? get optionsSnapshot => options;
+
+  @override
   Future<ClassroomSearchOptions> loadOptions(
           {bool forceRefresh = false}) async =>
       options;
