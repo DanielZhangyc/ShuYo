@@ -48,7 +48,11 @@ class AcademicScheduleDisplayState {
 class AcademicScheduleDisplaySettingsService {
   AcademicScheduleDisplaySettingsService({
     Future<SharedPreferences> Function()? preferencesLoader,
+    this.scope,
   }) : _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance;
+
+  final String? scope;
+  String _key(String key) => scope == null ? key : '$key.$scope';
 
   static const _colorfulKey = 'academic.schedule.display.colorful';
   static const _showTeacherKey = 'academic.schedule.display.showTeacher';
@@ -77,12 +81,12 @@ class AcademicScheduleDisplaySettingsService {
     SharedPreferences prefs,
   ) {
     return AcademicScheduleDisplaySettings(
-      colorful: prefs.getBool(_colorfulKey) ?? true,
-      showTeacher: prefs.getBool(_showTeacherKey) ?? true,
-      showCredit: prefs.getBool(_showCreditKey) ?? false,
-      showNote: prefs.getBool(_showNoteKey) ?? false,
+      colorful: prefs.getBool(_key(_colorfulKey)) ?? true,
+      showTeacher: prefs.getBool(_key(_showTeacherKey)) ?? true,
+      showCredit: prefs.getBool(_key(_showCreditKey)) ?? false,
+      showNote: prefs.getBool(_key(_showNoteKey)) ?? false,
       showNonCurrentWeekCourses:
-          prefs.getBool(_showNonCurrentWeekCoursesKey) ?? true,
+          prefs.getBool(_key(_showNonCurrentWeekCoursesKey)) ?? true,
     );
   }
 
@@ -90,12 +94,12 @@ class AcademicScheduleDisplaySettingsService {
     AcademicScheduleDisplaySettings settings,
   ) async {
     final prefs = await _preferencesLoader();
-    await prefs.setBool(_colorfulKey, settings.colorful);
-    await prefs.setBool(_showTeacherKey, settings.showTeacher);
-    await prefs.setBool(_showCreditKey, settings.showCredit);
-    await prefs.setBool(_showNoteKey, settings.showNote);
+    await prefs.setBool(_key(_colorfulKey), settings.colorful);
+    await prefs.setBool(_key(_showTeacherKey), settings.showTeacher);
+    await prefs.setBool(_key(_showCreditKey), settings.showCredit);
+    await prefs.setBool(_key(_showNoteKey), settings.showNote);
     await prefs.setBool(
-      _showNonCurrentWeekCoursesKey,
+      _key(_showNonCurrentWeekCoursesKey),
       settings.showNonCurrentWeekCourses,
     );
     return settings;
@@ -107,7 +111,7 @@ class AcademicScheduleDisplaySettingsService {
   }
 
   Map<String, int> _courseColorsFromPreferences(SharedPreferences prefs) {
-    final raw = prefs.getString(_courseColorsKey);
+    final raw = prefs.getString(_key(_courseColorsKey));
     if (raw == null || raw.isEmpty) {
       return <String, int>{};
     }
@@ -130,6 +134,6 @@ class AcademicScheduleDisplaySettingsService {
     final colors = await loadCourseColors();
     colors[key] = colorValue;
     final prefs = await _preferencesLoader();
-    await prefs.setString(_courseColorsKey, jsonEncode(colors));
+    await prefs.setString(_key(_courseColorsKey), jsonEncode(colors));
   }
 }

@@ -1,0 +1,237 @@
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shuyo/data/models/academic_schedule.dart';
+import 'package:shuyo/data/repositories/academic_schedule_repository.dart';
+import 'package:shuyo/data/services/schedule_share_service.dart';
+import 'package:shuyo/data/services/student_identity_service.dart';
+import 'package:shuyo/features/home/schedule_share_page.dart';
+import 'package:shuyo/shared/theme/shuyo_theme.dart';
+
+void main() {
+  testWidgets('destroying a code clears the read only capsule', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final identity = _FakeIdentity();
+    addTearDown(identity.dispose);
+    final requests = <http.Request>[];
+    final client = MockClient((request) async {
+      requests.add(request);
+      if (request.method == 'GET') {
+        return http.Response('{"success":true,"data":null}', 200);
+      }
+      if (request.method == 'DELETE') {
+        return http.Response('', 204);
+      }
+      return http.Response.bytes(
+          utf8.encode(jsonEncode({
+            'success': true,
+            'data': {
+              'id': 'share-one',
+              'code': 'Ab3D4e',
+              'expiresAt': '2026-10-22T00:00:00Z',
+              'termLabel': '2026 秋',
+              'includeNote': false
+            }
+          })),
+          201);
+    });
+    const term = AcademicTerm(
+      yearCode: '2026',
+      termCode: '3',
+      academicYearName: '2026-2027',
+      termName: '秋',
+      studentName: '本人',
+      studentId: '12345678',
+      className: '一班',
+    );
+    await tester.pumpWidget(MaterialApp(
+      theme: ShuYoThemes.byId(ShuYoThemes.defaultId).themeData(),
+      home: ScheduleSharePage(
+        ownSchedule: AcademicSchedule(
+            term: term,
+            sessions: const [],
+            untimedCourses: const [],
+            fetchedAt: DateTime.utc(2026, 10, 8)),
+        ownWeekState: ScheduleWeekState(
+            currentWeek: 1, anchorMonday: DateTime(2026, 8, 31)),
+        scheduleRepository: AcademicScheduleRepository(),
+        identityService: identity,
+        shareApi: ScheduleShareApi(client: client),
+        importStore: _MemoryImports(),
+        calendarStore: _MemoryCalendar(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, '生成'));
+    await tester.pumpAndSettle();
+    expect(find.text('Ab3D4e'), findsOneWidget);
+    expect(requests.where((item) => item.method == 'POST').length, 1);
+    expect(
+        requests
+            .firstWhere((item) => item.method == 'POST')
+            .body
+            .contains('12345678'),
+        isFalse);
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('销毁').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '销毁'));
+    await tester.pumpAndSettle();
+    expect(find.text('Ab3D4e'), findsNothing);
+    expect(find.text('暂无分享码'), findsOneWidget);
+    expect(
+        tester
+            .widget<IconButton>(find.byWidgetPredicate(
+              (widget) => widget is IconButton && widget.tooltip == '复制',
+            ))
+            .onPressed,
+        isNull);
+  });
+
+  testWidgets(
+      'imports a code, opens a read only schedule and compares with mine',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final importStore = _MemoryImports();
+    const term = AcademicTerm(
+      yearCode: '2026',
+      termCode: '3',
+      academicYearName: '2026-2027',
+      termName: '秋',
+      studentName: '本人',
+      studentId: '12345678',
+      className: '一班',
+    );
+    final own = AcademicSchedule(
+      term: term,
+      sessions: const [],
+      untimedCourses: const [],
+      fetchedAt: DateTime.utc(2026, 10, 8),
+      teachingWeekCount: 16,
+    );
+    final snapshot = {
+      'version': 1,
+      'term': {
+        'yearCode': '2026',
+        'termCode': '3',
+        'academicYearName': '2026-2027',
+        'termName': '秋'
+      },
+      'sessions': [
+        {
+          'courseName': '线性代数',
+          'teacherName': '张老师',
+          'campus': '宝山',
+          'location': '一教',
+          'credit': '3',
+          'weekday': 1,
+          'sections': [1, 2],
+          'weeks': [1]
+        }
+      ],
+      'untimedCourses': []
+    };
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/shares/resolve') {
+        expect(jsonDecode(request.body)['code'], 'ABC123');
+        return http.Response.bytes(
+            utf8.encode(jsonEncode({
+              'success': true,
+              'data': {'snapshot': snapshot, 'digest': 'digest-one'}
+            })),
+            200);
+      }
+      return http.Response('{}', 404);
+    });
+    await tester.pumpWidget(MaterialApp(
+      theme: ShuYoThemes.byId(ShuYoThemes.defaultId).themeData(),
+      home: ScheduleSharePage(
+        ownSchedule: own,
+        ownWeekState: ScheduleWeekState(
+            currentWeek: 1, anchorMonday: DateTime(2026, 8, 31)),
+        scheduleRepository: AcademicScheduleRepository(),
+        identityService: null,
+        shareApi: ScheduleShareApi(client: client),
+        importStore: importStore,
+        calendarStore: _MemoryCalendar(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('分享与导入'), findsOneWidget);
+    await tester.tap(find.text('导入').first);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'ABC123');
+    await tester.tap(find.text('导入').last);
+    await tester.pumpAndSettle();
+    expect(find.text('2026-2027 秋'), findsOneWidget);
+    await tester.tap(find.text('2026-2027 秋'));
+    await tester.pumpAndSettle();
+    expect(find.text('线性代数'), findsWidgets);
+    expect(find.byTooltip('设置开学日期'), findsNothing);
+    expect(find.byTooltip('比较'), findsOneWidget);
+    await tester.tap(find.byTooltip('比较'));
+    await tester.pumpAndSettle();
+    expect(find.text('我的课表'), findsOneWidget);
+    expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, '比较'))
+            .onPressed,
+        isNull);
+    await tester.tap(find.text('我的课表'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '比较'));
+    await tester.pumpAndSettle();
+    expect(find.text('共同空闲'), findsOneWidget);
+    expect(find.text('线性代数'), findsNothing);
+  });
+}
+
+class _MemoryImports extends ImportedScheduleStore {
+  final values = <ImportedSchedule>[];
+
+  @override
+  Future<List<ImportedSchedule>> list() async => [...values];
+
+  @override
+  Future<ImportedSchedule> save(SharedScheduleResult result) async {
+    final item = ImportedSchedule(
+      id: 'import-one',
+      name: '2026-2027 秋',
+      digest: result.digest,
+      snapshot: result.snapshot,
+      importedAt: DateTime.utc(2026, 10, 8),
+    );
+    values.add(item);
+    return item;
+  }
+}
+
+class _MemoryCalendar extends TermCalendarStore {
+  @override
+  Future<void> save(String termKey, DateTime date) async {}
+}
+
+class _FakeIdentity extends StudentIdentityService {
+  _FakeIdentity()
+      : super(httpClient: MockClient((_) async => http.Response('{}', 200)));
+  final session = StudentIdentitySession(
+    token: 'test-student-token',
+    studentId: '12345678',
+    maskedStudentId: '12****78',
+    expiresAt: DateTime.utc(2030),
+  );
+
+  @override
+  Future<StudentIdentitySession?> checkCurrentSession() async => session;
+
+  @override
+  Future<StudentIdentitySession?> loadLocalSession() async => session;
+
+  @override
+  Future<bool> ensureForProtectedAction() async => true;
+}

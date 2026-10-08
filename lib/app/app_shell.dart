@@ -336,6 +336,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             notificationService: _scheduleNotificationService,
                             widgetService: _scheduleWidgetService,
                             onLoginRequired: _handleInvalidAcademicSession,
+                            studentIdentityService: _studentIdentityService,
                             initialState: widget.initialOpenSchedule &&
                                     _scheduleDataRevision == 0
                                 ? widget.initialScheduleState

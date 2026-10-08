@@ -220,28 +220,33 @@ class AcademicSchedule {
     required this.sessions,
     required this.untimedCourses,
     required this.fetchedAt,
+    this.teachingWeekCount,
   });
 
   final AcademicTerm term;
   final List<CourseSession> sessions;
   final List<UntimedCourse> untimedCourses;
   final DateTime fetchedAt;
+  final int? teachingWeekCount;
 
   AcademicSchedule copyWith({
     AcademicTerm? term,
     List<CourseSession>? sessions,
     List<UntimedCourse>? untimedCourses,
     DateTime? fetchedAt,
+    int? teachingWeekCount,
   }) {
     return AcademicSchedule(
       term: term ?? this.term,
       sessions: sessions ?? this.sessions,
       untimedCourses: untimedCourses ?? this.untimedCourses,
       fetchedAt: fetchedAt ?? this.fetchedAt,
+      teachingWeekCount: teachingWeekCount ?? this.teachingWeekCount,
     );
   }
 
   int get maxWeek {
+    if (teachingWeekCount != null) return teachingWeekCount!.clamp(1, 32);
     final values = <int>[];
     for (final session in sessions) {
       values.addAll(session.weeks);
@@ -288,6 +293,7 @@ class AcademicSchedule {
       'untimedCourses':
           untimedCourses.map((course) => course.toJson()).toList(),
       'fetchedAt': fetchedAt.toIso8601String(),
+      if (teachingWeekCount != null) 'teachingWeekCount': teachingWeekCount,
     };
   }
 
@@ -304,6 +310,9 @@ class AcademicSchedule {
           .toList(),
       fetchedAt: DateTime.tryParse(stringValue(json['fetchedAt'])) ??
           DateTime.fromMillisecondsSinceEpoch(0),
+      teachingWeekCount: json['teachingWeekCount'] is int
+          ? json['teachingWeekCount'] as int
+          : null,
     );
   }
 }

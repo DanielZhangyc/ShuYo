@@ -11,11 +11,15 @@ import '../../data/services/academic_schedule_api_client.dart';
 import '../../data/services/academic_schedule_display_settings_service.dart';
 import '../../data/services/academic_schedule_notification_service.dart';
 import '../../data/services/academic_schedule_widget_service.dart';
+import '../../data/services/student_identity_service.dart';
+import '../../data/services/schedule_share_service.dart';
+import '../../data/services/schedule_comparison.dart';
 import '../../shared/shuyo_text_styles.dart';
 import '../../shared/navigation/shuyo_route.dart';
 import '../../shared/theme/shuyo_theme.dart';
 import '../../shared/widgets/empty_state.dart';
 import 'academic_schedule_editor_page.dart';
+import 'schedule_share_page.dart';
 
 const _scheduleCellInset = 2.5;
 const _scheduleCourseInset = 2.5;
@@ -32,6 +36,7 @@ class AcademicSchedulePage extends StatefulWidget {
     required this.notificationService,
     required this.widgetService,
     required this.onLoginRequired,
+    this.studentIdentityService,
     this.initialState,
     this.initialDisplayState,
     this.initialLoadError,
@@ -41,6 +46,7 @@ class AcademicSchedulePage extends StatefulWidget {
   final AcademicScheduleNotificationService notificationService;
   final AcademicScheduleWidgetService widgetService;
   final Future<void> Function() onLoginRequired;
+  final StudentIdentityService? studentIdentityService;
   final AcademicScheduleCacheState? initialState;
   final AcademicScheduleDisplayState? initialDisplayState;
   final String? initialLoadError;
@@ -123,6 +129,11 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
         ),
         actions: [
           IconButton(
+            tooltip: '分享与导入',
+            onPressed: _openShareHub,
+            icon: const Icon(Icons.inventory_2_outlined),
+          ),
+          IconButton(
             tooltip: '设置开学日期',
             onPressed: _schedule == null ? null : _setFirstWeekStartDate,
             icon: const Icon(Icons.edit_calendar_outlined),
@@ -151,6 +162,17 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
               },
             ),
     );
+  }
+
+  Future<void> _openShareHub() async {
+    await Navigator.of(context).push<void>(shuyoRoute(
+      builder: (_) => ScheduleSharePage(
+        ownSchedule: _schedule,
+        ownWeekState: _weekState,
+        scheduleRepository: widget.repository,
+        identityService: widget.studentIdentityService,
+      ),
+    ));
   }
 
   Widget _buildLoadedBody(String? error) {
@@ -340,6 +362,10 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     if (picked == null || !mounted) return;
     await widget.repository.setFirstWeekStart(picked);
     final weekState = await widget.repository.loadWeekState();
+    await TermCalendarStore().save(
+      '${schedule.term.yearCode}:${schedule.term.termCode}',
+      weekState.firstWeekStart,
+    );
     if (!mounted) {
       return;
     }
@@ -2612,6 +2638,11 @@ List<CourseSession> _sessionsIncludingNonCurrentWeek(
   return [...nonCurrentWeekSessions, ...currentWeekSessions];
 }
 
+int _gridSectionCount(AcademicSchedule schedule) => schedule.sessions
+    .fold<int>(
+        12, (value, item) => item.endSection > value ? item.endSection : value)
+    .clamp(12, 16);
+
 class _ScheduleBody extends StatelessWidget {
   const _ScheduleBody({
     required this.schedule,
@@ -2627,6 +2658,8 @@ class _ScheduleBody extends StatelessWidget {
     required this.onEmptySlotTap,
     required this.onCourseTap,
     required this.onDayHeaderTap,
+    this.freeSlots,
+    this.sectionCount,
   });
 
   final AcademicSchedule schedule;
@@ -2641,7 +2674,9 @@ class _ScheduleBody extends StatelessWidget {
   final bool canAddCourse;
   final ValueChanged<_ScheduleSlot> onEmptySlotTap;
   final ValueChanged<CourseSession> onCourseTap;
-  final ValueChanged<int> onDayHeaderTap;
+  final ValueChanged<int>? onDayHeaderTap;
+  final Set<_ScheduleSlot>? freeSlots;
+  final int? sectionCount;
 
   @override
   Widget build(BuildContext context) {
@@ -2693,6 +2728,9 @@ class _ScheduleBody extends StatelessWidget {
                         onEmptySlotTap: onEmptySlotTap,
                         onCourseTap: onCourseTap,
                         onDayHeaderTap: onDayHeaderTap,
+                        freeSlots: freeSlots,
+                        sectionCount:
+                            sectionCount ?? _gridSectionCount(schedule),
                       ),
                       if (untimed.isNotEmpty)
                         _UntimedCourseList(courses: untimed),
@@ -2983,12 +3021,13 @@ class _ScheduleGrid extends StatelessWidget {
     required this.onEmptySlotTap,
     required this.onCourseTap,
     required this.onDayHeaderTap,
+    this.freeSlots,
+    required this.sectionCount,
   });
 
   static const leftWidth = 68.0;
   static const _headerHeight = 54.0;
   static const _rowHeight = 68.0;
-  static const _sectionCount = 12;
 
   final List<CourseSession> sessions;
   final List<int> weekdays;
@@ -3000,14 +3039,16 @@ class _ScheduleGrid extends StatelessWidget {
   final bool canAddCourse;
   final ValueChanged<_ScheduleSlot> onEmptySlotTap;
   final ValueChanged<CourseSession> onCourseTap;
-  final ValueChanged<int> onDayHeaderTap;
+  final ValueChanged<int>? onDayHeaderTap;
+  final Set<_ScheduleSlot>? freeSlots;
+  final int sectionCount;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final dayWidth = (constraints.maxWidth - leftWidth) / weekdays.length;
-        final height = _headerHeight + _sectionCount * _rowHeight;
+        final height = _headerHeight + sectionCount * _rowHeight;
         return SizedBox(
           height: height,
           child: Stack(
@@ -3019,13 +3060,14 @@ class _ScheduleGrid extends StatelessWidget {
                 leftWidth: leftWidth,
                 headerHeight: _headerHeight,
                 rowHeight: _rowHeight,
-                sectionCount: _sectionCount,
+                sectionCount: sectionCount,
                 weekState: weekState,
                 displayedWeek: displayedWeek,
                 selectedManualSlot: selectedManualSlot,
                 canAddCourse: canAddCourse,
                 onEmptySlotTap: onEmptySlotTap,
                 onDayHeaderTap: onDayHeaderTap,
+                freeSlots: freeSlots,
               ),
               for (final session in sessions)
                 if (weekdays.contains(session.weekday))
@@ -3072,6 +3114,7 @@ class _GridBackground extends StatelessWidget {
     required this.canAddCourse,
     required this.onEmptySlotTap,
     required this.onDayHeaderTap,
+    this.freeSlots,
   });
 
   final List<CourseSession> sessions;
@@ -3086,7 +3129,8 @@ class _GridBackground extends StatelessWidget {
   final _ScheduleSlot? selectedManualSlot;
   final bool canAddCourse;
   final ValueChanged<_ScheduleSlot> onEmptySlotTap;
-  final ValueChanged<int> onDayHeaderTap;
+  final ValueChanged<int>? onDayHeaderTap;
+  final Set<_ScheduleSlot>? freeSlots;
 
   @override
   Widget build(BuildContext context) {
@@ -3107,7 +3151,9 @@ class _GridBackground extends StatelessWidget {
                       1,
                 ),
               ),
-              onTap: () => onDayHeaderTap(weekdays[index]),
+              onTap: onDayHeaderTap == null
+                  ? null
+                  : () => onDayHeaderTap!(weekdays[index]),
             ),
           ),
         for (var section = 1; section <= sectionCount; section++)
@@ -3137,6 +3183,9 @@ class _GridBackground extends StatelessWidget {
                             weekday: weekdays[index],
                             section: section,
                           ),
+                      commonFree: freeSlots?.contains(_ScheduleSlot(
+                              weekday: weekdays[index], section: section)) ??
+                          false,
                       onTap: onEmptySlotTap,
                     ),
                   ),
@@ -3162,12 +3211,14 @@ class _EmptyScheduleCell extends StatelessWidget {
     required this.enabled,
     required this.selected,
     required this.onTap,
+    this.commonFree = false,
   });
 
   final _ScheduleSlot slot;
   final bool enabled;
   final bool selected;
   final ValueChanged<_ScheduleSlot> onTap;
+  final bool commonFree;
 
   @override
   Widget build(BuildContext context) {
@@ -3179,7 +3230,9 @@ class _EmptyScheduleCell extends StatelessWidget {
         onTap: enabled ? () => onTap(slot) : null,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: colors.scheduleEmptyCell,
+            color: commonFree
+                ? Color.lerp(colors.scheduleEmptyCell, colors.accent, 0.28)!
+                : colors.scheduleEmptyCell,
             borderRadius: BorderRadius.circular(_scheduleCellRadius),
           ),
           child: Center(
@@ -3578,4 +3631,204 @@ String _courseColorSeed(CourseSession session) {
     return code;
   }
   return session.courseName.trim();
+}
+
+/// Uses the same week switcher and grid as the campus schedule, without edit actions.
+class ImportedSchedulePage extends StatefulWidget {
+  const ImportedSchedulePage({
+    super.key,
+    required this.schedule,
+    required this.weekState,
+    required this.title,
+    required this.importId,
+    required this.onCompare,
+  });
+
+  final AcademicSchedule schedule;
+  final ScheduleWeekState weekState;
+  final String title;
+  final String importId;
+  final VoidCallback onCompare;
+
+  @override
+  State<ImportedSchedulePage> createState() => _ImportedSchedulePageState();
+}
+
+class _ImportedSchedulePageState extends State<ImportedSchedulePage> {
+  late final _displayService = AcademicScheduleDisplaySettingsService(
+      scope: 'import.${widget.importId}');
+  late Future<AcademicScheduleDisplayState> _displayFuture;
+  late int _week;
+  AcademicScheduleDisplayState? _display;
+
+  @override
+  void initState() {
+    super.initState();
+    _week = widget.weekState
+        .weekForDate(DateTime.now())
+        .clamp(1, widget.schedule.maxWeek);
+    _displayFuture = _displayService.loadState();
+  }
+
+  Future<void> _openDisplaySettings() async {
+    final current = _display ?? await _displayFuture;
+    if (!mounted) return;
+    final next = await showModalBottomSheet<AcademicScheduleDisplaySettings>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _DisplaySettingsSheet(initial: current.settings),
+    );
+    if (next == null || !mounted) return;
+    final saved = await _displayService.saveSettings(next);
+    if (mounted) {
+      setState(() => _display = AcademicScheduleDisplayState(
+          settings: saved, courseColorValues: current.courseColorValues));
+    }
+  }
+
+  Future<void> _openMore() async {
+    final selected = await showModalBottomSheet<bool>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: ListTile(
+          leading: const Icon(Icons.palette_outlined),
+          title: const Text('显示设置'),
+          onTap: () => Navigator.pop(context, true),
+        ),
+      ),
+    );
+    if (selected == true) await _openDisplaySettings();
+  }
+
+  void _showCourse(CourseSession item) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(item.courseName,
+                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              if (item.teacherName.isNotEmpty)
+                _DetailLine(Icons.person_outline, item.teacherName),
+              if (item.placeText.isNotEmpty)
+                _DetailLine(Icons.place_outlined, item.placeText),
+              if (item.credit.isNotEmpty)
+                _DetailLine(Icons.school_outlined, '${item.credit} 学分'),
+              if (item.note.isNotEmpty)
+                _DetailLine(Icons.notes_outlined, item.note),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(
+          title: Text(widget.title),
+          actions: [
+            IconButton(
+                tooltip: '比较',
+                onPressed: widget.onCompare,
+                icon: const Icon(Icons.compare_arrows_outlined)),
+            IconButton(
+                tooltip: '更多',
+                onPressed: _openMore,
+                icon: const Icon(Icons.more_horiz)),
+          ],
+        ),
+        body: FutureBuilder<AcademicScheduleDisplayState>(
+          future: _displayFuture,
+          builder: (context, snapshot) {
+            if (!snapshot.hasData && _display == null) {
+              if (snapshot.hasError) {
+                return Center(child: Text('显示设置加载失败：${snapshot.error}'));
+              }
+              return const Center(child: CircularProgressIndicator());
+            }
+            final display = _display ?? snapshot.data!;
+            return _ScheduleBody(
+              schedule: widget.schedule,
+              weekState: widget.weekState,
+              displayedWeek: _week,
+              displaySettings: display.settings,
+              courseColorValues: display.courseColorValues,
+              onPreviousWeek: _week <= 1 ? null : () => setState(() => _week--),
+              onNextWeek: _week >= widget.schedule.maxWeek
+                  ? null
+                  : () => setState(() => _week++),
+              onQuickWeekSelected: (week) => setState(() => _week = week),
+              selectedManualSlot: null,
+              canAddCourse: false,
+              onEmptySlotTap: (_) {},
+              onCourseTap: _showCourse,
+              onDayHeaderTap: null,
+            );
+          },
+        ),
+      );
+}
+
+class SharedFreeTimePage extends StatefulWidget {
+  const SharedFreeTimePage(
+      {super.key, required this.schedules, required this.weekState});
+
+  final List<AcademicSchedule> schedules;
+  final ScheduleWeekState weekState;
+
+  @override
+  State<SharedFreeTimePage> createState() => _SharedFreeTimePageState();
+}
+
+class _SharedFreeTimePageState extends State<SharedFreeTimePage> {
+  late final int _maxWeek = widget.schedules
+      .map((item) => item.maxWeek)
+      .reduce((a, b) => a < b ? a : b);
+  late int _week =
+      widget.weekState.weekForDate(DateTime.now()).clamp(1, _maxWeek);
+  late final int _maxSection =
+      widget.schedules.map(_gridSectionCount).reduce((a, b) => a > b ? a : b);
+
+  Set<_ScheduleSlot> _freeSlots() {
+    return {
+      for (final (day, section) in commonFreeSections(widget.schedules, _week,
+          maxSection: _maxSection))
+        _ScheduleSlot(weekday: day, section: section),
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final grid = widget.schedules.first.copyWith(
+        sessions: const [],
+        untimedCourses: const [],
+        teachingWeekCount: _maxWeek);
+    return Scaffold(
+      appBar: AppBar(title: const Text('共同空闲')),
+      body: _ScheduleBody(
+        schedule: grid,
+        weekState: widget.weekState,
+        displayedWeek: _week,
+        displaySettings: const AcademicScheduleDisplaySettings(
+            colorful: true, showTeacher: false, showCredit: false),
+        courseColorValues: const {},
+        freeSlots: _freeSlots(),
+        sectionCount: _maxSection,
+        onPreviousWeek: _week <= 1 ? null : () => setState(() => _week--),
+        onNextWeek: _week >= _maxWeek ? null : () => setState(() => _week++),
+        onQuickWeekSelected: (week) => setState(() => _week = week),
+        selectedManualSlot: null,
+        canAddCourse: false,
+        onEmptySlotTap: (_) {},
+        onCourseTap: (_) {},
+        onDayHeaderTap: null,
+      ),
+    );
+  }
 }
