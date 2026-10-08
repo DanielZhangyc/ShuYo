@@ -211,7 +211,7 @@ void main() {
           'credit': '3',
           'weekday': 1,
           'sections': [1, 2],
-          'weeks': [1]
+          'weeks': [for (var week = 1; week <= 16; week++) week]
         }
       ],
       'untimedCourses': []
@@ -271,7 +271,7 @@ void main() {
     expect(find.byIcon(Icons.join_inner), findsOneWidget);
     await tester.tap(find.text('线性代数').first);
     await tester.pumpAndSettle();
-    expect(find.text('周一 第1-2节 1周'), findsOneWidget);
+    expect(find.text('周一 第1-2节 1-16周'), findsOneWidget);
     expect(find.text('编辑'), findsNothing);
     expect(find.text('删除'), findsNothing);
     await tester.tapAt(const Offset(8, 8));

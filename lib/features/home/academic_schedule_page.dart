@@ -3525,7 +3525,7 @@ class _CourseDetailSheet extends StatelessWidget {
         ? session.weekText.trim()
         : session.weeks.isEmpty
             ? '每周'
-            : '${session.weeks.join('、')}周';
+            : _formatWeekText(session.weeks);
     return SafeArea(
       top: false,
       bottom: false,
