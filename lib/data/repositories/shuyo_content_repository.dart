@@ -8,8 +8,7 @@ import '../../core/client_backend_constants.dart';
 enum ShuyoContentKind { announcements, tips }
 
 extension ShuyoContentKindLabel on ShuyoContentKind {
-  String get label =>
-      this == ShuyoContentKind.announcements ? 'ShuYo 公告' : '使用提示';
+  String get label => this == ShuyoContentKind.announcements ? '系统公告' : '使用提示';
   String get path =>
       this == ShuyoContentKind.announcements ? 'announcements' : 'tips';
 }

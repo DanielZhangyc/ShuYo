@@ -6,6 +6,7 @@ import 'package:shuyo/core/app_tab.dart';
 import 'package:shuyo/data/services/client_settings_service.dart';
 import 'package:shuyo/features/home/academic_schedule_page.dart';
 import 'package:shuyo/features/home/academic_progress_page.dart';
+import 'package:shuyo/features/home/shuyo_content_page.dart';
 import 'package:shuyo/features/onboarding/startup_onboarding.dart';
 
 void main() {
@@ -70,6 +71,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(BottomNavigationBar), findsNothing);
     expect(find.text('通知'), findsOneWidget);
+    expect(find.text('使用提示'), findsOneWidget);
+    expect(find.text('系统公告'), findsOneWidget);
+    expect(find.byType(ShuyoContentPage), findsOneWidget);
   });
 
   testWidgets('starts on the schedule tab for a widget launch', (tester) async {

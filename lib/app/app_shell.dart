@@ -18,6 +18,7 @@ import '../data/repositories/academic_schedule_repository.dart';
 import '../data/repositories/academic_progress_repository.dart';
 import '../data/repositories/academic_ranking_repository.dart';
 import '../data/repositories/announcement_repository.dart';
+import '../data/repositories/shuyo_content_repository.dart';
 import '../data/repositories/classroom_repository.dart';
 import '../data/repositories/client_backend_repository.dart';
 import '../data/services/academic_account_store.dart';
@@ -39,6 +40,7 @@ import '../features/home/academic_progress_page.dart';
 import '../features/home/announcements_page.dart';
 import '../features/home/empty_classroom_page.dart';
 import '../features/home/home_dashboard_page.dart';
+import '../features/home/shuyo_content_page.dart';
 import '../features/library_booking/library_booking_page.dart';
 import '../features/onboarding/startup_onboarding.dart';
 import '../features/settings/client_settings_page.dart';
@@ -415,9 +417,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _openNotifications() {
     Navigator.of(context).push<void>(
       shuyoRoute(
-        builder: (_) => Scaffold(
-          appBar: AppBar(title: const Text('通知')),
-          body: const SizedBox.expand(),
+        builder: (_) => ShuyoContentPage(
+          repository: ShuyoContentRepository(),
+          isDemo: widget.isDemo,
         ),
       ),
     );

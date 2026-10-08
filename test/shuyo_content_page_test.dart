@@ -56,7 +56,7 @@ void main() {
     );
   });
 
-  testWidgets('content tabs open details and reject outside images',
+  testWidgets('notifications default to tips with notice rows and tabs',
       (tester) async {
     final client = MockClient((request) async {
       final tips = request.url.path.endsWith('/tips');
@@ -86,17 +86,78 @@ void main() {
       home: ShuyoContentPage(repository: repository),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('欢迎使用'), findsOneWidget);
-    await tester.tap(find.text('欢迎使用'));
-    await tester.pumpAndSettle();
-    expect(find.text('公告正文'), findsOneWidget);
-    await tester.pageBack();
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('使用提示'));
-    await tester.pumpAndSettle();
+    expect(find.text('通知'), findsOneWidget);
+    expect(find.text('使用提示'), findsOneWidget);
+    expect(find.text('系统公告'), findsOneWidget);
+    expect(find.text('快速上手'), findsOneWidget);
+    expect(find.textContaining('第一步'), findsOneWidget);
+    expect(find.byType(Card), findsNothing);
+    expect(find.byType(SlideTransition), findsWidgets);
     await tester.tap(find.text('快速上手'));
     await tester.pumpAndSettle();
     expect(find.text('第一步'), findsOneWidget);
     expect(find.text('图片地址不可用'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('系统公告'));
+    await tester.pumpAndSettle();
+    expect(find.text('欢迎使用'), findsOneWidget);
+    expect(find.text('公告正文'), findsOneWidget);
+    await tester.tap(find.text('欢迎使用'));
+    await tester.pumpAndSettle();
+    expect(find.text('公告正文'), findsOneWidget);
+  });
+
+  testWidgets('notice rows animate when scrolling down and back up',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final client = MockClient((request) async => http.Response.bytes(
+          utf8.encode(jsonEncode({
+            'success': true,
+            'data': [
+              for (var index = 0; index < 12; index++)
+                {
+                  'id': 'tip_$index',
+                  'title': '提示 $index',
+                  'content': '正文预览 $index',
+                },
+            ],
+          })),
+          200,
+        ));
+    await tester.pumpWidget(MaterialApp(
+      home: ShuyoContentPage(
+        repository: ShuyoContentRepository(
+          client: client,
+          baseUrl: 'https://api.shuyo.work',
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('提示 0'), findsOneWidget);
+    await tester.drag(find.byType(ListView).first, const Offset(0, -620));
+    await tester.pump();
+    final downRow = find.ancestor(
+      of: find.text('提示 5'),
+      matching: find.byType(SlideTransition),
+    );
+    expect(downRow, findsWidgets);
+    expect(tester.widget<SlideTransition>(downRow.first).position.value.dx,
+        greaterThan(0));
+    await tester.pumpAndSettle();
+    expect(tester.widget<SlideTransition>(downRow.first).position.value.dx, 0);
+    await tester.drag(find.byType(ListView).first, const Offset(0, 620));
+    await tester.pump();
+    final upRow = find.ancestor(
+      of: find.text('提示 0'),
+      matching: find.byType(SlideTransition),
+    );
+    expect(upRow, findsWidgets);
+    expect(tester.widget<SlideTransition>(upRow.first).position.value.dx,
+        greaterThan(0));
+    expect(tester.takeException(), isNull);
   });
 }

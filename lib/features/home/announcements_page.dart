@@ -9,7 +9,6 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../data/models/announcement.dart';
 import '../../data/models/announcement_source.dart';
 import '../../data/repositories/announcement_repository.dart';
-import '../../data/repositories/shuyo_content_repository.dart';
 import '../../data/services/announcement_api_client.dart';
 import '../../shared/shuyo_text_styles.dart';
 import '../../shared/navigation/shuyo_route.dart';
@@ -17,7 +16,6 @@ import '../../shared/theme/shuyo_theme.dart';
 import '../../shared/theme/custom_background.dart';
 import '../../shared/widgets/empty_state.dart';
 import '../../shared/widgets/fullscreen_image_page.dart';
-import 'shuyo_content_page.dart';
 
 /// Horizontal padding of the detail body, also used to derive the image decode
 /// width.
@@ -43,12 +41,10 @@ class AnnouncementsPage extends StatefulWidget {
     super.key,
     required this.repository,
     this.isDemo = false,
-    this.contentRepository,
   });
 
   final AnnouncementRepository repository;
   final bool isDemo;
-  final ShuyoContentRepository? contentRepository;
 
   @override
   State<AnnouncementsPage> createState() => _AnnouncementsPageState();
@@ -122,58 +118,7 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
             ),
         ],
       ),
-      body: Column(
-        children: [
-          if (!widget.isDemo) _shuyoEntries(),
-          Expanded(
-            child: _future == null
-                ? const _AnnouncementLoadingState()
-                : _buildList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _shuyoEntries() => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('ShuYo', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () =>
-                        _openShuyoContent(ShuyoContentKind.announcements),
-                    icon: const Icon(Icons.campaign_outlined),
-                    label: const Text('ShuYo 公告'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _openShuyoContent(ShuyoContentKind.tips),
-                    icon: const Icon(Icons.lightbulb_outline),
-                    label: const Text('使用提示'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      );
-
-  void _openShuyoContent(ShuyoContentKind kind) {
-    Navigator.of(context).push<void>(
-      shuyoRoute(
-        builder: (_) => ShuyoContentPage(
-          repository: widget.contentRepository ?? ShuyoContentRepository(),
-          initialKind: kind,
-        ),
-      ),
+      body: _future == null ? const _AnnouncementLoadingState() : _buildList(),
     );
   }
 
