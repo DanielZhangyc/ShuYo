@@ -139,16 +139,20 @@ void main() {
         digest: 'digest-one',
       );
       final imported = await store.save(result);
+      expect(imported.name, '课表 1');
       expect((await store.save(result)).id, imported.id);
-      expect((await store.list()).length, 1);
+      final second = await store.save(SharedScheduleResult(
+        snapshot: result.snapshot, digest: 'digest-two'));
+      expect(second.name, '课表 2');
+      expect((await store.list()).length, 2);
       final copy = imported.toSchedule(localWeekCount: 16);
       expect(copy.term.studentId, isEmpty);
       expect(copy.sessions.single.courseName, '高数');
       expect(copy.maxWeek, 16);
       await store.rename(imported, '朋友课表');
-      expect((await store.list()).single.name, '朋友课表');
+      expect((await store.list()).any((item) => item.name == '朋友课表'), isTrue);
       await store.delete(imported.id);
-      expect(await store.list(), isEmpty);
+      expect((await store.list()).single.name, '课表 2');
     } finally {
       await directory.delete(recursive: true);
     }

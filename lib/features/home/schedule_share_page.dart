@@ -47,6 +47,7 @@ class _ScheduleSharePageState extends State<ScheduleSharePage> {
   bool _generatingMode = true;
   bool _busy = false;
   bool _loading = true;
+  bool _checkingCode = true;
   bool _includeNote = false;
   String? _pendingRequestId;
 
@@ -59,7 +60,10 @@ class _ScheduleSharePageState extends State<ScheduleSharePage> {
 
   void _identityChanged() {
     if (!mounted || widget.identityService?.isVerified != false) return;
-    setState(() { _code = null; _pendingRequestId = null; });
+    setState(() {
+      _code = null;
+      _pendingRequestId = null;
+    });
   }
 
   @override
@@ -99,10 +103,16 @@ class _ScheduleSharePageState extends State<ScheduleSharePage> {
         setState(() {
           _code = code;
           if (code != null) _includeNote = code.includeNote;
+          _checkingCode = false;
         });
       }
     } on Object {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _checkingCode = false;
+        });
+      }
     }
   }
 
@@ -234,6 +244,41 @@ class _ScheduleSharePageState extends State<ScheduleSharePage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _openShareMore() async {
+    final selected = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final bottomPadding = MediaQuery.of(context).viewPadding.bottom;
+        return SafeArea(
+          top: false,
+          bottom: false,
+          child: Container(
+            width: double.infinity,
+            padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + bottomPadding),
+            decoration: BoxDecoration(
+              color: context.shuyoColors.surface,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(8)),
+            ),
+            child: Material(
+              type: MaterialType.transparency,
+              child: ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: const Text('销毁分享码'),
+                enabled: _code != null && !_busy,
+                onTap: _code == null || _busy
+                    ? null
+                    : () => Navigator.of(context).pop(true),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    if (selected == true && mounted) await _destroy();
   }
 
   Future<void> _import() async {
@@ -370,135 +415,245 @@ class _ScheduleSharePageState extends State<ScheduleSharePage> {
     }
   }
 
+  Widget _modeChoice(ShuYoColors colors, bool mode, String label) {
+    final selected = _generatingMode == mode;
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: () => setState(() => _generatingMode = mode),
+      child: AnimatedContainer(
+        key: ValueKey(mode ? 'share-mode-generate' : 'share-mode-import'),
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? colors.accent : Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13.5,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            color: selected ? colors.onAccent : colors.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _shareControls(ShuYoColors colors) {
+    return Container(
+      key: const ValueKey('share-controls'),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colors.border),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(children: [
+        Row(children: [
+          Container(
+            key: const ValueKey('share-mode-switch'),
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [
+                colors.surfaceAlt.withValues(alpha: 0.88),
+                colors.surfaceMuted.withValues(alpha: 0.72),
+              ]),
+              borderRadius: BorderRadius.circular(999),
+              border:
+                  Border.all(color: colors.borderStrong.withValues(alpha: 0.7)),
+            ),
+            child: Material(
+              type: MaterialType.transparency,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                _modeChoice(colors, true, '生成分享码'),
+                _modeChoice(colors, false, '导入'),
+              ]),
+            ),
+          ),
+          const Spacer(),
+          IgnorePointer(
+            ignoring: !_generatingMode,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 160),
+              opacity: _generatingMode ? 1 : 0,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Text('含备注',
+                    style:
+                        TextStyle(color: colors.textSecondary, fontSize: 13.5)),
+                SizedBox(
+                  width: 30,
+                  height: 40,
+                  child: Checkbox(
+                    value: _includeNote,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                    onChanged: _busy
+                        ? null
+                        : (value) => setState(() {
+                              _includeNote = value ?? false;
+                              _pendingRequestId = null;
+                            }),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 16),
+        Container(
+          key: const ValueKey('share-code-capsule'),
+          height: 56,
+          padding: const EdgeInsets.fromLTRB(16, 0, 4, 0),
+          decoration: BoxDecoration(
+            color: colors.surfaceAlt,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: colors.border),
+          ),
+          child: Stack(children: [
+            Positioned.fill(
+                child: IgnorePointer(
+              ignoring: !_generatingMode,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 160),
+                opacity: _generatingMode ? 1 : 0,
+                child: Row(children: [
+                  Expanded(
+                      child: _checkingCode
+                          ? Align(
+                              alignment: Alignment.centerLeft,
+                              child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: colors.textMuted)))
+                          : SelectableText(_code?.code ?? '',
+                              style: TextStyle(
+                                  color: colors.textPrimary,
+                                  fontSize: 17,
+                                  letterSpacing: 2))),
+                  TextButton(
+                    onPressed: _busy ? null : _generate,
+                    child: Text(_pendingRequestId == null ? '生成' : '重试'),
+                  ),
+                  IconButton(
+                    tooltip: '复制',
+                    onPressed: _code == null || _busy
+                        ? null
+                        : () async {
+                            await Clipboard.setData(
+                                ClipboardData(text: _code!.code));
+                            _snack('已复制');
+                          },
+                    icon: const Icon(Icons.copy_outlined),
+                  ),
+                ]),
+              ),
+            )),
+            Positioned.fill(
+                child: IgnorePointer(
+              ignoring: _generatingMode,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 160),
+                opacity: _generatingMode ? 0 : 1,
+                child: Row(children: [
+                  Expanded(
+                      child: TextField(
+                    controller: _importController,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')),
+                      LengthLimitingTextInputFormatter(6),
+                    ],
+                    style: TextStyle(
+                        color: colors.textPrimary,
+                        fontSize: 17,
+                        letterSpacing: 1.4),
+                    decoration: InputDecoration(
+                      hintText: '输入分享码',
+                      hintStyle: TextStyle(color: colors.textMuted),
+                      isCollapsed: true,
+                      contentPadding: EdgeInsets.zero,
+                      filled: false,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      disabledBorder: InputBorder.none,
+                      errorBorder: InputBorder.none,
+                      focusedErrorBorder: InputBorder.none,
+                    ),
+                  )),
+                  TextButton(
+                      onPressed: _busy ? null : _import,
+                      child: const Text('导入')),
+                ]),
+              ),
+            )),
+          ]),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 18,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: _generatingMode && _code != null
+                ? Text(
+                    '有效至 ${_code!.expiresAt.toLocal().year}-'
+                    '${_code!.expiresAt.toLocal().month.toString().padLeft(2, '0')}-'
+                    '${_code!.expiresAt.toLocal().day.toString().padLeft(2, '0')}',
+                    style: TextStyle(color: colors.textMuted, fontSize: 12),
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.shuyoColors;
     return Scaffold(
-      appBar: AppBar(title: const Text('分享与导入')),
+      appBar: AppBar(
+        title: const Text('分享与导入'),
+        actions: [
+          IconButton(
+              tooltip: '更多',
+              onPressed: _openShareMore,
+              icon: const Icon(Icons.more_horiz)),
+          const SizedBox(width: 2),
+        ],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(children: [
-                      Row(children: [
-                        Expanded(
-                            child: SegmentedButton<bool>(
-                          showSelectedIcon: false,
-                          segments: const [
-                            ButtonSegment(value: true, label: Text('生成分享码')),
-                            ButtonSegment(value: false, label: Text('导入')),
-                          ],
-                          selected: {_generatingMode},
-                          onSelectionChanged: (value) =>
-                              setState(() => _generatingMode = value.first),
-                        )),
-                        if (_generatingMode && _code != null)
-                          PopupMenuButton<String>(
-                            tooltip: '更多',
-                            onSelected: (_) => _destroy(),
-                            itemBuilder: (_) => const [
-                              PopupMenuItem(value: 'destroy', child: Text('销毁'))
-                            ],
-                          ),
-                      ]),
-                      const SizedBox(height: 16),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 180),
-                        child: _generatingMode
-                            ? Container(
-                                key: const ValueKey('generate'),
-                                decoration: BoxDecoration(
-                                    color: colors.surfaceMuted,
-                                    borderRadius: BorderRadius.circular(999)),
-                                padding: const EdgeInsets.only(left: 16),
-                                child: Row(children: [
-                                  Expanded(
-                                      child: SelectableText(
-                                          _code?.code ?? '暂无分享码',
-                                          style: const TextStyle(
-                                              fontSize: 17, letterSpacing: 2))),
-                                  TextButton(
-                                      onPressed: _busy ? null : _generate,
-                                      child: Text(_pendingRequestId == null
-                                          ? '生成'
-                                          : '重试')),
-                                  IconButton(
-                                      tooltip: '复制',
-                                      onPressed: _code == null || _busy
-                                          ? null
-                                          : () async {
-                                              await Clipboard.setData(
-                                                  ClipboardData(
-                                                      text: _code!.code));
-                                              _snack('已复制');
-                                            },
-                                      icon: const Icon(Icons.copy_outlined)),
-                                ]),
-                              )
-                            : Container(
-                                key: const ValueKey('import'),
-                                decoration: BoxDecoration(
-                                    color: colors.surfaceMuted,
-                                    borderRadius: BorderRadius.circular(999)),
-                                padding: const EdgeInsets.only(left: 16),
-                                child: Row(children: [
-                                  Expanded(
-                                      child: TextField(
-                                          controller: _importController,
-                                          maxLength: 6,
-                                          decoration: const InputDecoration(
-                                              hintText: '输入分享码',
-                                              counterText: '',
-                                              border: InputBorder.none))),
-                                  TextButton(
-                                      onPressed: _busy ? null : _import,
-                                      child: const Text('导入')),
-                                ]),
-                              ),
-                      ),
-                      if (_generatingMode) ...[
-                        CheckboxListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                              title: const Text('新码包含备注'),
-                          value: _includeNote,
-                          onChanged: _busy
-                              ? null
-                              : (value) => setState(() {
-                                    _includeNote = value ?? false;
-                                    _pendingRequestId = null;
-                                  }),
-                        ),
-                        if (_code != null)
-                          Text(
-                              '有效至 ${_code!.expiresAt.toLocal().year}-'
-                              '${_code!.expiresAt.toLocal().month.toString().padLeft(2, '0')}-'
-                              '${_code!.expiresAt.toLocal().day.toString().padLeft(2, '0')}',
-                              style: TextStyle(
-                                  color: colors.textMuted, fontSize: 12)),
-                      ],
-                    ]),
-                  ),
-                ),
+                _shareControls(colors),
                 const SizedBox(height: 20),
                 for (final item in _imports)
-                  Card(
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Material(
+                      color: colors.surface,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        side: BorderSide(color: colors.border),
+                      ),
                       child: ListTile(
-                    title: Text(item.name),
-                    onTap: () => _openImported(item),
-                    trailing: PopupMenuButton<String>(
-                      tooltip: '更多',
-                      onSelected: (action) => _itemAction(item, action),
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(value: 'rename', child: Text('重命名')),
-                        PopupMenuItem(value: 'delete', child: Text('删除')),
-                      ],
+                        title: Text(item.name),
+                        onTap: () => _openImported(item),
+                        trailing: PopupMenuButton<String>(
+                          tooltip: '更多',
+                          onSelected: (action) => _itemAction(item, action),
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(value: 'rename', child: Text('重命名')),
+                            PopupMenuItem(value: 'delete', child: Text('删除')),
+                          ],
+                        ),
+                      ),
                     ),
-                  )),
+                  ),
               ],
             ),
     );

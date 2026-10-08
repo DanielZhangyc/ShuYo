@@ -272,20 +272,21 @@ class ImportedScheduleStore {
   }
 
   Future<ImportedSchedule> save(SharedScheduleResult result) async {
-    final existing =
-        (await list()).where((item) => item.digest == result.digest);
+    final imported = await list();
+    final existing = imported.where((item) => item.digest == result.digest);
     if (existing.isNotEmpty) return existing.first;
     final random = Random.secure();
     final id = List<int>.generate(16, (_) => random.nextInt(256))
         .map((value) => value.toRadixString(16).padLeft(2, '0'))
         .join();
-    final term = result.snapshot['term'] as Map<String, dynamic>;
-    final name =
-        '${term['academicYearName'] ?? term['yearCode']} ${term['termName'] ?? ''}'
-            .trim();
+    final usedNames = imported.map((item) => item.name).toSet();
+    var number = 1;
+    while (usedNames.contains('课表 $number')) {
+      number++;
+    }
     final item = ImportedSchedule(
       id: id,
-      name: name,
+      name: '课表 $number',
       digest: result.digest,
       snapshot: result.snapshot,
       importedAt: DateTime.now(),

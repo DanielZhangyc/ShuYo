@@ -3231,7 +3231,8 @@ class _EmptyScheduleCell extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: commonFree
-                ? Color.lerp(colors.scheduleEmptyCell, colors.accent, 0.28)!
+                ? colors.accent.withValues(
+                    alpha: colors.brightness == Brightness.light ? 0.58 : 0.46)
                 : colors.scheduleEmptyCell,
             borderRadius: BorderRadius.circular(_scheduleCellRadius),
           ),
@@ -3689,13 +3690,31 @@ class _ImportedSchedulePageState extends State<ImportedSchedulePage> {
   Future<void> _openMore() async {
     final selected = await showModalBottomSheet<bool>(
       context: context,
-      builder: (context) => SafeArea(
-        child: ListTile(
-          leading: const Icon(Icons.palette_outlined),
-          title: const Text('显示设置'),
-          onTap: () => Navigator.pop(context, true),
-        ),
-      ),
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final bottomPadding = MediaQuery.of(context).viewPadding.bottom;
+        return SafeArea(
+          top: false,
+          bottom: false,
+          child: Container(
+            width: double.infinity,
+            padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + bottomPadding),
+            decoration: BoxDecoration(
+              color: context.shuyoColors.surface,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(8)),
+            ),
+            child: Material(
+              type: MaterialType.transparency,
+              child: ListTile(
+                leading: const Icon(Icons.palette_outlined),
+                title: const Text('显示设置'),
+                onTap: () => Navigator.of(context).pop(true),
+              ),
+            ),
+          ),
+        );
+      },
     );
     if (selected == true) await _openDisplaySettings();
   }

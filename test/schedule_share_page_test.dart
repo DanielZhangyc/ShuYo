@@ -13,6 +13,50 @@ import 'package:shuyo/features/home/schedule_share_page.dart';
 import 'package:shuyo/shared/theme/shuyo_theme.dart';
 
 void main() {
+  testWidgets(
+      'share card stays fixed while the pill switches on a narrow phone',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    await tester.pumpWidget(MaterialApp(
+      theme: ShuYoThemes.byId(ShuYoThemes.defaultId).themeData(),
+      home: ScheduleSharePage(
+        ownSchedule: null,
+        ownWeekState: null,
+        scheduleRepository: AcademicScheduleRepository(),
+        identityService: null,
+        importStore: _MemoryImports(),
+        calendarStore: _MemoryCalendar(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final card = tester.getRect(find.byKey(const ValueKey('share-controls')));
+    final capsule =
+        tester.getRect(find.byKey(const ValueKey('share-code-capsule')));
+    final generate =
+        tester.getSize(find.byKey(const ValueKey('share-mode-generate')));
+    final import =
+        tester.getSize(find.byKey(const ValueKey('share-mode-import')));
+    expect(import.width, lessThan(generate.width));
+    expect(find.byType(Card), findsNothing);
+    expect(find.text('暂无分享码'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('导入').first);
+    await tester.pumpAndSettle();
+    expect(tester.getRect(find.byKey(const ValueKey('share-controls'))), card);
+    expect(tester.getRect(find.byKey(const ValueKey('share-code-capsule'))),
+        capsule);
+    final field = tester.widget<TextField>(find.byType(TextField).first);
+    expect(field.decoration?.border, InputBorder.none);
+    expect(field.decoration?.enabledBorder, InputBorder.none);
+    expect(field.decoration?.focusedBorder, InputBorder.none);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('destroying a code clears the read only capsule', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final identity = _FakeIdentity();
@@ -69,6 +113,16 @@ void main() {
     await tester.tap(find.widgetWithText(TextButton, '生成'));
     await tester.pumpAndSettle();
     expect(find.text('Ab3D4e'), findsOneWidget);
+    final card = tester.getRect(find.byKey(const ValueKey('share-controls')));
+    final capsule =
+        tester.getRect(find.byKey(const ValueKey('share-code-capsule')));
+    await tester.tap(find.text('导入').first);
+    await tester.pumpAndSettle();
+    expect(tester.getRect(find.byKey(const ValueKey('share-controls'))), card);
+    expect(tester.getRect(find.byKey(const ValueKey('share-code-capsule'))),
+        capsule);
+    await tester.tap(find.text('生成分享码'));
+    await tester.pumpAndSettle();
     expect(requests.where((item) => item.method == 'POST').length, 1);
     expect(
         requests
@@ -78,12 +132,12 @@ void main() {
         isFalse);
     await tester.tap(find.byTooltip('更多'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('销毁').first);
+    await tester.tap(find.text('销毁分享码'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '销毁'));
     await tester.pumpAndSettle();
     expect(find.text('Ab3D4e'), findsNothing);
-    expect(find.text('暂无分享码'), findsOneWidget);
+    expect(find.text('暂无分享码'), findsNothing);
     expect(
         tester
             .widget<IconButton>(find.byWidgetPredicate(
@@ -168,8 +222,9 @@ void main() {
     await tester.enterText(find.byType(TextField).first, 'ABC123');
     await tester.tap(find.text('导入').last);
     await tester.pumpAndSettle();
-    expect(find.text('2026-2027 秋'), findsOneWidget);
-    await tester.tap(find.text('2026-2027 秋'));
+    expect(find.text('课表 1'), findsOneWidget);
+    expect(find.byType(Card), findsNothing);
+    await tester.tap(find.text('课表 1'));
     await tester.pumpAndSettle();
     expect(find.text('线性代数'), findsWidgets);
     expect(find.byTooltip('设置开学日期'), findsNothing);
@@ -188,6 +243,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('共同空闲'), findsOneWidget);
     expect(find.text('线性代数'), findsNothing);
+    final blue = ShuYoThemes.byId(ShuYoThemes.defaultId)
+        .colors
+        .accent
+        .withValues(alpha: 0.58);
+    expect(
+        tester.widgetList<DecoratedBox>(find.byType(DecoratedBox)).any(
+              (widget) =>
+                  widget.decoration is BoxDecoration &&
+                  (widget.decoration as BoxDecoration).color == blue,
+            ),
+        isTrue);
   });
 }
 
@@ -201,7 +267,7 @@ class _MemoryImports extends ImportedScheduleStore {
   Future<ImportedSchedule> save(SharedScheduleResult result) async {
     final item = ImportedSchedule(
       id: 'import-one',
-      name: '2026-2027 秋',
+      name: '课表 1',
       digest: result.digest,
       snapshot: result.snapshot,
       importedAt: DateTime.utc(2026, 10, 8),
