@@ -281,6 +281,22 @@ class _ScheduleSharePageState extends State<ScheduleSharePage> {
     if (selected == true && mounted) await _destroy();
   }
 
+  Future<void> _showInfo() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('说明'),
+        content: const Text('导入他人课表后可显示出两者（或更多）共同的空闲时间'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _import() async {
     final code = _importController.text.trim();
     if (!RegExp(r'^[A-Za-z0-9]{6}$').hasMatch(code)) {
@@ -652,7 +668,27 @@ class _ScheduleSharePageState extends State<ScheduleSharePage> {
     final colors = context.shuyoColors;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('分享与导入'),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('分享与导入'),
+            Transform.translate(
+              offset: const Offset(-3, -0.5),
+              child: Opacity(
+                opacity: 0.65,
+                child: IconButton(
+                  tooltip: '说明',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 28, minHeight: 28),
+                  icon: const Icon(Icons.info_outline, size: 18),
+                  onPressed: _showInfo,
+                ),
+              ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
               tooltip: '更多',

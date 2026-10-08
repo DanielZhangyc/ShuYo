@@ -37,6 +37,8 @@ void main() {
       ),
     ));
 
+    expect(find.byIcon(Icons.people_outline), findsOneWidget);
+
     await tester.tap(find.byTooltip('课表信息说明'));
     await tester.pumpAndSettle();
     expect(

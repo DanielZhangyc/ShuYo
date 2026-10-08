@@ -279,7 +279,11 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('更多'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text(tab == '学业' ? '刷新学业信息' : '刷新课表'));
+        await tester.tap(find.text(tab == '学业' ? '刷新学业信息' : '更新课表'));
+        if (tab == '日程') {
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('确定'));
+        }
         await tester.pumpAndSettle();
         expect(find.byType(NativeLoginPage), findsOneWidget);
         expect(controller.academicLoggedIn, isFalse);

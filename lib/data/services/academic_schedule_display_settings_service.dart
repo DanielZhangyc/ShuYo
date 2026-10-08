@@ -136,4 +136,9 @@ class AcademicScheduleDisplaySettingsService {
     final prefs = await _preferencesLoader();
     await prefs.setString(_key(_courseColorsKey), jsonEncode(colors));
   }
+
+  Future<void> saveCourseColors(Map<String, int> colors) async {
+    final prefs = await _preferencesLoader();
+    await prefs.setString(_key(_courseColorsKey), jsonEncode(colors));
+  }
 }

@@ -1,6 +1,7 @@
 // ignore_for_file: deprecated_member_use
 
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -131,7 +132,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
           IconButton(
             tooltip: '分享与导入',
             onPressed: _openShareHub,
-            icon: const Icon(Icons.inventory_2_outlined),
+            icon: const Icon(Icons.people_outline),
           ),
           IconButton(
             tooltip: '设置开学日期',
@@ -336,6 +337,65 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
         setState(() => _refreshing = false);
       }
     }
+  }
+
+  Future<void> _confirmAndUpdateSchedule() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认更新'),
+        content: const Text('点击确定后将与教务系统中课表同步，不会保留本地编辑'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) await _refreshSchedule();
+  }
+
+  Future<void> _randomizeColors() async {
+    final schedule = _schedule;
+    if (schedule == null || schedule.sessions.isEmpty) {
+      _showSnack('暂无课程');
+      return;
+    }
+    final palette = context.shuyoColors.schedulePalette;
+    final random = Random();
+    final keys = schedule.sessions
+        .map(_courseColorSeed)
+        .where((key) => key.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    final next = <String, int>{};
+    for (final key in keys) {
+      final current =
+          _courseColorValues[key] ?? _courseColor(context, key).toARGB32();
+      final choices =
+          palette.where((color) => color.toARGB32() != current).toList();
+      final available = choices.isNotEmpty ? choices : palette;
+      next[key] = available[random.nextInt(available.length)].toARGB32();
+    }
+    await _displaySettingsService.saveCourseColors(next);
+    AcademicScheduleDisplaySettings settings = _displaySettings;
+    if (!settings.colorful) {
+      settings = await _displaySettingsService.saveSettings(
+        settings.copyWith(colorful: true),
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _courseColorValues = next;
+      _displaySettings = settings;
+    });
+    _showSnack('已随机分配颜色');
   }
 
   Future<void> _handleLoginRequired() async {
@@ -737,118 +797,18 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
   }
 
   Future<void> _handleCourseTap(CourseSession session) async {
+    final colorValue = _courseColorValues[_courseColorSeed(session)];
+    final color = colorValue == null
+        ? _courseColorForSession(context, session)
+        : Color(colorValue);
     final action = await showModalBottomSheet<_ManualCourseAction>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (context) {
-        final colors = context.shuyoColors;
-        final colorValue = _courseColorValues[_courseColorSeed(session)];
-        final color = colorValue == null
-            ? _courseColorForSession(context, session)
-            : Color(colorValue);
-        final bottomPadding = MediaQuery.of(context).viewPadding.bottom;
-        return SafeArea(
-          top: false,
-          bottom: false,
-          child: Container(
-            width: double.infinity,
-            padding: EdgeInsets.fromLTRB(20, 18, 20, 18 + bottomPadding),
-            decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(8),
-              ),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 4,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: color,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        session.courseName,
-                        style: TextStyle(
-                          color: colors.textPrimary,
-                          fontSize: 17.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                _DetailLine(
-                  Icons.schedule,
-                  '${_weekdayName(session.weekday)} ${session.sectionText} ${session.weekText}',
-                ),
-                if (session.placeText.isNotEmpty)
-                  _DetailLine(Icons.place_outlined, session.placeText),
-                if (session.teacherName.isNotEmpty)
-                  _DetailLine(Icons.person_outline, session.teacherName),
-                if (session.credit.isNotEmpty)
-                  _DetailLine(Icons.school_outlined, '${session.credit} 学分'),
-                if (session.note.trim().isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
-                    decoration: BoxDecoration(
-                      color: colors.surfaceAlt,
-                      border: Border(
-                        left: BorderSide(color: color, width: 3),
-                      ),
-                    ),
-                    child: Text(
-                      session.note.trim(),
-                      style: TextStyle(
-                        color: colors.textSecondary,
-                        fontSize: 13,
-                        height: 1.45,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () =>
-                            Navigator.of(context).pop(_ManualCourseAction.edit),
-                        icon: const Icon(Icons.edit_outlined),
-                        label: const Text('编辑'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => Navigator.of(context)
-                            .pop(_ManualCourseAction.delete),
-                        icon: Icon(Icons.delete_outline, color: colors.danger),
-                        label: Text(
-                          '删除',
-                          style: TextStyle(color: colors.danger),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+      builder: (context) => _CourseDetailSheet(
+        session: session,
+        color: color,
+        editable: true,
+      ),
     );
     if (!mounted || action == null) {
       return;
@@ -1220,10 +1180,17 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
                             child: CircularProgressIndicator(strokeWidth: 3),
                           )
                         : const Icon(Icons.refresh),
-                    title: const Text('刷新课表'),
+                    title: const Text('更新课表'),
                     enabled: !_refreshing,
                     onTap: () => Navigator.of(context)
-                        .pop(_ScheduleMenuAction.refreshSchedule),
+                        .pop(_ScheduleMenuAction.updateSchedule),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.shuffle_outlined),
+                    title: const Text('随机颜色'),
+                    enabled: _schedule?.sessions.isNotEmpty ?? false,
+                    onTap: () => Navigator.of(context)
+                        .pop(_ScheduleMenuAction.randomColors),
                   ),
                   ListTile(
                     leading: const Icon(Icons.notifications_none),
@@ -1248,8 +1215,10 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
       return;
     }
     switch (action) {
-      case _ScheduleMenuAction.refreshSchedule:
-        await _refreshSchedule();
+      case _ScheduleMenuAction.updateSchedule:
+        await _confirmAndUpdateSchedule();
+      case _ScheduleMenuAction.randomColors:
+        await _randomizeColors();
       case _ScheduleMenuAction.settings:
         await _openNotificationSettings();
       case _ScheduleMenuAction.displaySettings:
@@ -1500,7 +1469,8 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
 }
 
 enum _ScheduleMenuAction {
-  refreshSchedule,
+  updateSchedule,
+  randomColors,
   settings,
   displaySettings,
 }
@@ -3536,6 +3506,118 @@ class _DetailLine extends StatelessWidget {
   }
 }
 
+class _CourseDetailSheet extends StatelessWidget {
+  const _CourseDetailSheet({
+    required this.session,
+    required this.color,
+    required this.editable,
+  });
+
+  final CourseSession session;
+  final Color color;
+  final bool editable;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.shuyoColors;
+    final bottomPadding = MediaQuery.of(context).viewPadding.bottom;
+    final weekText = session.weekText.trim().isNotEmpty
+        ? session.weekText.trim()
+        : session.weeks.isEmpty
+            ? '每周'
+            : '${session.weeks.join('、')}周';
+    return SafeArea(
+      top: false,
+      bottom: false,
+      child: Container(
+        width: double.infinity,
+        padding: EdgeInsets.fromLTRB(20, 18, 20, 18 + bottomPadding),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Container(
+                width: 4,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                  child: Text(
+                session.courseName,
+                style: TextStyle(
+                  color: colors.textPrimary,
+                  fontSize: 17.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              )),
+            ]),
+            const SizedBox(height: 16),
+            _DetailLine(
+              Icons.schedule,
+              '${_weekdayName(session.weekday)} ${session.sectionText} $weekText',
+            ),
+            if (session.placeText.isNotEmpty)
+              _DetailLine(Icons.place_outlined, session.placeText),
+            if (session.teacherName.isNotEmpty)
+              _DetailLine(Icons.person_outline, session.teacherName),
+            if (session.credit.isNotEmpty)
+              _DetailLine(Icons.school_outlined, '${session.credit} 学分'),
+            if (session.note.trim().isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+                decoration: BoxDecoration(
+                  color: colors.surfaceAlt,
+                  border: Border(left: BorderSide(color: color, width: 3)),
+                ),
+                child: Text(
+                  session.note.trim(),
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    fontSize: 13,
+                    height: 1.45,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (editable) ...[
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(
+                    child: OutlinedButton.icon(
+                  onPressed: () =>
+                      Navigator.of(context).pop(_ManualCourseAction.edit),
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('编辑'),
+                )),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: OutlinedButton.icon(
+                  onPressed: () =>
+                      Navigator.of(context).pop(_ManualCourseAction.delete),
+                  icon: Icon(Icons.delete_outline, color: colors.danger),
+                  label: Text('删除', style: TextStyle(color: colors.danger)),
+                )),
+              ]),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _UntimedCourseList extends StatelessWidget {
   const _UntimedCourseList({required this.courses});
 
@@ -3719,30 +3801,20 @@ class _ImportedSchedulePageState extends State<ImportedSchedulePage> {
     if (selected == true) await _openDisplaySettings();
   }
 
-  void _showCourse(CourseSession item) {
-    showModalBottomSheet<void>(
+  Future<void> _showCourse(CourseSession item) async {
+    final display = _display ?? await _displayFuture;
+    if (!mounted) return;
+    final colorValue = display.courseColorValues[_courseColorSeed(item)];
+    final color = colorValue == null
+        ? _courseColorForSession(context, item)
+        : Color(colorValue);
+    await showModalBottomSheet<void>(
       context: context,
-      builder: (_) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(item.courseName,
-                  style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 12),
-              if (item.teacherName.isNotEmpty)
-                _DetailLine(Icons.person_outline, item.teacherName),
-              if (item.placeText.isNotEmpty)
-                _DetailLine(Icons.place_outlined, item.placeText),
-              if (item.credit.isNotEmpty)
-                _DetailLine(Icons.school_outlined, '${item.credit} 学分'),
-              if (item.note.isNotEmpty)
-                _DetailLine(Icons.notes_outlined, item.note),
-            ],
-          ),
-        ),
+      backgroundColor: Colors.transparent,
+      builder: (context) => _CourseDetailSheet(
+        session: item,
+        color: color,
+        editable: false,
       ),
     );
   }
@@ -3755,7 +3827,7 @@ class _ImportedSchedulePageState extends State<ImportedSchedulePage> {
             IconButton(
                 tooltip: '比较',
                 onPressed: widget.onCompare,
-                icon: const Icon(Icons.compare_arrows_outlined)),
+                icon: const Icon(Icons.join_inner)),
             IconButton(
                 tooltip: '更多',
                 onPressed: _openMore,

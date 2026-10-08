@@ -34,6 +34,11 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('说明'));
+    await tester.pumpAndSettle();
+    expect(find.text('导入他人课表后可显示出两者（或更多）共同的空闲时间'), findsOneWidget);
+    await tester.tap(find.text('知道了'));
+    await tester.pumpAndSettle();
     final card = tester.getRect(find.byKey(const ValueKey('share-controls')));
     final capsule =
         tester.getRect(find.byKey(const ValueKey('share-code-capsule')));
@@ -263,6 +268,14 @@ void main() {
     expect(find.text('线性代数'), findsWidgets);
     expect(find.byTooltip('设置开学日期'), findsNothing);
     expect(find.byTooltip('比较'), findsOneWidget);
+    expect(find.byIcon(Icons.join_inner), findsOneWidget);
+    await tester.tap(find.text('线性代数').first);
+    await tester.pumpAndSettle();
+    expect(find.text('周一 第1-2节 1周'), findsOneWidget);
+    expect(find.text('编辑'), findsNothing);
+    expect(find.text('删除'), findsNothing);
+    await tester.tapAt(const Offset(8, 8));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('比较'));
     await tester.pumpAndSettle();
     expect(find.text('我的课表'), findsOneWidget);
