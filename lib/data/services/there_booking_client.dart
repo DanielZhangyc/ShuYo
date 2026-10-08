@@ -3,12 +3,12 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/client_user_agent.dart';
 import '../../core/webvpn_urls.dart';
 import 'academic_native_auth_service.dart';
 import 'http_timeout.dart';
+import 'session_cookie_jar.dart';
 
 enum BookingVenue {
   library('校本部图书馆', 'LIB_SEAT', '/mobile/libseat', true),
@@ -46,13 +46,13 @@ class ThereBookingException implements Exception {
 class ThereBookingClient {
   ThereBookingClient({
     HttpClient? httpClient,
-    WebViewCookieManager? cookieManager,
+    SessionCookieJar? cookieJar,
     Uri? serviceUri,
     this.useWebVpn = false,
-    Future<List<WebViewCookie>> Function(Uri)? cookieLoader,
-    Future<void> Function(WebViewCookie)? cookieSetter,
+    Future<List<SessionCookie>> Function(Uri)? cookieLoader,
+    Future<void> Function(SessionCookie)? cookieSetter,
   })  : _http = httpClient ?? HttpClient(),
-        _cookieManagerInstance = cookieManager,
+        _cookieJarInstance = cookieJar,
         baseUri = serviceUri ??
             Uri.parse(useWebVpn
                 ? 'https://https-there-shu-edu-cn-443.webvpn.shu.edu.cn'
@@ -68,11 +68,11 @@ class ThereBookingClient {
   final HttpClient _http;
   final Uri baseUri;
   final bool useWebVpn;
-  final Future<List<WebViewCookie>> Function(Uri)? _cookieLoader;
-  final Future<void> Function(WebViewCookie)? _cookieSetter;
-  WebViewCookieManager? _cookieManagerInstance;
-  WebViewCookieManager get _cookieManager =>
-      _cookieManagerInstance ??= WebViewCookieManager();
+  final Future<List<SessionCookie>> Function(Uri)? _cookieLoader;
+  final Future<void> Function(SessionCookie)? _cookieSetter;
+  SessionCookieJar? _cookieJarInstance;
+  SessionCookieJar get _cookieJar =>
+      _cookieJarInstance ??= SessionCookieJar.shared;
   AcademicSessionCookieStore _cookies = AcademicSessionCookieStore();
   bool _browserCookiesLoaded = false;
   String? _portalWebVpnToken;
@@ -480,22 +480,20 @@ class ThereBookingClient {
   Future<void> clearSession() async {
     resetSession();
     final cookies = await (_cookieLoader?.call(baseUri) ??
-        _cookieManager.getCookies(domain: baseUri));
+        _cookieJar.getCookies(domain: baseUri));
     for (final cookie in cookies) {
       if (cookie.name != 'SPHYS_SESSION' &&
           cookie.name != 'authenticityToken' &&
           cookie.name != 'HYS_LANG') {
         continue;
       }
-      final expired = WebViewCookie(
+      final expired = SessionCookie(
         name: cookie.name,
         value: '',
-        domain: cookie.domain.isEmpty
-            ? baseUri.host
-            : cookie.domain.replaceFirst(RegExp(r'^\.'), ''),
+        domain: cookie.domain.isEmpty ? baseUri.host : cookie.domain,
         path: cookie.path.isEmpty ? '/' : cookie.path,
       );
-      await (_cookieSetter?.call(expired) ?? _cookieManager.setCookie(expired));
+      await (_cookieSetter?.call(expired) ?? _cookieJar.setCookie(expired));
     }
   }
 
@@ -618,14 +616,14 @@ class ThereBookingClient {
       _cookies.save(uri, scopedCookies);
       for (final cookie in scopedCookies) {
         if (cookie.name.isEmpty || cookie.value.isEmpty) continue;
-        final webCookie = WebViewCookie(
+        final jarCookie = SessionCookie(
           name: cookie.name,
-          value: _webViewCookieValue(cookie.value),
-          domain: cookie.domain?.replaceFirst(RegExp(r'^\.'), '') ?? uri.host,
+          value: cookie.value,
+          domain: cookie.domain ?? uri.host,
           path: cookie.path ?? '/',
         );
-        await (_cookieSetter?.call(webCookie) ??
-            _cookieManager.setCookie(webCookie));
+        await (_cookieSetter?.call(jarCookie) ??
+            _cookieJar.setCookie(jarCookie));
       }
       final location = response.headers.value(HttpHeaders.locationHeader);
       final text =
@@ -801,7 +799,7 @@ class ThereBookingClient {
     if (useWebVpn) {
       final portal = Uri.parse(WebVpnUrls.portal);
       final portalCookies = await (_cookieLoader?.call(portal) ??
-          _cookieManager.getCookies(domain: portal));
+          _cookieJar.getCookies(domain: portal));
       _portalWebVpnToken = [
         for (final cookie in portalCookies)
           if (cookie.name == 'webvpn-token' && cookie.value.isNotEmpty)
@@ -809,7 +807,7 @@ class ThereBookingClient {
       ].lastOrNull;
     }
     final values = await (_cookieLoader?.call(baseUri) ??
-        _cookieManager.getCookies(domain: baseUri));
+        _cookieJar.getCookies(domain: baseUri));
     for (final value in values) {
       final cookie = Cookie(value.name, value.value)
         ..domain = value.domain.isEmpty ? baseUri.host : value.domain
@@ -817,15 +815,6 @@ class ThereBookingClient {
       _cookies.save(baseUri, [cookie]);
     }
     _browserCookiesLoaded = true;
-  }
-
-  String _webViewCookieValue(String value) {
-    if (defaultTargetPlatform != TargetPlatform.android) return value;
-    try {
-      return Uri.decodeComponent(value);
-    } on FormatException {
-      return value;
-    }
   }
 
   void _requirePage(_ThereResponse response) {

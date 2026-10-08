@@ -4,8 +4,8 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shuyo/data/services/session_cookie_jar.dart';
 import 'package:shuyo/data/services/there_booking_client.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 void main() {
   late HttpServer server;
@@ -282,7 +282,7 @@ void main() {
       useWebVpn: true,
       cookieLoader: (uri) async => uri.host == 'webvpn.shu.edu.cn'
           ? [
-              WebViewCookie(
+              SessionCookie(
                 name: 'webvpn-token',
                 value: 'GATEWAY_TOKEN',
                 domain: 'webvpn.shu.edu.cn',

@@ -5,7 +5,7 @@ import 'package:shuyo/core/academic_url_resolver.dart';
 import 'package:shuyo/core/webvpn_urls.dart';
 import 'package:shuyo/data/services/academic_account_store.dart';
 import 'package:shuyo/data/services/academic_auth_service.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:shuyo/data/services/session_cookie_jar.dart';
 
 void main() {
   setUp(() {
@@ -44,15 +44,14 @@ void main() {
     );
   });
 
-  test(
-      'restores a cached direct campus session when WebView cookies are partial',
+  test('restores a cached direct campus session when live cookies are partial',
       () async {
     final academic = Uri.parse(AcademicConstants.baseUrl);
     final first = AcademicAuthService(
       cookieLoader: (domain) async {
         if (domain.host == academic.host) {
           return [
-            WebViewCookie(
+            SessionCookie(
               name: 'JSESSIONID',
               value: 'academic-session',
               domain: academic.host,
@@ -67,7 +66,7 @@ void main() {
     final initialHeader = await first.cookieHeader();
     expect(initialHeader, contains('JSESSIONID=academic-session'));
 
-    final restored = <WebViewCookie>[];
+    final restored = <SessionCookie>[];
     final restarted = AcademicAuthService(
       cookieLoader: (_) async => const [],
       cookieSetter: (cookie) async => restored.add(cookie),
@@ -87,13 +86,13 @@ void main() {
       cookieLoader: (domain) async {
         if (domain.host == academic.host) {
           return [
-            WebViewCookie(
+            SessionCookie(
               name: 'JSESSIONID',
               value: 'academic-session',
               domain: academic.host,
               path: '/jwglxt',
             ),
-            WebViewCookie(
+            SessionCookie(
               name: 'route',
               value: 'node-a',
               domain: academic.host,
@@ -119,7 +118,7 @@ void main() {
     await prefs.setBool('academic.auth.explicitly_signed_out', true);
     final service = AcademicAuthService(
       cookieLoader: (_) async => [
-        WebViewCookie(
+        SessionCookie(
           name: 'JSESSIONID',
           value: 'test-session',
           domain: AcademicConstants.host,
@@ -150,7 +149,7 @@ void main() {
     final service = AcademicAuthService(
       cookieLoader: (domain) async => domain.host == academic.host
           ? [
-              WebViewCookie(
+              SessionCookie(
                 name: 'JSESSIONID',
                 value: 'fresh-session',
                 domain: academic.host,
@@ -199,7 +198,7 @@ void main() {
     final service = AcademicAuthService(
       cookieLoader: (domain) async => domain.host == portal.host
           ? [
-              WebViewCookie(
+              SessionCookie(
                 name: 'webvpn-token',
                 value: 'stale-session',
                 domain: portal.host,
@@ -219,7 +218,7 @@ void main() {
     final service = AcademicAuthService(
       cookieLoader: (domain) async => domain.host == portal.host
           ? [
-              WebViewCookie(
+              SessionCookie(
                 name: 'webvpn-token',
                 value: 'possibly-valid-session',
                 domain: portal.host,
@@ -235,7 +234,7 @@ void main() {
 
   test('restores and validates a cached direct campus session', () async {
     final academic = Uri.parse(AcademicConstants.baseUrl);
-    final restored = <WebViewCookie>[];
+    final restored = <SessionCookie>[];
     final service = AcademicAuthService(
       cookieLoader: (_) async => const [],
       cookieSetter: (cookie) async => restored.add(cookie),

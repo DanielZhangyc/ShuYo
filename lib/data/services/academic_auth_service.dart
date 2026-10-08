@@ -4,7 +4,6 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/academic_constants.dart';
 import '../../core/academic_url_resolver.dart';
@@ -13,24 +12,25 @@ import '../../core/webvpn_urls.dart';
 import 'academic_account_store.dart';
 import 'http_timeout.dart';
 import 'secure_app_store.dart';
+import 'session_cookie_jar.dart';
 
 enum WebVpnSessionStatus { valid, loginRequired, unavailable }
 
 class AcademicAuthService {
   AcademicAuthService({
-    WebViewCookieManager? cookieManager,
+    SessionCookieJar? cookieJar,
     Future<SharedPreferences> Function()? preferencesLoader,
     AcademicAccountStore? accountStore,
     SecureAppStore? secureStore,
-    Future<List<WebViewCookie>> Function(Uri domain)? cookieLoader,
-    Future<void> Function(WebViewCookie cookie)? cookieSetter,
+    Future<List<SessionCookie>> Function(Uri domain)? cookieLoader,
+    Future<void> Function(SessionCookie cookie)? cookieSetter,
     Future<WebVpnSessionStatus> Function(String cookieHeader)?
         webVpnSessionValidator,
     Future<WebVpnSessionStatus> Function(String cookieHeader)?
         directSessionValidator,
-  })  : _cookieManager = cookieManager ??
+  })  : _cookieJar = cookieJar ??
             (cookieLoader == null || cookieSetter == null
-                ? WebViewCookieManager()
+                ? SessionCookieJar.shared
                 : null),
         _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance,
         _secureStore =
@@ -38,8 +38,8 @@ class AcademicAuthService {
         _accountStore = accountStore ??
             AcademicAccountStore(preferencesLoader: preferencesLoader) {
     _cookieLoader =
-        cookieLoader ?? (domain) => _cookieManager!.getCookies(domain: domain);
-    _cookieSetter = cookieSetter ?? _cookieManager!.setCookie;
+        cookieLoader ?? (domain) => _cookieJar!.getCookies(domain: domain);
+    _cookieSetter = cookieSetter ?? _cookieJar!.setCookie;
     _webVpnSessionValidator =
         webVpnSessionValidator ?? _validateWebVpnSessionOverNetwork;
     _directSessionValidator =
@@ -49,17 +49,17 @@ class AcademicAuthService {
   static const _cachedDirectCookiesKey = 'academic.auth.cached_cookies.direct';
   static const _cachedWebVpnCookiesKey = 'academic.auth.cached_cookies.webvpn';
   // Explicit logout must win over a temporarily unavailable WebVPN endpoint
-  // and any cookies that a WebView has not removed yet.
+  // and any cookies that a failing clear has not removed yet.
   static const _explicitlySignedOutKey = 'academic.auth.explicitly_signed_out';
   static const _portalGroup = 'portal';
   static const _academicGroup = 'academic';
 
-  final WebViewCookieManager? _cookieManager;
+  final SessionCookieJar? _cookieJar;
   final Future<SharedPreferences> Function() _preferencesLoader;
   final SecureAppStore _secureStore;
   final AcademicAccountStore _accountStore;
-  late final Future<List<WebViewCookie>> Function(Uri domain) _cookieLoader;
-  late final Future<void> Function(WebViewCookie cookie) _cookieSetter;
+  late final Future<List<SessionCookie>> Function(Uri domain) _cookieLoader;
+  late final Future<void> Function(SessionCookie cookie) _cookieSetter;
   late final Future<WebVpnSessionStatus> Function(String cookieHeader)
       _webVpnSessionValidator;
   late final Future<WebVpnSessionStatus> Function(String cookieHeader)
@@ -85,12 +85,12 @@ class AcademicAuthService {
       Uri.parse('${AcademicConstants.baseUrl}/jwglxt/'),
     ];
     final prefs = await _preferencesLoader();
-    // Record the user's intent before touching the WebView. Cookie deletion
-    // can fail on a transient WebVPN/WebView error, but must not resurrect the
+    // Record the user's intent before touching the cookie jar. Cookie deletion
+    // can fail on a transient WebVPN error, but must not resurrect the
     // account on the next app launch.
     await prefs.setBool(_explicitlySignedOutKey, true);
     for (final domain in domains) {
-      List<WebViewCookie> cookies;
+      List<SessionCookie> cookies;
       try {
         cookies = await _cookieLoader(domain);
       } on Object {
@@ -99,7 +99,7 @@ class AcademicAuthService {
       for (final cookie in cookies) {
         try {
           await _cookieSetter(
-            WebViewCookie(
+            SessionCookie(
               name: cookie.name,
               value: '',
               domain: cookie.domain,
@@ -108,7 +108,7 @@ class AcademicAuthService {
           );
         } on Object {
           // Continue clearing other domains; the persistent logout marker
-          // above protects against a partial WebView cleanup.
+          // above protects against a partial cleanup.
         }
       }
     }
@@ -138,8 +138,8 @@ class AcademicAuthService {
   }
 
   /// Validates the campus account using the currently selected access mode.
-  /// The WebView remains the source of the session cookies; this method only
-  /// restores and probes those cookies so a restart can recover the account.
+  /// The session cookie jar remains the source of these cookies; this method
+  /// only restores and probes them so a restart can recover the account.
   Future<bool> hasAcademicSession() async {
     if (await _isExplicitlySignedOut()) return false;
     final status = AcademicUrlResolver.usesWebVpn
@@ -157,7 +157,7 @@ class AcademicAuthService {
     final merged = _mergeCookieGroups(cached, live);
     await _persistCookies(merged, webVpn: false);
     await _restoreCookies(merged);
-    final cookies = merged[_academicGroup] ?? const <WebViewCookie>[];
+    final cookies = merged[_academicGroup] ?? const <SessionCookie>[];
     final header = cookies
         .where((cookie) => cookie.name.isNotEmpty && cookie.value.isNotEmpty)
         .map((cookie) => '${cookie.name}=${cookie.value}')
@@ -209,10 +209,7 @@ class AcademicAuthService {
           current = next;
           continue;
         }
-        if (current.host == AcademicConstants.host &&
-            current.path.startsWith('/jwglxt/') &&
-            !current.path.endsWith('/jwglxt/ticketlogin') &&
-            !current.path.endsWith('/jwglxt/xtgl/login_slogin.html')) {
+        if (AcademicUrlResolver.isAcademicSessionUrl(current.toString())) {
           return WebVpnSessionStatus.valid;
         }
         if (current.host.contains('newsso-shu-edu-cn') ||
@@ -267,7 +264,7 @@ class AcademicAuthService {
       );
       return WebVpnSessionStatus.loginRequired;
     }
-    final header = (merged[_portalGroup] ?? const <WebViewCookie>[])
+    final header = (merged[_portalGroup] ?? const <SessionCookie>[])
         .where((cookie) => cookie.name.isNotEmpty && cookie.value.isNotEmpty)
         .map((cookie) => '${cookie.name}=${cookie.value}')
         .join('; ');
@@ -383,11 +380,11 @@ class AcademicAuthService {
   /// Returns cookies suitable for the current service.
   ///
   /// When [targetUri] is supplied, cookies are filtered using normal browser
-  /// host/path matching. This is important on Android WebView: the WebVPN
-  /// portal and each proxied academic host can contain different values for
-  /// the same `webvpn-token` name. Collapsing all domains by name can select
-  /// the portal token for an academic request and produces a valid HTTP 200
-  /// login page instead of the authenticated response.
+  /// host/path matching. The WebVPN portal and each proxied academic host can
+  /// contain different values for the same `webvpn-token` name; collapsing all
+  /// domains by name can select the portal token for an academic request and
+  /// produces a valid HTTP 200 login page instead of the authenticated
+  /// response.
   Future<String?> cookieHeader({Uri? targetUri}) =>
       _cookieHeader(targetUri: targetUri, persistSession: true);
 
@@ -411,7 +408,7 @@ class AcademicAuthService {
         ? [if (webVpn) _portalGroup, _academicGroup]
         : <String>[_academicGroup];
     for (final group in groups) {
-      for (final cookie in merged[group] ?? const <WebViewCookie>[]) {
+      for (final cookie in merged[group] ?? const <SessionCookie>[]) {
         if (cookie.name.isNotEmpty && cookie.value.isNotEmpty) {
           if (targetUri != null && !_cookieMatches(cookie, targetUri)) {
             continue;
@@ -449,10 +446,10 @@ class AcademicAuthService {
         .join('; ');
   }
 
-  Future<Map<String, List<WebViewCookie>>> _loadLiveCookies({
+  Future<Map<String, List<SessionCookie>>> _loadLiveCookies({
     required bool webVpn,
   }) async {
-    final groups = <String, List<WebViewCookie>>{};
+    final groups = <String, List<SessionCookie>>{};
     if (webVpn) {
       groups[_portalGroup] = await _cookiesFor(
         Uri.parse(WebVpnUrls.portal),
@@ -460,21 +457,19 @@ class AcademicAuthService {
     }
     final academicDomains = webVpn
         ? <Uri>[
-            // The WebVPN gateway redirects through this legacy HTTP-prefixed
-            // host during ticket login. Android keeps its cookies scoped to
-            // that host instead of exposing them on the HTTPS-prefixed host.
+            // The gateway redirects through this legacy HTTP-prefixed host
+            // during ticket login, so the session cookie can be scoped there
+            // instead of on the HTTPS-prefixed host.
             Uri.parse(
               'https://http-jwxt-shu-edu-cn-80.webvpn.shu.edu.cn',
             ),
             Uri.parse(AcademicUrlResolver.webVpnBaseUrl),
-            // Some Android WebView versions keep the ticket/session cookie
-            // scoped to /jwglxt rather than /. Querying the exact path is
-            // required for CookieManager.getCookie to return it.
+            // A cookie scoped to /jwglxt instead of / is only visible to a
+            // request whose path reaches that prefix, so query that path too.
             Uri.parse('${AcademicUrlResolver.webVpnBaseUrl}/jwglxt/'),
             AcademicUrlResolver.scheduleIndexUri,
-            // The gateway can redirect through the original host. Keep a
-            // direct-host snapshot as a fallback for Android WebView builds
-            // that scope the backend session cookie there.
+            // The gateway can redirect through the original host, so keep a
+            // direct-host snapshot as well.
             Uri.parse(AcademicConstants.baseUrl),
             Uri.parse('${AcademicConstants.baseUrl}/jwglxt/'),
           ]
@@ -484,7 +479,7 @@ class AcademicAuthService {
             AcademicUrlResolver.homeUri,
             AcademicUrlResolver.scheduleIndexUri,
           ];
-    final academicCookies = <WebViewCookie>[];
+    final academicCookies = <SessionCookie>[];
     for (final domain in academicDomains) {
       academicCookies.addAll(await _cookiesFor(domain));
     }
@@ -492,12 +487,12 @@ class AcademicAuthService {
     return groups;
   }
 
-  Future<List<WebViewCookie>> _cookiesFor(Uri domain) async {
+  Future<List<SessionCookie>> _cookiesFor(Uri domain) async {
     try {
       final loaded = (await _cookieLoader(domain))
           .where((cookie) => cookie.name.isNotEmpty && cookie.value.isNotEmpty)
           .map(
-            (cookie) => WebViewCookie(
+            (cookie) => SessionCookie(
               name: cookie.name,
               value: cookie.value,
               domain: _normalizeCookieDomain(cookie.domain, domain.host),
@@ -510,11 +505,11 @@ class AcademicAuthService {
           .toList()
         ..sort();
       _debug(
-          'webview cookie read domain=${_describeUri(domain)} cookies=$cookies');
+          'session cookie read domain=${_describeUri(domain)} cookies=$cookies');
       return loaded;
     } on Object catch (error) {
       _debug(
-        'webview cookie read failed domain=${_describeUri(domain)} '
+        'session cookie read failed domain=${_describeUri(domain)} '
         'error=${error.runtimeType}',
       );
       return const [];
@@ -530,7 +525,7 @@ class AcademicAuthService {
     return host.isEmpty ? fallbackHost : host;
   }
 
-  bool _cookieMatches(WebViewCookie cookie, Uri target) {
+  bool _cookieMatches(SessionCookie cookie, Uri target) {
     final domain = _normalizeCookieDomain(cookie.domain, target.host);
     final host = target.host.toLowerCase();
     final normalizedDomain =
@@ -544,24 +539,24 @@ class AcademicAuthService {
         targetPath.startsWith(path.endsWith('/') ? path : '$path/');
   }
 
-  Future<Map<String, List<WebViewCookie>>> _loadCachedCookies({
+  Future<Map<String, List<SessionCookie>>> _loadCachedCookies({
     required bool webVpn,
   }) async {
     String? raw;
     try {
       raw = await _secureStore.read(_cacheKey(webVpn));
     } on Object {
-      // Keychain/Keystore failure must not block the live WebView session.
+      // Keychain/Keystore failure must not block the live session.
       return const {};
     }
     if (raw == null || raw.isEmpty) return const {};
     try {
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return const {};
-      final groups = <String, List<WebViewCookie>>{};
+      final groups = <String, List<SessionCookie>>{};
       for (final entry in decoded.entries) {
         if (entry.value is! List) continue;
-        final cookies = <WebViewCookie>[];
+        final cookies = <SessionCookie>[];
         for (final item in entry.value as List) {
           if (item is! Map) continue;
           final name = item['name']?.toString() ?? '';
@@ -570,7 +565,7 @@ class AcademicAuthService {
           final path = item['path']?.toString() ?? '/';
           if (name.isEmpty || value.isEmpty || domain.isEmpty) continue;
           cookies.add(
-            WebViewCookie(
+            SessionCookie(
               name: name,
               value: value,
               domain: domain,
@@ -586,17 +581,17 @@ class AcademicAuthService {
     }
   }
 
-  Map<String, List<WebViewCookie>> _mergeCookieGroups(
-    Map<String, List<WebViewCookie>> cached,
-    Map<String, List<WebViewCookie>> live,
+  Map<String, List<SessionCookie>> _mergeCookieGroups(
+    Map<String, List<SessionCookie>> cached,
+    Map<String, List<SessionCookie>> live,
   ) {
-    final groups = <String, List<WebViewCookie>>{};
+    final groups = <String, List<SessionCookie>>{};
     for (final group in {...cached.keys, ...live.keys}) {
-      final values = <String, WebViewCookie>{};
-      final liveCookies = live[group] ?? const <WebViewCookie>[];
+      final values = <String, SessionCookie>{};
+      final liveCookies = live[group] ?? const <SessionCookie>[];
       final liveNames = liveCookies.map((cookie) => cookie.name).toSet();
-      for (final cookie in cached[group] ?? const <WebViewCookie>[]) {
-        // Once WebView exposes a cookie name for this service, its live values
+      for (final cookie in cached[group] ?? const <SessionCookie>[]) {
+        // Once the jar exposes a cookie name for this service, its live values
         // are authoritative across all scopes. Keeping an older, more-specific
         // cached path can otherwise make it win request selection after login.
         if (liveNames.contains(cookie.name)) continue;
@@ -610,11 +605,11 @@ class AcademicAuthService {
     return groups;
   }
 
-  String _cookieKey(WebViewCookie cookie) =>
+  String _cookieKey(SessionCookie cookie) =>
       '${cookie.name}\u0000${cookie.domain}\u0000${cookie.path}';
 
   Future<void> _persistCookies(
-    Map<String, List<WebViewCookie>> groups, {
+    Map<String, List<SessionCookie>> groups, {
     required bool webVpn,
   }) async {
     if (groups.values.every((cookies) => cookies.isEmpty)) return;
@@ -635,20 +630,20 @@ class AcademicAuthService {
     try {
       await _secureStore.write(_cacheKey(webVpn), jsonEncode(encoded));
     } on Object {
-      // The live WebView cookie still works for this run. Never fall back to
+      // The live session cookie still works for this run. Never fall back to
       // persisting a school session in plain SharedPreferences.
     }
   }
 
   Future<void> _restoreCookies(
-    Map<String, List<WebViewCookie>> groups,
+    Map<String, List<SessionCookie>> groups,
   ) async {
     for (final cookies in groups.values) {
       for (final cookie in cookies) {
         try {
           await _cookieSetter(cookie);
         } on Object {
-          // HTTP 请求仍可使用缓存，WebView 恢复失败不应清除登录态。
+          // HTTP 请求仍可使用缓存，恢复会话失败不应清除登录态。
         }
       }
     }
@@ -658,10 +653,10 @@ class AcademicAuthService {
       webVpn ? _cachedWebVpnCookiesKey : _cachedDirectCookiesKey;
 
   String _describeCookieSources({
-    required Map<String, List<WebViewCookie>> cached,
-    required Map<String, List<WebViewCookie>> live,
+    required Map<String, List<SessionCookie>> cached,
+    required Map<String, List<SessionCookie>> live,
   }) {
-    String describe(Map<String, List<WebViewCookie>> groups) {
+    String describe(Map<String, List<SessionCookie>> groups) {
       final result = <String>[];
       for (final entry in groups.entries) {
         final names = entry.value.map((cookie) => cookie.name).toSet().toList()
@@ -699,6 +694,6 @@ class _CookieCandidate {
   _CookieCandidate(this.cookie)
       : score = cookie.domain.length * 1000 + cookie.path.length;
 
-  final WebViewCookie cookie;
+  final SessionCookie cookie;
   final int score;
 }

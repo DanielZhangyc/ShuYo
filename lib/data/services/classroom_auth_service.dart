@@ -1,20 +1,19 @@
-import 'package:webview_flutter/webview_flutter.dart';
-
 import '../../core/classroom_url_resolver.dart';
 import '../../core/webvpn_urls.dart';
+import 'session_cookie_jar.dart';
 
 class ClassroomAuthService {
   ClassroomAuthService({
-    WebViewCookieManager? cookieManager,
-    Future<List<WebViewCookie>> Function(Uri)? cookieLoader,
-  }) : _cookieManager = cookieManager {
+    SessionCookieJar? cookieJar,
+    Future<List<SessionCookie>> Function(Uri)? cookieLoader,
+  }) : _cookieJar = cookieJar {
     _cookieLoader = cookieLoader ??
         (uri) =>
-            (_cookieManager ??= WebViewCookieManager()).getCookies(domain: uri);
+            (_cookieJar ??= SessionCookieJar.shared).getCookies(domain: uri);
   }
 
-  WebViewCookieManager? _cookieManager;
-  late final Future<List<WebViewCookie>> Function(Uri) _cookieLoader;
+  SessionCookieJar? _cookieJar;
+  late final Future<List<SessionCookie>> Function(Uri) _cookieLoader;
 
   Future<String?> cookieHeader() async {
     if (!ClassroomUrlResolver.usesWebVpn) {

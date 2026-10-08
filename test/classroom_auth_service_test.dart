@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shuyo/core/classroom_url_resolver.dart';
 import 'package:shuyo/data/services/classroom_auth_service.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:shuyo/data/services/session_cookie_jar.dart';
 
 void main() {
   tearDown(() => ClassroomUrlResolver.configure(useWebVpn: false));
@@ -24,7 +24,7 @@ void main() {
       hosts.add(uri.host);
       if (uri.host == 'webvpn.shu.edu.cn') {
         return const [
-          WebViewCookie(
+          SessionCookie(
             name: 'webvpn-token',
             value: 'session',
             domain: 'webvpn.shu.edu.cn',
@@ -32,7 +32,7 @@ void main() {
         ];
       }
       return [
-        WebViewCookie(name: 'classroom', value: 'ok', domain: uri.host),
+        SessionCookie(name: 'classroom', value: 'ok', domain: uri.host),
       ];
     });
     expect(await auth.cookieHeader(), 'webvpn-token=session; classroom=ok');

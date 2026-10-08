@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuyo/data/services/app_data_migration_service.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:shuyo/data/services/session_cookie_jar.dart';
 
 void main() {
   test('removes forum drafts and cookies but preserves campus and WebVPN state',
@@ -23,16 +23,16 @@ void main() {
       'client.network.webvpn.enabled': true,
       'client.theme.id': 'dark',
     });
-    final cleared = <WebViewCookie>[];
+    final cleared = <SessionCookie>[];
     var loads = 0;
     final service = AppDataMigrationService(
       cacheDirectoryLoader: () async => root,
       cookieLoader: (domain) async {
         loads++;
         return [
-          WebViewCookie(
+          SessionCookie(
               name: '_forum_session', value: 'old', domain: domain.host),
-          WebViewCookie(
+          SessionCookie(
               name: 'webvpn-token', value: 'keep', domain: domain.host),
         ];
       },
