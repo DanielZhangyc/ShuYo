@@ -16,6 +16,9 @@ class SecureAppStore {
   static const _sensitiveKeys = [
     'academic.auth.cached_cookies.direct',
     'academic.auth.cached_cookies.webvpn',
+    // Owned by SessionCookieJar.storageKey; repeated here so a fresh install
+    // cannot inherit the previous one's campus sessions.
+    'shuyo.session.cookies.v1',
     'shuyo.student.session.v1',
     'shuyo.student.pending_revocations.v1',
   ];
