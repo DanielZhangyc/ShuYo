@@ -903,7 +903,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           hasAcademicAccount: _hasAcademicSession,
           hasWebVpnSession: hasWebVpnSession,
           onAcademicLogout: _logoutAcademicAccount,
-          onWebVpnLogout: _logoutWebVpnSession,
           isDemo: widget.isDemo,
           onExitDemo: widget.onExitDemo,
         ),
@@ -984,25 +983,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       if (failed) _showSnack('部分登录状态清除失败，请重试退出');
     }
     return !failed;
-  }
-
-  Future<bool> _logoutWebVpnSession() async {
-    try {
-      await WebVpnSessionStore().clearSession();
-      await _clearProxiedThereSession();
-      await _unifiedAccountService.setWebVpnPendingRecovery(false);
-      if (mounted) {
-        setState(() {
-          _webVpnPendingRecovery = false;
-          _webVpnSessionReady = false;
-        });
-      }
-      await _setWebVpnEnabled(false);
-      return true;
-    } on Object {
-      _showSnack('WebVPN退出失败');
-      return false;
-    }
   }
 
   Future<void> _clearProxiedThereSession() async {

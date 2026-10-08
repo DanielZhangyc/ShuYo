@@ -546,17 +546,38 @@ void main() {
     expect(find.text('检查更新'), findsNothing);
   });
 
-  testWidgets('WebVPN session alone exposes the logout entry', (tester) async {
+  testWidgets('WebVPN session alone uses the full campus logout',
+      (tester) async {
+    var logoutCalls = 0;
     await _pumpSettings(
       tester,
       hasWebVpnSession: true,
-      onWebVpnLogout: () async => true,
+      onAcademicLogout: () async {
+        logoutCalls++;
+        return true;
+      },
     );
 
     expect(find.text('退出登录'), findsOneWidget);
     await tester.tap(find.text('退出登录'));
     await tester.pumpAndSettle();
-    expect(find.text('WebVPN'), findsOneWidget);
+    expect(find.text('确认退出'), findsOneWidget);
+    expect(find.text('退出后将需要重新登录，仍可查看已保存的课表和学业信息'), findsOneWidget);
+    expect(find.text('选择要退出的会话'), findsNothing);
+    expect(logoutCalls, 0);
+
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(logoutCalls, 0);
+
+    await tester.tap(find.text('退出登录'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('退出'));
+    await tester.pumpAndSettle();
+    expect(logoutCalls, 1);
+    expect(find.text('已退出上大校园账户'), findsOneWidget);
+    expect(tester.widget<ListTile>(find.widgetWithText(ListTile, '退出登录')).onTap,
+        isNull);
   });
 }
 
@@ -566,7 +587,6 @@ Future<void> _pumpSettings(
   bool hasAcademicAccount = false,
   bool hasWebVpnSession = false,
   Future<bool> Function()? onAcademicLogout,
-  Future<bool> Function()? onWebVpnLogout,
   StartupOnboardingController? webVpnController,
   AppTab selectedStartupTab = AppTab.home,
   Future<void> Function(AppTab)? onStartupTabChanged,
@@ -601,7 +621,6 @@ Future<void> _pumpSettings(
         hasAcademicAccount: hasAcademicAccount,
         hasWebVpnSession: hasWebVpnSession,
         onAcademicLogout: onAcademicLogout,
-        onWebVpnLogout: onWebVpnLogout,
         isDemo: isDemo,
       ),
     ),

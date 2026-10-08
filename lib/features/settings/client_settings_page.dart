@@ -45,7 +45,6 @@ class ClientSettingsPage extends StatelessWidget {
     this.hasAcademicAccount = false,
     this.hasWebVpnSession = false,
     this.onAcademicLogout,
-    this.onWebVpnLogout,
     this.isDemo = false,
     this.onExitDemo,
   });
@@ -65,7 +64,6 @@ class ClientSettingsPage extends StatelessWidget {
   final bool hasAcademicAccount;
   final bool hasWebVpnSession;
   final Future<bool> Function()? onAcademicLogout;
-  final Future<bool> Function()? onWebVpnLogout;
   final bool isDemo;
   final Future<void> Function()? onExitDemo;
 
@@ -144,7 +142,6 @@ class ClientSettingsPage extends StatelessWidget {
               hasAcademicAccount: hasAcademicAccount,
               hasWebVpnSession: hasWebVpnSession,
               onAcademicLogout: onAcademicLogout,
-              onWebVpnLogout: onWebVpnLogout,
             ),
         ],
       ),
@@ -423,13 +420,11 @@ class _AccountLogoutRow extends StatefulWidget {
     required this.hasAcademicAccount,
     required this.hasWebVpnSession,
     required this.onAcademicLogout,
-    required this.onWebVpnLogout,
   });
 
   final bool hasAcademicAccount;
   final bool hasWebVpnSession;
   final Future<bool> Function()? onAcademicLogout;
-  final Future<bool> Function()? onWebVpnLogout;
 
   @override
   State<_AccountLogoutRow> createState() => _AccountLogoutRowState();
@@ -462,8 +457,8 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
   Widget build(BuildContext context) {
     final colors = context.shuyoColors;
     final enabled = !_loggingOut &&
-        ((_hasAcademicAccount && widget.onAcademicLogout != null) ||
-            (_hasWebVpnSession && widget.onWebVpnLogout != null));
+        (_hasAcademicAccount || _hasWebVpnSession) &&
+        widget.onAcademicLogout != null;
     return ListTile(
       title: Text('退出登录', style: TextStyle(color: colors.danger)),
       subtitle: _loggingOut ? const Text('正在退出...') : null,
@@ -474,95 +469,16 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
               child: CircularProgressIndicator(strokeWidth: 2.5),
             )
           : const Icon(Icons.chevron_right),
-      onTap: enabled ? _chooseAccount : null,
+      onTap: enabled ? _confirmAndLogout : null,
     );
   }
 
-  Future<void> _chooseAccount() async {
-    final target = await showModalBottomSheet<_LogoutTarget>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        final colors = context.shuyoColors;
-        final bottomPadding = MediaQuery.of(context).viewPadding.bottom;
-        return SafeArea(
-          top: false,
-          bottom: false,
-          child: Container(
-            width: double.infinity,
-            padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + bottomPadding),
-            decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(8),
-              ),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-                    child: Text(
-                      '选择要退出的会话',
-                      style: ShuYoTextStyles.sectionTitle(
-                        color: colors.textPrimary,
-                      ),
-                    ),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.school_outlined),
-                    title: const Text('上大校园账户'),
-                    subtitle: Text(
-                      (_hasAcademicAccount || _hasWebVpnSession)
-                          ? '退出统一认证、教务和WebVPN'
-                          : '未登录',
-                    ),
-                    enabled: (_hasAcademicAccount || _hasWebVpnSession) &&
-                        widget.onAcademicLogout != null,
-                    onTap: (_hasAcademicAccount || _hasWebVpnSession) &&
-                            widget.onAcademicLogout != null
-                        ? () =>
-                            Navigator.of(context).pop(_LogoutTarget.academic)
-                        : null,
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.vpn_key_off_outlined),
-                    title: const Text('WebVPN'),
-                    subtitle: Text(
-                      _hasWebVpnSession ? '重置WebVPN' : '未登录',
-                    ),
-                    enabled: _hasWebVpnSession && widget.onWebVpnLogout != null,
-                    onTap: _hasWebVpnSession && widget.onWebVpnLogout != null
-                        ? () => Navigator.of(context).pop(_LogoutTarget.webVpn)
-                        : null,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-    if (target == null || !mounted) return;
-    await _confirmAndLogout(target);
-  }
-
-  Future<void> _confirmAndLogout(_LogoutTarget target) async {
-    final academic = target == _LogoutTarget.academic;
+  Future<void> _confirmAndLogout() async {
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: Text(
-              academic ? '退出校园账户' : '退出WebVPN',
-            ),
-            content: Text(
-              academic
-                  ? '将退出统一认证、教务和WebVPN。已保存的课表与学业数据不会被清除。'
-                  : '退出后将关闭WebVPN并清除登录状态',
-            ),
+            title: const Text('确认退出'),
+            content: const Text('退出后将需要重新登录，仍可查看已保存的课表和学业信息'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
@@ -579,31 +495,20 @@ class _AccountLogoutRowState extends State<_AccountLogoutRow> {
     if (!confirmed || !mounted) return;
 
     setState(() => _loggingOut = true);
-    final loggedOut = switch (target) {
-      _LogoutTarget.academic => await widget.onAcademicLogout?.call() ?? false,
-      _LogoutTarget.webVpn => await widget.onWebVpnLogout?.call() ?? false,
-    };
+    final loggedOut = await widget.onAcademicLogout?.call() ?? false;
     if (!mounted) return;
     setState(() {
       _loggingOut = false;
-      if (loggedOut && academic) {
+      if (loggedOut) {
         _hasAcademicAccount = false;
-        _hasWebVpnSession = false;
-      }
-      if (loggedOut && target == _LogoutTarget.webVpn) {
         _hasWebVpnSession = false;
       }
     });
     if (loggedOut) {
-      _showSnack(
-        context,
-        academic ? '已退出上大校园账户' : '已退出WebVPN',
-      );
+      _showSnack(context, '已退出上大校园账户');
     }
   }
 }
-
-enum _LogoutTarget { academic, webVpn }
 
 class _AboutClientPage extends StatefulWidget {
   const _AboutClientPage({
