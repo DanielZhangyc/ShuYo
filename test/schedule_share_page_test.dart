@@ -36,7 +36,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('说明'));
     await tester.pumpAndSettle();
-    expect(find.text('导入他人课表后可显示出两者（或更多）共同的空闲时间'), findsOneWidget);
+    expect(find.text('导入他人课表后可计算出两者共同空闲时间，支持多人比较'), findsOneWidget);
     await tester.tap(find.text('知道了'));
     await tester.pumpAndSettle();
     final card = tester.getRect(find.byKey(const ValueKey('share-controls')));
@@ -288,7 +288,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '比较'));
     await tester.pumpAndSettle();
-    expect(find.text('共同空闲'), findsOneWidget);
+    expect(find.text('空余时段'), findsOneWidget);
     expect(find.text('线性代数'), findsNothing);
     final blue = ShuYoThemes.byId(ShuYoThemes.defaultId)
         .colors

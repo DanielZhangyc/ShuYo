@@ -132,7 +132,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
           IconButton(
             tooltip: '分享与导入',
             onPressed: _openShareHub,
-            icon: const Icon(Icons.people_outline),
+            icon: const Icon(Icons.people_outlined),
           ),
           IconButton(
             tooltip: '设置开学日期',
@@ -3901,7 +3901,7 @@ class _SharedFreeTimePageState extends State<SharedFreeTimePage> {
         untimedCourses: const [],
         teachingWeekCount: _maxWeek);
     return Scaffold(
-      appBar: AppBar(title: const Text('共同空闲')),
+      appBar: AppBar(title: const Text('空余时段')),
       body: _ScheduleBody(
         schedule: grid,
         weekState: widget.weekState,

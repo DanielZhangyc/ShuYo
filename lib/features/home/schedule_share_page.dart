@@ -161,14 +161,14 @@ class _ScheduleSharePageState extends State<ScheduleSharePage> {
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('重新生成分享码'),
-          content: const Text('旧分享码将立即失效。'),
+          content: const Text('旧分享码将失效'),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(context, false),
                 child: const Text('取消')),
             FilledButton(
                 onPressed: () => Navigator.pop(context, true),
-                child: const Text('生成')),
+                child: const Text('确认')),
           ],
         ),
       );
@@ -207,7 +207,7 @@ class _ScheduleSharePageState extends State<ScheduleSharePage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('销毁分享码'),
-        content: const Text('销毁后，旧码无法再导入课表。'),
+        content: const Text('销毁后，旧分享码将不可用'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -286,7 +286,7 @@ class _ScheduleSharePageState extends State<ScheduleSharePage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('说明'),
-        content: const Text('导入他人课表后可显示出两者（或更多）共同的空闲时间'),
+        content: const Text('导入他人课表后可计算出两者共同空闲时间，支持多人比较'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
