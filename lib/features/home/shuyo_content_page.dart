@@ -153,7 +153,7 @@ class _ContentListState extends State<_ContentList>
                     : ListView.separated(
                         physics: const AlwaysScrollableScrollPhysics(),
                         scrollCacheExtent: const ScrollCacheExtent.pixels(0),
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                        padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
                         itemCount: loaded.items.length,
                         itemBuilder: (context, index) {
                           final item = loaded.items[index];
@@ -245,7 +245,7 @@ class _ContentTileState extends State<_ContentTile>
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 148),
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 15),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
               child: Row(
                 children: [
                   Expanded(

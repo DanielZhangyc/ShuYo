@@ -123,6 +123,26 @@ Future<void> _openDetail(
 }
 
 void main() {
+  testWidgets('school notice tap surface spans the screen width',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(
+      home: AnnouncementsPage(repository: _repositoryWith()),
+    ));
+    await tester.pumpAndSettle();
+    final ripple = find
+        .ancestor(
+          of: find.text(_listTitle),
+          matching: find.byType(InkWell),
+        )
+        .first;
+    expect(tester.getRect(ripple).left, 0);
+    expect(tester.getSize(ripple).width, 320);
+  });
+
   testWidgets('favorites are independent from the current and default source',
       (tester) async {
     final repository = _repositoryWith();

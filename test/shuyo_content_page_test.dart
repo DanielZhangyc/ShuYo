@@ -138,6 +138,14 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(find.text('提示 0'), findsOneWidget);
+    final firstRipple = find
+        .ancestor(
+          of: find.text('提示 0'),
+          matching: find.byType(InkWell),
+        )
+        .first;
+    expect(tester.getRect(firstRipple).left, 0);
+    expect(tester.getSize(firstRipple).width, 320);
     await tester.drag(find.byType(ListView).first, const Offset(0, -620));
     await tester.pump();
     final downRow = find.ancestor(
