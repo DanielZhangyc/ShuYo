@@ -58,7 +58,7 @@ void main() {
       expect(header, isNot(contains('empty=')));
     });
 
-    test('exposes entries for installing into the WebView', () {
+    test('exposes entries for publishing into the session cookie jar', () {
       final store = AcademicSessionCookieStore();
       store.save(
         Uri.parse('$newsso/oauth/wecom/qrcode'),

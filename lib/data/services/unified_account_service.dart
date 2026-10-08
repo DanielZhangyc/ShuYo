@@ -122,7 +122,10 @@ class UnifiedAccountService {
             path: entry.path,
           ),
         ));
-        await installer.installCookiesInWebView();
+        // Clear the rejected session before publishing the new one, so a stale
+        // webvpn-token cannot shadow the token this handshake just created.
+        await installer.resetPreviousSession();
+        await installer.publishSessionCookies();
       } finally {
         installer.dispose();
       }

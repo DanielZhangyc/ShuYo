@@ -22,9 +22,6 @@ class HttpTimeout {
   /// Discovery of the redirect-based native campus authentication entry.
   static const authentication = Duration(seconds: 30);
 
-  /// Hidden WebView preparation performed before retrying a service request.
-  static const webViewPreparation = Duration(seconds: 15);
-
   /// OAuth callback, cookie exchange, and service ticket establishment.
   static const oauthCompletion = Duration(seconds: 45);
 

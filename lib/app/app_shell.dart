@@ -21,6 +21,7 @@ import '../data/repositories/announcement_repository.dart';
 import '../data/repositories/classroom_repository.dart';
 import '../data/repositories/client_backend_repository.dart';
 import '../data/services/academic_account_store.dart';
+import '../data/services/academic_native_auth_service.dart';
 import '../data/services/academic_profile_preferences.dart';
 import '../data/services/academic_auth_service.dart';
 import '../data/services/academic_schedule_api_client.dart';
@@ -33,7 +34,6 @@ import '../data/services/unified_account_service.dart';
 import '../data/services/there_booking_client.dart';
 import '../data/services/webvpn_session_store.dart';
 import '../features/auth/native_login_page.dart';
-import '../features/auth/webvpn_oauth_completion_page.dart';
 import '../features/home/academic_schedule_page.dart';
 import '../features/home/academic_progress_page.dart';
 import '../features/home/announcements_page.dart';
@@ -497,7 +497,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         await _academicAuthService.markLoggedIn();
         await _academicAuthService.cookieHeader();
       } on Object {
-        // A temporary WebView cookie delay can recover on a manual refresh.
+        // A transient cookie delay can recover on a manual refresh.
       }
       await _refreshScheduleSummaryQuietly();
       try {
@@ -735,15 +735,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     if (callback == null) return false;
     if (!mounted) return null;
-    final completed = await Navigator.of(context).push<bool>(
-      shuyoRoute(
-        builder: (_) => WebVpnOAuthCompletionPage(callbackUri: callback!),
-      ),
-    );
-    if (completed != true || !mounted) {
+    final completer = AcademicNativeAuthService();
+    try {
+      await completer.completeLogin(callback);
+    } on Object {
       if (mounted) _showSnack('教务会话兑换失败，请稍后重试');
       return null;
+    } finally {
+      completer.dispose();
     }
+    if (!mounted) return null;
     final WebVpnSessionStatus status;
     try {
       status = await _academicAuthService.validateDirectAcademicSession();
