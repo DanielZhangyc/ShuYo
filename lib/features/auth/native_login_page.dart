@@ -21,6 +21,19 @@ enum NativeLoginDestination { academic, webVpn, there }
 
 enum NativeLoginResult { authenticated, demo }
 
+/// 该次登录是否已在扫码页内完成 WebVPN 握手。
+///
+/// 企微扫码登录 WebVPN 时，[WeComScanPage] 会在同一原生 Cookie 会话内自行走完
+/// `auth/start → auth/finish → user/info`，此时 [WeComRedeemResult.callbackUri]
+/// 是登录后的落地页，没有可兑换的 `code`。教务等其余目标只拿到授权码，仍须跟随
+/// 回调兑换会话。
+@visibleForTesting
+bool weComEstablishedWebVpnSession({
+  required NativeLoginDestination destination,
+  required WeComRedeemResult? weComRedeem,
+}) =>
+    weComRedeem != null && destination == NativeLoginDestination.webVpn;
+
 class NativeLoginPage extends StatefulWidget {
   const NativeLoginPage({
     super.key,
@@ -686,7 +699,15 @@ class _NativeLoginPageState extends State<NativeLoginPage> {
       }
       return;
     }
-    await _authService.completeLogin(callbackUri);
+    if (weComEstablishedWebVpnSession(
+      destination: widget.destination,
+      weComRedeem: weComRedeem,
+    )) {
+      // 会话已由扫码流程建立，直接把已收集的 Cookie 发布给共享会话罐。
+      await _authService.publishSessionCookies();
+    } else {
+      await _authService.completeLogin(callbackUri);
+    }
     if (!mounted) return;
     final auth = AcademicAuthService();
     if (widget.destination == NativeLoginDestination.academic) {

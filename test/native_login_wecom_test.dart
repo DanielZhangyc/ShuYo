@@ -1,8 +1,42 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shuyo/core/wecom_constants.dart';
+import 'package:shuyo/data/services/wecom_auth_service.dart';
 import 'package:shuyo/features/auth/native_login_page.dart';
 
+/// 企微扫码登录 WebVPN 的产物：握手已在扫码页内完成，回调地址是落地页。
+final _webVpnLandingResult = WeComRedeemResult(
+  callbackUri: Uri.parse(WeComConstants.webVpnLanding),
+  sessionCookies: const [],
+);
+
 void main() {
+  test('WebVPN WeCom login skips the callback exchange', () {
+    expect(
+      weComEstablishedWebVpnSession(
+        destination: NativeLoginDestination.webVpn,
+        weComRedeem: _webVpnLandingResult,
+      ),
+      isTrue,
+    );
+    // 教务系统的企微流程只拿到授权码，仍须跟随回调兑换会话。
+    expect(
+      weComEstablishedWebVpnSession(
+        destination: NativeLoginDestination.academic,
+        weComRedeem: _webVpnLandingResult,
+      ),
+      isFalse,
+    );
+    // 账密登录不经过扫码页，始终需要兑换回调。
+    expect(
+      weComEstablishedWebVpnSession(
+        destination: NativeLoginDestination.webVpn,
+        weComRedeem: null,
+      ),
+      isFalse,
+    );
+  });
+
   testWidgets('campus login shows the WeCom login entry button',
       (tester) async {
     await tester.pumpWidget(
