@@ -10,6 +10,7 @@ import '../../core/client_user_agent.dart';
 import '../../core/wecom_constants.dart';
 import 'academic_native_auth_service.dart';
 import 'http_timeout.dart';
+import 'webvpn_device_id.dart';
 
 /// 企业微信扫码登录过程中的会话信息。
 class WeComQrSession {
@@ -80,7 +81,7 @@ class WeComSessionResult {
   final Uri cookieSourceUri;
 }
 
-/// 一条带作用域的 Cookie，供写入 WebView 时使用。
+/// 一条带作用域的 Cookie，供写入会话 Cookie 罐时使用。
 class WeComStoredCookie {
   const WeComStoredCookie({
     required this.cookie,
@@ -97,7 +98,7 @@ class WeComStoredCookie {
 ///
 /// [callbackUri] 是**目标业务系统**的完成地址：普通目标为
 /// `authorize` 的 302 callback，WebVPN 则为私有握手完成后的落地页；
-/// [sessionCookies] 是本次流程收集到的全部 Cookie，必须写入 WebView，
+/// [sessionCookies] 是本次流程收集到的全部 Cookie，必须写入会话 Cookie 罐，
 /// 否则加载 [callbackUri] 时 SSO 会认为未登录并重定向回登录页。
 class WeComRedeemResult {
   const WeComRedeemResult({
@@ -141,8 +142,7 @@ class WeComAuthException implements Exception {
 ///    `user/info` 验证会话。
 ///
 /// 整个流程共享同一个 Cookie 容器，否则第 5 步会因缺少 `SHU_OAUTH2`
-/// 而被判定为未登录。需要 state 预热的系统在 [WeComScanPage]
-/// 里改为让 WebView 自行走完整链路。
+/// 而被判定为未登录。
 class WeComAuthService {
   WeComAuthService({
     HttpClient? httpClient,
@@ -160,7 +160,6 @@ class WeComAuthService {
   final AcademicSessionCookieStore _cookies = AcademicSessionCookieStore();
   static final _qrImgKeyPattern = RegExp(r'qrImg\?key=([0-9a-fA-F]+)');
   static final _jsonpPattern = RegExp(r'jsonpCallback\((\{.*?\})\)');
-  static const _webVpnDeviceIdKey = 'webvpn.auth.device_id';
 
   void dispose() => _client.close(force: true);
 
@@ -570,9 +569,9 @@ class WeComAuthService {
         break;
       }
     }
-    // WebViewCookieManager cannot preserve a native Set-Cookie Domain
-    // attribute. Always add a portal-host copy so WebVPN's own page and the
-    // existing session validator can observe the freshly-created session.
+    // The session validator reads webvpn-token on the portal host, while the
+    // gateway may scope the token it issued to a proxied host. Always add a
+    // portal-host copy so the freshly-created session can be observed.
     if (token != null &&
         !result.any(
           (entry) =>
@@ -616,19 +615,10 @@ class WeComAuthService {
   }
 
   @visibleForTesting
-  Future<String> loadWebVpnDeviceId() async {
-    final preferences = await _preferencesLoader();
-    final existing = preferences.getString(_webVpnDeviceIdKey);
-    if (existing != null && RegExp(r'^[0-9a-f]{32}$').hasMatch(existing)) {
-      return existing;
-    }
-    final value = List.generate(
-      16,
-      (_) => _random.nextInt(256).toRadixString(16).padLeft(2, '0'),
-    ).join();
-    await preferences.setString(_webVpnDeviceIdKey, value);
-    return value;
-  }
+  Future<String> loadWebVpnDeviceId() => WebVpnDeviceId.load(
+        preferencesLoader: _preferencesLoader,
+        random: _random,
+      );
 
   /// 按目标系统准备 `state`。
   Future<String> _prepareState(WeComOAuthTarget target) async {
