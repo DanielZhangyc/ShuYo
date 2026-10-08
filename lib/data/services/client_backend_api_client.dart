@@ -39,6 +39,77 @@ class ClientBackendApiClient {
 
   final http.Client _httpClient;
 
+  Map<String, String> _studentHeaders(String token, {bool json = false}) => {
+        'accept': 'application/json',
+        'authorization': 'Bearer $token',
+        'user-agent': ClientUserAgent.mobileBrowser,
+        if (json) 'content-type': 'application/json; charset=utf-8',
+      };
+
+  Future<List<ClientFeedbackTicket>> listStudentFeedback(String token) async {
+    final response = await HttpTimeout.request(
+      _httpClient.get(_uri('/api/v1/student/feedback'),
+          headers: _studentHeaders(token)),
+      message: '反馈加载超时，请稍后再试',
+    );
+    final data = _decode(response)['data'];
+    if (data is! List) throw const ClientBackendApiException('反馈列表无效');
+    return data
+        .whereType<JsonMap>()
+        .map(ClientFeedbackTicket.fromServerJson)
+        .toList(growable: false);
+  }
+
+  Future<ClientFeedbackTicket> submitStudentFeedback(
+      String token, ClientFeedbackDraft draft) async {
+    final response = await HttpTimeout.request(
+      _httpClient.post(_uri('/api/v1/student/feedback'),
+          headers: _studentHeaders(token, json: true),
+          body: jsonEncode(draft.toJson())),
+      message: '反馈提交超时，请稍后再试',
+    );
+    final result = ClientFeedbackSubmissionResult.fromJson(_decode(response));
+    if (result.id.isEmpty) {
+      throw const ClientBackendApiException('反馈提交结果无效');
+    }
+    return ClientFeedbackTicket.fromSubmission(draft: draft, result: result);
+  }
+
+  Future<ClientFeedbackTicket> fetchStudentFeedback(
+      String token, String id) async {
+    final response = await HttpTimeout.request(
+      _httpClient.get(
+          _uri('/api/v1/student/feedback/${Uri.encodeComponent(id)}'),
+          headers: _studentHeaders(token)),
+      message: '反馈加载超时，请稍后再试',
+    );
+    final data = _decode(response)['data'];
+    if (data is! JsonMap) throw const ClientBackendApiException('反馈详情无效');
+    return ClientFeedbackTicket.fromServerJson(data);
+  }
+
+  Future<ClientFeedbackTicket> closeStudentFeedback(
+      String token, String id) async {
+    final response = await HttpTimeout.request(
+      _httpClient.post(
+          _uri('/api/v1/student/feedback/${Uri.encodeComponent(id)}/close'),
+          headers: _studentHeaders(token)),
+      message: '关闭反馈超时，请稍后再试',
+    );
+    final data = _decode(response)['data'];
+    if (data is! JsonMap) throw const ClientBackendApiException('反馈状态无效');
+    return ClientFeedbackTicket.fromServerJson(data);
+  }
+
+  Future<void> reportStudentPresence(String token) async {
+    final response = await HttpTimeout.request(
+      _httpClient.post(_uri('/api/v1/student/presence/heartbeat'),
+          headers: _studentHeaders(token)),
+      message: '活跃统计请求超时',
+    );
+    _decode(response);
+  }
+
   Future<ClientBootstrapInfo> fetchBootstrap() async {
     final response = await HttpTimeout.request(
       _httpClient.get(

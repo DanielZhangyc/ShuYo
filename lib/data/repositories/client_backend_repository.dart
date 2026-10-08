@@ -8,12 +8,15 @@ import '../../core/client_app_info.dart';
 import '../models/client_backend.dart';
 import '../models/common.dart';
 import '../services/client_backend_api_client.dart';
+import '../services/student_identity_service.dart';
 
 class ClientBackendRepository {
   ClientBackendRepository({
     ClientBackendApiClient? apiClient,
+    StudentIdentityService? studentIdentityService,
     Future<SharedPreferences> Function()? preferencesLoader,
   })  : _apiClient = apiClient ?? ClientBackendApiClient(),
+        _studentIdentityService = studentIdentityService,
         _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance;
 
   static const _feedbackTicketsKey = 'client.backend.feedback.tickets';
@@ -27,6 +30,28 @@ class ClientBackendRepository {
       'client.backend.announcement.baseline_initialized';
 
   final ClientBackendApiClient _apiClient;
+  final StudentIdentityService? _studentIdentityService;
+  StudentIdentityService? get studentIdentityService => _studentIdentityService;
+  DateTime? _lastPresenceAttempt;
+
+  Future<void> reportPresence() async {
+    final identity = _studentIdentityService;
+    if (identity == null) return;
+    final last = _lastPresenceAttempt;
+    if (last != null &&
+        DateTime.now().difference(last) < const Duration(minutes: 30)) {
+      return;
+    }
+    try {
+      final session = await identity.checkCurrentSession();
+      if (session == null) return;
+      _lastPresenceAttempt = DateTime.now();
+      await _apiClient.reportStudentPresence(session.token);
+    } on Object {
+      // Presence is best effort and must not affect campus or timetable use.
+    }
+  }
+
   final Future<SharedPreferences> Function() _preferencesLoader;
   final Random _random = Random.secure();
 
@@ -123,6 +148,28 @@ class ClientBackendRepository {
   }
 
   Future<List<ClientFeedbackTicket>> loadFeedbackTickets() async {
+    final legacy = await _loadLegacyFeedbackTickets();
+    StudentIdentitySession? session;
+    try {
+      session = await _studentIdentityService?.checkCurrentSession();
+    } on Object {
+      if (legacy.isNotEmpty) return legacy;
+      rethrow;
+    }
+    if (session == null) return legacy;
+    try {
+      final current = await _apiClient.listStudentFeedback(session.token);
+      return _sortedTickets([...current, ...legacy]);
+    } on ClientBackendApiException catch (error) {
+      if (error.statusCode == 401) {
+        return legacy;
+      }
+      if (legacy.isNotEmpty) return legacy;
+      rethrow;
+    }
+  }
+
+  Future<List<ClientFeedbackTicket>> _loadLegacyFeedbackTickets() async {
     final prefs = await _preferencesLoader();
     final raw = prefs.getString(_feedbackTicketsKey);
     if (raw == null || raw.isEmpty) {
@@ -140,10 +187,7 @@ class ClientBackendRepository {
   }
 
   Future<List<ClientFeedbackTicket>> refreshFeedbackTickets() async {
-    final tickets = await loadFeedbackTickets();
-    if (tickets.isEmpty) {
-      return tickets;
-    }
+    final tickets = await _loadLegacyFeedbackTickets();
     final refreshed = <ClientFeedbackTicket>[];
     for (final ticket in tickets) {
       final token = ticket.lookupToken;
@@ -160,18 +204,25 @@ class ClientBackendRepository {
       }
     }
     await _saveFeedbackTickets(refreshed);
-    return refreshed;
+    return loadFeedbackTickets();
   }
 
   Future<ClientFeedbackTicket> refreshFeedbackTicket(
     ClientFeedbackTicket ticket,
   ) async {
+    if (ticket.lookupToken.isEmpty) {
+      final session = await _studentIdentityService?.checkCurrentSession();
+      if (session == null) {
+        throw const StudentIdentityException('请先完成 ShuYo 身份核验。');
+      }
+      return _apiClient.fetchStudentFeedback(session.token, ticket.id);
+    }
     final token = ticket.lookupToken;
     if (token.isEmpty) {
       return ticket;
     }
     final refreshed = await _apiClient.fetchFeedback(ticket.id, token);
-    final tickets = await loadFeedbackTickets();
+    final tickets = await _loadLegacyFeedbackTickets();
     final nextTickets = [
       refreshed,
       ...tickets.where((item) => item.id != refreshed.id),
@@ -185,6 +236,25 @@ class ClientBackendRepository {
     required String content,
     required String contact,
   }) async {
+    final identity = _studentIdentityService;
+    if (identity != null) {
+      if (!await identity.ensureForProtectedAction()) {
+        throw const StudentIdentityException('请先登录校园账户并完成 ShuYo 身份核验。');
+      }
+      final session = await identity.loadLocalSession();
+      if (session == null) {
+        throw const StudentIdentityException('请先完成 ShuYo 身份核验。');
+      }
+      final draft = ClientFeedbackDraft(
+        title: title,
+        content: content,
+        contact: contact,
+        deviceId: '',
+        appVersion: ClientAppInfo.displayVersion,
+        platform: Platform.operatingSystem,
+      );
+      return _apiClient.submitStudentFeedback(session.token, draft);
+    }
     final draft = ClientFeedbackDraft(
       title: title,
       content: content,
@@ -205,6 +275,18 @@ class ClientBackendRepository {
     ];
     await _saveFeedbackTickets(nextTickets);
     return ticket;
+  }
+
+  Future<ClientFeedbackTicket> closeFeedback(
+      ClientFeedbackTicket ticket) async {
+    if (ticket.lookupToken.isNotEmpty) {
+      throw const ClientBackendApiException('旧版反馈暂不支持自行关闭。');
+    }
+    final session = await _studentIdentityService?.checkCurrentSession();
+    if (session == null) {
+      throw const StudentIdentityException('请先完成 ShuYo 身份核验。');
+    }
+    return _apiClient.closeStudentFeedback(session.token, ticket.id);
   }
 
   Future<void> _saveFeedbackTickets(

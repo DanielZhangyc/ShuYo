@@ -174,9 +174,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final _profilePreferences = AcademicProfilePreferences();
   late final UnifiedAccountService _unifiedAccountService =
       widget.unifiedAccountService ?? UnifiedAccountService();
-  final _clientBackendRepository = ClientBackendRepository();
   late final StudentIdentityService _studentIdentityService =
       widget.studentIdentityService ?? StudentIdentityService();
+  late final ClientBackendRepository _clientBackendRepository =
+      ClientBackendRepository(studentIdentityService: _studentIdentityService);
 
   @override
   void initState() {
@@ -250,6 +251,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         unawaited(_checkClientBackendPrompts());
         unawaited(_studentIdentityService.retryPendingRevocations());
         unawaited(_studentIdentityService.refreshLocalStatus());
+        unawaited(_clientBackendRepository.reportPresence());
       });
     }
   }
@@ -268,6 +270,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (widget.isDemo || state != AppLifecycleState.resumed) return;
+    unawaited(_clientBackendRepository.reportPresence());
     unawaited(_refreshScheduleSummaryQuietly());
     unawaited(_refreshAnnouncementSummaryQuietly());
     unawaited(_scheduleNotificationService.syncScheduleReminders());
@@ -509,7 +512,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       }
       if (!mounted) return;
       if (!firstLogin) {
-        unawaited(_studentIdentityService.ensureAfterCampusLogin());
+        unawaited(() async {
+          await _studentIdentityService.ensureAfterCampusLogin();
+          await _clientBackendRepository.reportPresence();
+        }());
         _showSnack('登录已恢复，请再次点击刷新更新数据');
         return;
       }
@@ -518,6 +524,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       unawaited(() async {
         await _syncAcademicExtrasAfterLogin();
         await _studentIdentityService.ensureAfterCampusLogin();
+        await _clientBackendRepository.reportPresence();
       }());
     } finally {
       _completingAcademicLogin = false;

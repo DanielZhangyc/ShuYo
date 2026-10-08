@@ -8,6 +8,7 @@ import '../../shared/navigation/shuyo_route.dart';
 import '../../shared/theme/shuyo_theme.dart';
 import '../../shared/time_format.dart';
 import '../../shared/widgets/empty_state.dart';
+import 'student_identity_page.dart';
 
 class ClientFeedbackPage extends StatefulWidget {
   const ClientFeedbackPage({
@@ -85,6 +86,23 @@ class _ClientFeedbackPageState extends State<ClientFeedbackPage> {
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               children: [
+                if (widget.repository.studentIdentityService != null) ...[
+                  _Section(
+                    title: '账户反馈',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                            '新版反馈与已核验的学生账户绑定，可在自己的设备上查看回复并关闭反馈。旧版反馈仍可凭本机保存的查询令牌查看。'),
+                        TextButton(
+                          onPressed: _openIdentity,
+                          child: const Text('查看或核验 ShuYo 身份'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
                 _ComposerCard(
                   formKey: _formKey,
                   titleController: _titleController,
@@ -119,6 +137,15 @@ class _ClientFeedbackPageState extends State<ClientFeedbackPage> {
         },
       ),
     );
+  }
+
+  Future<void> _openIdentity() async {
+    final service = widget.repository.studentIdentityService;
+    if (service == null) return;
+    await Navigator.of(context).push<void>(
+      shuyoRoute(builder: (_) => StudentIdentityPage(service: service)),
+    );
+    if (mounted) await _refresh(force: true);
   }
 
   Future<List<ClientFeedbackTicket>> _loadTickets() {
@@ -310,6 +337,15 @@ class _ClientFeedbackDetailPageState extends State<ClientFeedbackDetailPage> {
                     ],
                   ),
                 ),
+                if (ticket.lookupToken.isEmpty &&
+                    ticket.status != 'closed') ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _refreshing ? null : () => _close(ticket),
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text('关闭这条反馈'),
+                  ),
+                ],
                 const SizedBox(height: 14),
                 _Section(
                   title: '内容',
@@ -373,6 +409,34 @@ class _ClientFeedbackDetailPageState extends State<ClientFeedbackDetailPage> {
       if (mounted) {
         setState(() => _refreshing = false);
       }
+    }
+  }
+
+  Future<void> _close(ClientFeedbackTicket ticket) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('关闭反馈'),
+        content: const Text('关闭后，这条反馈仍可查看，但你不能自行重新打开。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('关闭')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _refreshing = true);
+    try {
+      final closed = await widget.repository.closeFeedback(ticket);
+      if (mounted) setState(() => _future = Future.value(closed));
+    } on Object catch (error) {
+      if (mounted) _showSnack(context, '关闭失败：$error');
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
     }
   }
 }
@@ -524,6 +588,8 @@ class _TicketTile extends StatelessWidget {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
+                    _SmallBadge(
+                        text: ticket.lookupToken.isEmpty ? '账户反馈' : '旧版反馈'),
                     _SmallBadge(text: ticket.status),
                     _SmallBadge(text: TimeFormat.compact(ticket.updatedAt)),
                     if (ticket.replies.isNotEmpty)
