@@ -38,6 +38,37 @@ void main() {
     expect(callback.host, 'jwxt.shu.edu.cn');
   });
 
+  test('an authorization code alone marks the entry as a finished handshake',
+      () {
+    // SSO 会话仍有效时，authorize 直接回业务系统回调；此时没有登录参数可提交。
+    expect(
+      AcademicNativeAuthService.isAuthorizedCallback(Uri.parse(
+        'https://webvpn.shu.edu.cn/callback/oauth2?code=x&state=y',
+      )),
+      isTrue,
+    );
+    expect(
+      AcademicNativeAuthService.isAuthorizedCallback(Uri.parse(
+        'https://jwxt.shu.edu.cn/sso/shulogin?code=x&state=y',
+      )),
+      isTrue,
+    );
+    // 登录页没有 code，仍须走凭据交换。
+    expect(
+      AcademicNativeAuthService.isAuthorizedCallback(Uri.parse(
+        'https://newsso.shu.edu.cn/oauth2/login/context',
+      )),
+      isFalse,
+    );
+    // 空 code 不能当作已完成，否则会跳过整个凭据流程。
+    expect(
+      AcademicNativeAuthService.isAuthorizedCallback(
+        Uri.parse('https://webvpn.shu.edu.cn/callback/oauth2?code='),
+      ),
+      isFalse,
+    );
+  });
+
   group('AcademicSessionCookieStore', () {
     const newsso = 'https://newsso.shu.edu.cn';
 

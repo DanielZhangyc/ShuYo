@@ -222,6 +222,11 @@ class AcademicNativeAuthService {
   }) async {
     _clearChallenge();
     final loginUri = await _discoverLoginUri();
+    if (isAuthorizedCallback(loginUri)) {
+      // 复用仍然有效的 SSO 会话，授权码已就绪，无需再提交凭据。
+      _validateUri(loginUri);
+      return AcademicLoginResult(callbackUri: loginUri);
+    }
     final params = _extractParams(loginUri);
     final encryptedPassword = AcademicPasswordEncryptor.encrypt(password);
     final response = await _jsonRequest(
@@ -629,6 +634,19 @@ class AcademicNativeAuthService {
     return uri.host == _webVpnHost &&
         uri.path == '/callback/oauth2' &&
         uri.queryParameters.containsKey('code');
+  }
+
+  /// Whether discovery already landed on a business callback carrying an
+  /// authorization code.
+  ///
+  /// A still-valid SSO session makes `authorize` answer with the business
+  /// callback instead of the login page. That callback already holds the `code`
+  /// the remaining handshake needs and has no login parameters to submit, so
+  /// the credential exchange has to be skipped.
+  @visibleForTesting
+  static bool isAuthorizedCallback(Uri uri) {
+    final code = uri.queryParameters['code'];
+    return code != null && code.isNotEmpty;
   }
 
   /// The gateway and some business entries point at a different SSO host.
