@@ -361,24 +361,27 @@ class _ScheduleSharePageState extends State<ScheduleSharePage> {
 
   Future<void> _itemAction(ImportedSchedule item, String action) async {
     if (action == 'rename') {
-      final controller = TextEditingController(text: item.name);
+      var draftName = item.name;
       final name = await showDialog<String>(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('重命名'),
-          content:
-              TextField(controller: controller, maxLength: 40, autofocus: true),
+          content: TextFormField(
+            initialValue: item.name,
+            maxLength: 40,
+            autofocus: true,
+            onChanged: (value) => draftName = value,
+          ),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text('取消')),
             FilledButton(
-                onPressed: () => Navigator.pop(context, controller.text.trim()),
+                onPressed: () => Navigator.pop(context, draftName.trim()),
                 child: const Text('保存')),
           ],
         ),
       );
-      controller.dispose();
       if (name == null || name.isEmpty) return;
       try {
         await _store.rename(item, name);
@@ -415,27 +418,80 @@ class _ScheduleSharePageState extends State<ScheduleSharePage> {
     }
   }
 
-  Widget _modeChoice(ShuYoColors colors, bool mode, String label) {
-    final selected = _generatingMode == mode;
-    return InkWell(
-      borderRadius: BorderRadius.circular(999),
-      onTap: () => setState(() => _generatingMode = mode),
-      child: AnimatedContainer(
-        key: ValueKey(mode ? 'share-mode-generate' : 'share-mode-import'),
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? colors.accent : Colors.transparent,
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13.5,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-            color: selected ? colors.onAccent : colors.textSecondary,
+  Widget _modeSwitch(ShuYoColors colors) {
+    const labelStyle = TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500);
+    double choiceWidth(String label) {
+      final painter = TextPainter(
+        text: TextSpan(text: label, style: labelStyle),
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+        maxLines: 1,
+      )..layout();
+      final width = painter.width + 24;
+      painter.dispose();
+      return width;
+    }
+
+    final generateWidth = choiceWidth('生成分享码');
+    final importWidth = choiceWidth('导入');
+    Widget choice(bool mode, String label, double width) => SizedBox(
+          key: ValueKey(mode ? 'share-mode-generate' : 'share-mode-import'),
+          width: width,
+          height: 38,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(999),
+            onTap: () => setState(() => _generatingMode = mode),
+            child: Center(
+              child: AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  style: labelStyle.copyWith(
+                    color: _generatingMode == mode
+                        ? colors.onAccent
+                        : colors.textSecondary,
+                  ),
+                  child: Text(label)),
+            ),
           ),
+        );
+
+    return Container(
+      key: const ValueKey('share-mode-switch'),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(colors: [
+          colors.surfaceAlt.withValues(alpha: 0.88),
+          colors.surfaceMuted.withValues(alpha: 0.72),
+        ]),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: colors.borderStrong.withValues(alpha: 0.7)),
+      ),
+      child: Material(
+        type: MaterialType.transparency,
+        child: SizedBox(
+          width: generateWidth + importWidth,
+          height: 38,
+          child: Stack(children: [
+            AnimatedPositioned(
+              key: const ValueKey('share-mode-selection'),
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              left: _generatingMode ? 0 : generateWidth,
+              top: 0,
+              bottom: 0,
+              width: _generatingMode ? generateWidth : importWidth,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: colors.accent,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            Row(children: [
+              choice(true, '生成分享码', generateWidth),
+              choice(false, '导入', importWidth),
+            ]),
+          ]),
         ),
       ),
     );
@@ -452,26 +508,7 @@ class _ScheduleSharePageState extends State<ScheduleSharePage> {
       padding: const EdgeInsets.all(16),
       child: Column(children: [
         Row(children: [
-          Container(
-            key: const ValueKey('share-mode-switch'),
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(colors: [
-                colors.surfaceAlt.withValues(alpha: 0.88),
-                colors.surfaceMuted.withValues(alpha: 0.72),
-              ]),
-              borderRadius: BorderRadius.circular(999),
-              border:
-                  Border.all(color: colors.borderStrong.withValues(alpha: 0.7)),
-            ),
-            child: Material(
-              type: MaterialType.transparency,
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                _modeChoice(colors, true, '生成分享码'),
-                _modeChoice(colors, false, '导入'),
-              ]),
-            ),
-          ),
+          _modeSwitch(colors),
           const Spacer(),
           IgnorePointer(
             ignoring: !_generatingMode,
@@ -645,6 +682,8 @@ class _ScheduleSharePageState extends State<ScheduleSharePage> {
                         onTap: () => _openImported(item),
                         trailing: PopupMenuButton<String>(
                           tooltip: '更多',
+                          color: colors.surface,
+                          surfaceTintColor: Colors.transparent,
                           onSelected: (action) => _itemAction(item, action),
                           itemBuilder: (_) => const [
                             PopupMenuItem(value: 'rename', child: Text('重命名')),

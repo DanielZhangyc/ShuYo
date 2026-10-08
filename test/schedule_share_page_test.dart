@@ -41,12 +41,33 @@ void main() {
         tester.getSize(find.byKey(const ValueKey('share-mode-generate')));
     final import =
         tester.getSize(find.byKey(const ValueKey('share-mode-import')));
+    final selectedStart =
+        tester.getRect(find.byKey(const ValueKey('share-mode-selection')));
+    final generateLabel =
+        tester.widget<AnimatedDefaultTextStyle>(find.descendant(
+      of: find.byKey(const ValueKey('share-mode-generate')),
+      matching: find.byType(AnimatedDefaultTextStyle),
+    ));
+    final importLabel = tester.widget<AnimatedDefaultTextStyle>(find.descendant(
+      of: find.byKey(const ValueKey('share-mode-import')),
+      matching: find.byType(AnimatedDefaultTextStyle),
+    ));
+    expect(generateLabel.style.fontWeight, importLabel.style.fontWeight);
     expect(import.width, lessThan(generate.width));
     expect(find.byType(Card), findsNothing);
     expect(find.text('暂无分享码'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.tap(find.text('导入').first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    final selectedMiddle =
+        tester.getRect(find.byKey(const ValueKey('share-mode-selection')));
     await tester.pumpAndSettle();
+    final selectedEnd =
+        tester.getRect(find.byKey(const ValueKey('share-mode-selection')));
+    expect(selectedMiddle.left, greaterThan(selectedStart.left));
+    expect(selectedMiddle.left, lessThan(selectedEnd.left));
+    expect(selectedEnd.width, lessThan(selectedStart.width));
     expect(tester.getRect(find.byKey(const ValueKey('share-controls'))), card);
     expect(tester.getRect(find.byKey(const ValueKey('share-code-capsule'))),
         capsule);
@@ -224,7 +245,20 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('课表 1'), findsOneWidget);
     expect(find.byType(Card), findsNothing);
-    await tester.tap(find.text('课表 1'));
+    final menu = tester
+        .widget<PopupMenuButton<String>>(find.byType(PopupMenuButton<String>));
+    expect(menu.color, ShuYoThemes.byId(ShuYoThemes.defaultId).colors.surface);
+    expect(menu.surfaceTintColor, Colors.transparent);
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('重命名'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField), '同学课表');
+    await tester.tap(find.widgetWithText(FilledButton, '保存'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('同学课表'), findsOneWidget);
+    await tester.tap(find.text('同学课表'));
     await tester.pumpAndSettle();
     expect(find.text('线性代数'), findsWidgets);
     expect(find.byTooltip('设置开学日期'), findsNothing);
@@ -274,6 +308,12 @@ class _MemoryImports extends ImportedScheduleStore {
     );
     values.add(item);
     return item;
+  }
+
+  @override
+  Future<void> rename(ImportedSchedule item, String name) async {
+    final index = values.indexWhere((value) => value.id == item.id);
+    values[index] = item.copyWith(name: name);
   }
 }
 
