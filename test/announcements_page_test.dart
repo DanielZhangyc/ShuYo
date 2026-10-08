@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shuyo/data/models/announcement.dart';
 import 'package:shuyo/data/models/announcement_source.dart';
 import 'package:shuyo/data/repositories/announcement_repository.dart';
+import 'package:shuyo/data/repositories/shuyo_content_repository.dart';
 import 'package:shuyo/features/home/announcements_page.dart';
 import 'package:shuyo/shared/theme/custom_background.dart';
 
@@ -96,6 +97,20 @@ class _FakeAnnouncementRepository extends AnnouncementRepository {
   }
 }
 
+class _FakeShuyoContentRepository extends ShuyoContentRepository {
+  @override
+  Future<ShuyoContentLoad> load(ShuyoContentKind kind) async =>
+      const ShuyoContentLoad([
+        ShuyoContentItem(
+          id: 'ann_1',
+          title: 'ShuYo 更新公告',
+          content: '更新说明',
+          createdAt: null,
+          updatedAt: null,
+        ),
+      ]);
+}
+
 _FakeAnnouncementRepository _repositoryWith({
   List<AnnouncementContentBlock> blocks = const [
     AnnouncementContentBlock.text(_detailBody),
@@ -123,6 +138,28 @@ Future<void> _openDetail(
 }
 
 void main() {
+  testWidgets('ShuYo entries open content while school notices stay visible',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(
+      home: AnnouncementsPage(
+        repository: _repositoryWith(),
+        contentRepository: _FakeShuyoContentRepository(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text(_listTitle), findsOneWidget);
+    expect(find.text('ShuYo 公告'), findsOneWidget);
+    expect(find.text('使用提示'), findsOneWidget);
+    await tester.tap(find.text('ShuYo 公告'));
+    await tester.pumpAndSettle();
+    expect(find.text('ShuYo 更新公告'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('favorites are independent from the current and default source',
       (tester) async {
     final repository = _repositoryWith();
