@@ -11,6 +11,10 @@ import '../../shared/shuyo_text_styles.dart';
 import '../../shared/theme/custom_background.dart';
 import '../../shared/theme/shuyo_theme.dart';
 import '../../shared/widgets/empty_state.dart';
+import '../../shared/widgets/fullscreen_image_page.dart';
+
+@visibleForTesting
+const shuyoTipImagePlaceholderKey = ValueKey('shuyo-tip-image-placeholder');
 
 class ShuyoContentPage extends StatelessWidget {
   const ShuyoContentPage({
@@ -153,7 +157,7 @@ class _ContentListState extends State<_ContentList>
                     : ListView.separated(
                         physics: const AlwaysScrollableScrollPhysics(),
                         scrollCacheExtent: const ScrollCacheExtent.pixels(0),
-                        padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
+                        padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
                         itemCount: loaded.items.length,
                         itemBuilder: (context, index) {
                           final item = loaded.items[index];
@@ -359,12 +363,53 @@ class ShuyoContentDetailPage extends StatelessWidget {
                   final safe = _safeImage(uri);
                   if (safe == null) return const Text('图片地址不可用');
                   return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Image.network(
-                      safe.toString(),
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stack) =>
-                          const Text('图片暂不可用'),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: GestureDetector(
+                      onTap: () => Navigator.of(context).push<void>(
+                        shuyoRoute(
+                          builder: (_) =>
+                              FullscreenImagePage(url: safe.toString()),
+                        ),
+                      ),
+                      child: AnimatedSize(
+                        duration: const Duration(milliseconds: 180),
+                        curve: Curves.easeOutCubic,
+                        alignment: Alignment.topCenter,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            safe.toString(),
+                            fit: BoxFit.cover,
+                            cacheWidth: _imageDecodeWidth(context),
+                            frameBuilder: (context, child, frame,
+                                wasSynchronouslyLoaded) {
+                              if (wasSynchronouslyLoaded || frame != null) {
+                                return child;
+                              }
+                              final colors = context.shuyoColors;
+                              return Container(
+                                key: shuyoTipImagePlaceholderKey,
+                                height: 180,
+                                alignment: Alignment.center,
+                                color: colors.surfaceAlt,
+                                child: Icon(Icons.image_outlined,
+                                    size: 22, color: colors.textMuted),
+                              );
+                            },
+                            errorBuilder: (context, error, stack) {
+                              final colors = context.shuyoColors;
+                              return Container(
+                                height: 120,
+                                alignment: Alignment.center,
+                                color: colors.surfaceAlt,
+                                child: Text('图片加载失败',
+                                    style:
+                                        TextStyle(color: colors.textTertiary)),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
                     ),
                   );
                 },
@@ -380,6 +425,13 @@ class ShuyoContentDetailPage extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  int _imageDecodeWidth(BuildContext context) {
+    final logicalWidth = MediaQuery.sizeOf(context).width - 40;
+    final pixels =
+        (logicalWidth * MediaQuery.devicePixelRatioOf(context)).round();
+    return pixels < 1 ? 1 : pixels;
   }
 }
 

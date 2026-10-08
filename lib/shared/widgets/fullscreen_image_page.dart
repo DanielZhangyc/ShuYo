@@ -483,7 +483,12 @@ class _ZoomableNetworkImageState extends State<_ZoomableNetworkImage> {
     setState(() {
       _headersLoaded = true;
     });
-    _resolveImage();
+    // The initial call happens in initState, before inherited MediaQuery data
+    // may be read. didChangeDependencies resolves the first image; a deferred
+    // resolve also covers retries and URL changes after that lifecycle step.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _resolveImage();
+    });
   }
 
   Future<void> _retry() async {
