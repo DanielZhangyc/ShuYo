@@ -54,6 +54,13 @@ class ClassroomRepository {
   ClassroomSearchOptions? _memoryOptions;
   final _scheduleCache = <String, _CachedClassroomSchedule>{};
 
+  /// The options already held in memory from an earlier [loadOptions].
+  ///
+  /// A page opened right after a previous visit can paint them on its first
+  /// frame instead of flashing the loading state while [loadOptions] resolves
+  /// from the same entry.
+  ClassroomSearchOptions? get optionsSnapshot => _memoryOptions;
+
   ClassroomApiClient get _client => _apiClient ??= ClassroomApiClient();
 
   Future<ClassroomSearchOptions> loadOptions({
