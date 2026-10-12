@@ -42,10 +42,11 @@ class HomeDashboardPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+      padding: const EdgeInsets.only(top: 8, bottom: 20),
       children: [
         if (isDemo) ...[
           Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
             decoration: BoxDecoration(
               color: context.shuyoColors.surfaceAlt,
@@ -270,6 +271,8 @@ class _HomeRow extends StatelessWidget {
           : null,
       child: Container(
         constraints: const BoxConstraints(minHeight: 68),
+        // Keep the content inset while the tap ripple spans the full width.
+        margin: const EdgeInsets.symmetric(horizontal: 16),
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: customBackground
             ? null
