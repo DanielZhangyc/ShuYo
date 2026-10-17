@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuyo/data/services/academic_account_store.dart';
+import 'package:shuyo/data/services/chaoxing_booking_client.dart';
 import 'package:shuyo/data/services/there_booking_client.dart';
 import 'package:shuyo/data/services/unified_account_service.dart';
 import 'package:shuyo/features/library_booking/library_booking_page.dart';
@@ -153,9 +154,11 @@ class _UnreachableBookingClient extends _BookingClient {
 
 class _GatewayRecoveryClient extends _BookingClient {
   bool gatewayLoginRequired = true;
+  int selectionAttempts = 0;
 
   @override
   Future<void> selectVenue(BookingVenue venue) async {
+    selectionAttempts++;
     if (gatewayLoginRequired) {
       throw const ThereBookingException(
         ThereFailureKind.webVpnLoginRequired,
@@ -229,8 +232,42 @@ class _NoMinimumClient extends _BookingClient {
   }
 }
 
+class _LibraryBranchClient extends ChaoxingBookingClient {
+  _LibraryBranchClient()
+      : super(cookieLoader: (_) async => [], cookieSetter: (_) async {});
+
+  int roomsCalls = 0;
+
+  @override
+  Map<String, dynamic>? get user => const {
+        'uid': 'USER_1',
+        'uname': '测试用户',
+        'sno': 'STUDENT_1',
+      };
+
+  @override
+  Future<List<Map<String, dynamic>>> rooms() async {
+    roomsCalls++;
+    return [
+      {
+        'id': 6508,
+        'secondLevelName': '钱伟长馆',
+        'thirdLevelName': '四楼阅览室',
+        'capacity': 2,
+        'startSeatNum': 1,
+      },
+    ];
+  }
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  Future<void> showBottomAction(WidgetTester tester, Finder target) async {
+    await tester.scrollUntilVisible(target, 180);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -100));
+    await tester.pumpAndSettle();
+  }
 
   testWidgets('custom photo travels with each booking step', (tester) async {
     SharedPreferences.setMockInitialValues({
@@ -264,6 +301,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ShuYoRouteSurface), findsOneWidget);
 
+    await showBottomAction(tester, find.text('仅查看座位情况'));
     await tester.tap(find.text('仅查看座位情况'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 120));
@@ -275,6 +313,50 @@ void main() {
       ),
       findsNWidgets(2),
     );
+  });
+
+  testWidgets('new library venue bypasses WebVPN when it is enabled',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      AcademicAccountStore.studentIdKey: 'STUDENT_1',
+    });
+    final there = _GatewayRecoveryClient();
+    final library = _LibraryBranchClient();
+    final day = DateTime.parse(ThereBookingClient.schoolDay());
+    var webVpnRecoveries = 0;
+    addTearDown(there.dispose);
+    addTearDown(library.dispose);
+
+    await tester.pumpWidget(MaterialApp(
+      home: LibraryBookingPage(
+        accountService: UnifiedAccountService(),
+        client: there,
+        chaoxingClient: library,
+        useWebVpn: true,
+        schoolClock: () => DateTime.utc(day.year, day.month, day.day, 8),
+        onWebVpnSessionRequired: () async {
+          webVpnRecoveries++;
+          there.gatewayLoginRequired = false;
+          return true;
+        },
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text(BookingVenue.qianweichang.label),
+      180,
+    );
+    await tester.ensureVisible(find.text(BookingVenue.qianweichang.label));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(BookingVenue.qianweichang.label));
+    await tester.pumpAndSettle();
+
+    expect(find.text('四楼阅览室'), findsOneWidget);
+    expect(library.roomsCalls, 1);
+    expect(there.selectionAttempts, 0);
+    expect(there.areaListCalls, 0);
+    expect(webVpnRecoveries, 0);
   });
 
   DateTime schoolMorning() {
@@ -340,14 +422,22 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(find.text('图书馆预约'), findsOneWidget);
-    expect(find.text('暂无本地记录'), findsOneWidget);
-    for (final venue in BookingVenue.values) {
+    expect(tester.getTopLeft(find.text('选择场馆')).dy,
+        lessThan(tester.getTopLeft(find.text('仅查看座位情况')).dy));
+    for (final venue
+        in BookingVenue.values.where((venue) => !venue.isChaoxing)) {
       expect(find.text(venue.label), findsWidgets);
     }
+    await tester.scrollUntilVisible(find.text('我的预约'), 180);
+    expect(tester.getTopLeft(find.text('仅查看座位情况')).dy,
+        lessThan(tester.getTopLeft(find.text('我的预约')).dy));
+    expect(find.text('暂无本地记录'), findsOneWidget);
     await tester.tap(find.text('我的预约'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('返回上一步'));
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+        find.text(BookingVenue.library.label), -180);
     await tester.tap(find.text(BookingVenue.library.label));
     await tester.pumpAndSettle();
     expect(find.byTooltip('我的预约'), findsNothing);
@@ -412,6 +502,7 @@ void main() {
       await tester.tap(find.byTooltip('返回上一步'));
       await tester.pumpAndSettle();
     }
+    await tester.scrollUntilVisible(find.textContaining('2E015'), 180);
     expect(find.text('暂无本地记录'), findsNothing);
     expect(find.textContaining('2E015'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -422,6 +513,7 @@ void main() {
       schoolClock: schoolMorning,
     )));
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.textContaining('2E015'), 180);
     expect(find.textContaining('2E015'), findsOneWidget);
   });
 
@@ -477,6 +569,8 @@ void main() {
       client: client,
       schoolClock: schoolMorning,
     )));
+    await tester.pumpAndSettle();
+    await showBottomAction(tester, find.text('仅查看座位情况'));
     await tester.tap(find.text('仅查看座位情况'));
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.visibility_outlined), findsNothing);
@@ -484,6 +578,9 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('view-library')));
     await tester.tap(find.byKey(const ValueKey('view-scienceArt')));
     await tester.pumpAndSettle();
+    await showBottomAction(tester, find.text('下一步'));
+    expect(tester.getTopLeft(find.text(BookingVenue.wenhui.label)).dy,
+        lessThan(tester.getTopLeft(find.text('下一步')).dy));
     await tester.tap(find.text('下一步'));
     await tester.pumpAndSettle();
     expect(client.areaListCalls, 2);
@@ -780,7 +877,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text(monthDay()));
     await tester.pumpAndSettle();
-    expect(find.text('今天已无可预约时段，请选择明天'), findsOneWidget);
+    expect(find.text('今天已无可预约时段'), findsOneWidget);
     expect(
         tester
             .widget<FilledButton>(find.widgetWithText(FilledButton, '下一步'))
@@ -901,6 +998,7 @@ void main() {
         ));
     await tester.pumpWidget(page());
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('我的预约'), 180);
     await tester.tap(find.text('我的预约'));
     await tester.pumpAndSettle();
     final next = find.text('下一步');
@@ -911,12 +1009,14 @@ void main() {
         isNull);
     await tester.tap(find.byKey(const ValueKey('booking-studySpace')));
     await tester.pumpAndSettle();
+    await showBottomAction(tester, next);
     await tester.tap(next);
     await tester.pumpAndSettle();
     expect(client.selectedVenues.toSet(), {BookingVenue.studySpace});
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpWidget(page());
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('我的预约'), 180);
     await tester.tap(find.text('我的预约'));
     await tester.pumpAndSettle();
     final selected = tester.widget<CheckboxListTile>(
@@ -940,10 +1040,13 @@ void main() {
       client: client,
       schoolClock: schoolMorning,
     )));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('我的预约'), 180);
     await tester.tap(find.text('我的预约'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('booking-studySpace')));
     await tester.pumpAndSettle();
+    await showBottomAction(tester, find.text('下一步'));
     await tester.tap(find.text('下一步'));
     await tester.pumpAndSettle();
     expect(find.textContaining('B-034'), findsOneWidget);

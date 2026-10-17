@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/services/academic_account_store.dart';
+import '../../data/services/chaoxing_booking_adapter.dart';
+import '../../data/services/chaoxing_booking_client.dart';
 import '../../data/services/library_booking_cache.dart';
 import '../../data/services/there_booking_client.dart';
 import '../../data/services/unified_account_service.dart';
@@ -31,15 +33,19 @@ class LibraryBookingPage extends StatefulWidget {
     super.key,
     required this.accountService,
     this.client,
+    this.chaoxingClient,
     this.useWebVpn = false,
     this.onWebVpnSessionRequired,
+    this.onChaoxingLoginRequired,
     this.schoolClock,
   });
 
   final UnifiedAccountService accountService;
   final ThereBookingClient? client;
+  final ChaoxingBookingClient? chaoxingClient;
   final bool useWebVpn;
   final Future<bool> Function()? onWebVpnSessionRequired;
+  final Future<bool> Function()? onChaoxingLoginRequired;
 
   /// Shanghai wall-clock time, overridable for deterministic time selection.
   final DateTime Function()? schoolClock;
@@ -51,8 +57,25 @@ class LibraryBookingPage extends StatefulWidget {
 class _LibraryBookingPageState extends State<LibraryBookingPage> {
   static const double _timeDigitFontSize = 22;
 
-  late final ThereBookingClient _client =
+  late final ThereBookingClient _thereClient =
       widget.client ?? ThereBookingClient(useWebVpn: widget.useWebVpn);
+  ChaoxingBookingClient? _ownedChaoxingClient;
+  ChaoxingBookingAdapter? _chaoxingAdapter;
+  BookingVenue _activeClientVenue = BookingVenue.library;
+  ThereBookingClient get _client => _activeClientVenue.isChaoxing
+      ? (_chaoxingAdapter ??= ChaoxingBookingAdapter(
+          client: widget.chaoxingClient ??
+              (_ownedChaoxingClient ??= ChaoxingBookingClient()),
+          schoolClock: () => _schoolNow,
+        ))
+      : _thereClient;
+
+  Future<void> _selectBookingVenue(BookingVenue venue) async {
+    _activeClientVenue = venue;
+    await _client.selectVenue(venue);
+    _sessionVenue = venue;
+  }
+
   _BookingStep _step = _BookingStep.venue;
   bool _slideForward = true;
   BookingVenue _venue = BookingVenue.library;
@@ -62,7 +85,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   final Set<BookingVenue> _bookingVenueSelection = {};
   bool _bookingSelectionReady = false;
   static const _bookingVenuePreference = 'library_booking_selected_venues';
-  String _day = ThereBookingClient.schoolDay();
+  late String _day;
   List<String> _days = [];
   List<Map<String, dynamic>> _areas = [];
   final Map<BookingVenue, List<Map<String, dynamic>>> _allAreasByVenue = {};
@@ -112,13 +135,16 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   @override
   void initState() {
     super.initState();
+    _day = _clockDay;
     unawaited(_restoreBookingVenues());
     unawaited(_loadHomeCache());
   }
 
   @override
   void dispose() {
-    if (widget.client == null) _client.dispose();
+    if (widget.client == null) _thereClient.dispose();
+    _ownedChaoxingClient?.dispose();
+    _chaoxingAdapter?.dispose();
     super.dispose();
   }
 
@@ -667,6 +693,10 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     final free = _count(area['freeResourceCount']);
     final base = Theme.of(context).textTheme.bodyMedium;
     final accent = context.shuyoColors.accent;
+    if (area['busyResourceCount'] is! num &&
+        area['freeResourceCount'] is! num) {
+      return Text('开放座位数 $open', style: base);
+    }
     final firstLine = '开放座位数 $open / 使用中 $busy';
     final available = TextSpan(style: base, children: [
       const TextSpan(text: '可用 '),
@@ -753,7 +783,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       ]);
 
   String _dateLabel(String day) {
-    final today = ThereBookingClient.schoolDay();
+    final today = _clockDay;
     final todayDate = DateTime.parse(today);
     final tomorrow =
         DateTime.utc(todayDate.year, todayDate.month, todayDate.day + 1);
@@ -814,7 +844,11 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           ]),
           if (!hasInterval) ...[
             const SizedBox(height: 18),
-            Text(_day == _clockDay ? '今天已无可预约时段，请选择明天' : '当前没有可选时段'),
+            Text(_day == _clockDay
+                ? _days.any((day) => day.compareTo(_day) > 0)
+                    ? '今天已无可预约时段，请选择明天'
+                    : '今天已无可预约时段'
+                : '当前没有可选时段'),
           ],
           const SizedBox(height: 18),
           SizedBox(
@@ -1140,10 +1174,10 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       _previewAvailable = null;
     });
     try {
-      await _client.selectVenue(venue);
-      _sessionVenue = venue;
-      final data =
-          await _read(() => _client.area(id, '$day $start', '$day $end'));
+      final data = await _read(() async {
+        await _selectBookingVenue(venue);
+        return _client.area(id, '$day $start', '$day $end');
+      });
       if (!mounted || _step != _BookingStep.time || key != _currentPreviewKey) {
         return;
       }
@@ -1529,7 +1563,21 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     final label = ThereBookingClient.string(item['statusLabel']) ?? '';
     if (_finishedEarly(item)) return '已结束';
     if (status == 'CANCEL' || label.contains('取消')) return '已取消';
-    final now = DateTime.now().toUtc().add(const Duration(hours: 8));
+    if (status == 'CX_7') return '已结束';
+    if (status.startsWith('CX_') && status != 'CX_0') {
+      return label.isEmpty ? '状态待确认' : label;
+    }
+    final schoolNow = _schoolNow;
+    final now = DateTime.utc(
+      schoolNow.year,
+      schoolNow.month,
+      schoolNow.day,
+      schoolNow.hour,
+      schoolNow.minute,
+      schoolNow.second,
+      schoolNow.millisecond,
+      schoolNow.microsecond,
+    );
     DateTime? parse(Object? value) {
       final text = ThereBookingClient.string(value);
       return text == null
@@ -1634,13 +1682,11 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     });
     try {
       _profile = await _read<Map<String, dynamic>>(() async {
-        await _client.selectVenue(_venue);
-        _sessionVenue = _venue;
+        await _selectBookingVenue(_venue);
         return _client.profile();
       }, validateAfterRecovery: _checkAccount);
       await _checkAccount(_profile!);
-      final areas =
-          await _read(() => _client.areas(ThereBookingClient.schoolDay()));
+      final areas = await _read(() => _client.areas(_clockDay));
       if (!mounted || generation != _generation) return;
       setState(() {
         _areas = areas
@@ -1650,17 +1696,21 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
             .toList();
         _loading = false;
       });
-      try {
-        await widget.accountService.setTherePendingRecovery(false);
-      } on Object {
-        // The business data is usable even if the local marker fails.
+      if (!_venue.isChaoxing) {
+        try {
+          await widget.accountService.setTherePendingRecovery(false);
+        } on Object {
+          // The business data is usable even if the local marker fails.
+        }
       }
     } on Object catch (error) {
       if (!mounted || generation != _generation) return;
-      try {
-        await widget.accountService.setTherePendingRecovery(true);
-      } on Object {
-        // Keep the service error visible.
+      if (!_venue.isChaoxing) {
+        try {
+          await widget.accountService.setTherePendingRecovery(true);
+        } on Object {
+          // Keep the service error visible.
+        }
       }
       if (mounted && generation == _generation) {
         setState(() {
@@ -1686,23 +1736,21 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       _error = null;
     });
     final failures = <String>[];
-    var verified = false;
+    final verifiedClients = <bool>{};
     for (final venue
         in BookingVenue.values.where(_viewVenueSelection.contains)) {
       if (!mounted || generation != _generation) return;
       setState(() => _loadingLabel = '正在连接至${venue.label}');
       try {
         await _read(() async {
-          await _client.selectVenue(venue);
-          _sessionVenue = venue;
-          if (!verified) {
+          await _selectBookingVenue(venue);
+          if (!verifiedClients.contains(venue.isChaoxing)) {
             await _checkAccount(await _client.profile());
-            verified = true;
+            verifiedClients.add(venue.isChaoxing);
           }
           return true;
         });
-        final areas =
-            await _read(() => _client.areas(ThereBookingClient.schoolDay()));
+        final areas = await _read(() => _client.areas(_clockDay));
         if (!mounted || generation != _generation) return;
         setState(() {
           _allAreasByVenue[venue] = areas
@@ -1736,10 +1784,10 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       _error = null;
     });
     try {
-      await _client.selectVenue(_venue);
-      _sessionVenue = _venue;
-      final overview =
-          await _read(() => _client.overview(ThereBookingClient.schoolDay()));
+      final overview = await _read(() async {
+        await _selectBookingVenue(_venue);
+        return _client.overview(_clockDay);
+      });
       if (!mounted || generation != _generation) return;
       setState(() {
         _days = _bookingDays(overview);
@@ -1765,9 +1813,10 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       _clearPreview();
     });
     try {
-      await _client.selectVenue(_venue);
-      _sessionVenue = _venue;
-      final data = await _read(() => _client.area(id, _day, _day));
+      final data = await _read(() async {
+        await _selectBookingVenue(_venue);
+        return _client.area(id, _day, _day);
+      });
       if (!mounted || generation != _generation) return;
       final rules = ThereBookingClient.object(data['bookingTimes']) ?? const {};
       final choices = _timeChoices(rules);
@@ -1801,10 +1850,10 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       _selectedRoomId = null;
     });
     try {
-      await _client.selectVenue(_venue);
-      _sessionVenue = _venue;
-      final result =
-          await _read(() => _client.area(id, '$_day $_start', '$_day $_end'));
+      final result = await _read(() async {
+        await _selectBookingVenue(_venue);
+        return _client.area(id, '$_day $_start', '$_day $_end');
+      });
       if (!mounted || generation != _generation) return;
       setState(() {
         _areaData = result;
@@ -1829,17 +1878,16 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     });
     try {
       final byId = <String, Map<String, dynamic>>{};
-      var verified = false;
+      final verifiedClients = <bool>{};
       for (final venue
           in BookingVenue.values.where(_bookingVenueSelection.contains)) {
         if (!mounted || generation != _generation) return;
         setState(() => _loadingLabel = '正在读取${venue.label}的预约');
         await _read(() async {
-          await _client.selectVenue(venue);
-          _sessionVenue = venue;
-          if (!verified) {
+          await _selectBookingVenue(venue);
+          if (!verifiedClients.contains(venue.isChaoxing)) {
             await _checkAccount(await _client.profile());
-            verified = true;
+            verifiedClients.add(venue.isChaoxing);
           }
           return true;
         });
@@ -1872,6 +1920,21 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   }
 
   Future<bool> _authenticate() async {
+    if (_activeClientVenue.isChaoxing) {
+      final login = widget.onChaoxingLoginRequired;
+      if (login != null) return login();
+      if (!mounted) return false;
+      final result = await Navigator.of(context).push<NativeLoginResult>(
+        MaterialPageRoute(
+          builder: (_) => const ShuYoRouteSurface(child: NativeLoginPage()),
+        ),
+      );
+      if (result == NativeLoginResult.authenticated) {
+        _client.resetSession();
+        return true;
+      }
+      return false;
+    }
     await _client.prepareOAuth();
     final callback = await widget.accountService.authorizeThere();
     if (callback != null) {
@@ -1929,7 +1992,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     Future<T> Function() operation,
     Future<void> Function(T)? validateAfterRecovery,
   ) async {
-    await _client.selectVenue(_sessionVenue ?? _venue);
+    await _selectBookingVenue(_activeClientVenue);
     if (validateAfterRecovery != null) {
       final result = await operation();
       await validateAfterRecovery(result);
@@ -1981,8 +2044,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     setState(() => _busy = true);
     String? createdId;
     try {
-      await _client.selectVenue(_venue);
-      _sessionVenue = _venue;
+      await _selectBookingVenue(_venue);
       createdId = await _client.create(
         areaId: areaId,
         roomId: roomId,
@@ -2038,8 +2100,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
               .firstOrNull ??
           _venue;
       final detail = await _read(() async {
-        await _client.selectVenue(venue);
-        _sessionVenue = venue;
+        await _selectBookingVenue(venue);
         return _client.detail(id);
       });
       if (!mounted) return;
@@ -2193,6 +2254,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     if (!confirmed || !mounted) return;
     setState(() => _busy = true);
     var cancelled = false;
+    var uncertain = false;
     try {
       await _client.cancel(id);
       cancelled = true;
@@ -2203,6 +2265,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           webVpn: error.kind == ThereFailureKind.webVpnLoginRequired,
         );
       } else if (mounted) {
+        uncertain = error.kind == ThereFailureKind.uncertain;
         _showMessage(error.message);
       }
     } on Object catch (error) {
@@ -2210,10 +2273,12 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-    if (!cancelled || !mounted) return;
-    _showMessage('已取消预约');
-    _awaitingWriteStatus[id] = false;
-    await _removeBookingFromCache(id);
+    if ((!cancelled && !uncertain) || !mounted) return;
+    if (cancelled) {
+      _showMessage('已取消预约');
+      _awaitingWriteStatus[id] = false;
+      await _removeBookingFromCache(id);
+    }
     try {
       if (_step == _BookingStep.bookings) {
         await _loadBookings();
@@ -2225,7 +2290,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         await _refreshSeats();
       }
     } on Object {
-      if (mounted) _showMessage('已取消预约，列表暂时无法刷新');
+      if (mounted) {
+        _showMessage(cancelled ? '已取消预约，列表暂时无法刷新' : '取消结果暂未确认，请稍后刷新我的预约');
+      }
     }
   }
 
@@ -2316,7 +2383,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         days.add(day);
       }
     }
-    final today = ThereBookingClient.schoolDay();
+    final today = _clockDay;
     final date = DateTime.parse(today);
     final next = DateTime.utc(date.year, date.month, date.day + 1);
     final tomorrow = '${next.year.toString().padLeft(4, '0')}-'
@@ -2338,8 +2405,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     final text = ThereBookingClient.string(value);
     if (text == null || text.length < 16) return text ?? '待确认';
     final year = int.tryParse(text.substring(0, 4));
-    final currentYear =
-        DateTime.now().toUtc().add(const Duration(hours: 8)).year;
+    final currentYear = _schoolNow.year;
     return year == currentYear ? text.substring(5, 16) : text.substring(0, 16);
   }
 

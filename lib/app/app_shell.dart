@@ -30,6 +30,7 @@ import '../data/services/academic_schedule_display_settings_service.dart';
 import '../data/services/academic_schedule_notification_service.dart';
 import '../data/services/academic_schedule_widget_service.dart';
 import '../data/services/client_settings_service.dart';
+import '../data/services/chaoxing_booking_client.dart';
 import '../data/services/student_identity_service.dart';
 import '../data/services/unified_account_service.dart';
 import '../data/services/there_booking_client.dart';
@@ -149,6 +150,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _openingLibraryBooking = false;
   ThereBookingClient? _directBookingClient;
   ThereBookingClient? _webVpnBookingClient;
+  ChaoxingBookingClient? _chaoxingBookingClient;
   Future<WebVpnRecoveryOutcome>? _webVpnRecoveryTask;
   Future<void>? _thereRecoveryTask;
   String _scheduleSummaryText = '正在读取课表...';
@@ -289,6 +291,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _widgetClickSubscription?.cancel();
     _directBookingClient?.dispose();
     _webVpnBookingClient?.dispose();
+    _chaoxingBookingClient?.dispose();
     if (widget.studentIdentityService == null) {
       _studentIdentityService.dispose();
     }
@@ -838,15 +841,32 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           builder: (_) => LibraryBookingPage(
             accountService: _unifiedAccountService,
             client: client,
+            chaoxingClient: _chaoxingBookingClient ??= ChaoxingBookingClient(),
             useWebVpn: useWebVpn,
             onWebVpnSessionRequired: () =>
                 _changeWebVpnFromAccountManager(true),
+            onChaoxingLoginRequired: _loginForChaoxingBooking,
           ),
         ),
       );
     } finally {
       _openingLibraryBooking = false;
     }
+  }
+
+  Future<bool> _loginForChaoxingBooking() async {
+    if (widget.isDemo || !mounted) return false;
+    final result = await Navigator.of(context).push<NativeLoginResult>(
+      shuyoRoute(builder: (_) => const NativeLoginPage()),
+    );
+    if (result != NativeLoginResult.authenticated || !mounted) return false;
+    try {
+      await _clearChaoxingSession();
+    } on Object {
+      // Campus login succeeded; the booking client can recheck its session.
+    }
+    await _finishAcademicLogin(connectWebVpn: false);
+    return mounted;
   }
 
   Future<void> _establishThereInBackground() async {
@@ -957,6 +977,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       failed = true;
     }
     try {
+      await _clearChaoxingSession();
+    } on Object {
+      failed = true;
+    }
+    try {
       await _unifiedAccountService.clearSsoSession();
     } on Object {
       failed = true;
@@ -989,6 +1014,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   Future<void> _clearProxiedThereSession() async {
     await _clearThereSession(useWebVpn: true);
+  }
+
+  Future<void> _clearChaoxingSession() async {
+    final existing = _chaoxingBookingClient;
+    final client = existing ?? ChaoxingBookingClient();
+    try {
+      await client.clearSession();
+    } finally {
+      if (existing == null) client.dispose();
+    }
   }
 
   Future<void> _clearThereSession({required bool useWebVpn}) async {
