@@ -14,15 +14,20 @@ enum BookingVenue {
   library('校本部图书馆', 'LIB_SEAT', '/mobile/libseat', true),
   studySpace('24H学习空间', 'STATION', '/mobile/seat2021', true),
   yanchang('延长智能中心', 'SEAT', '/mobile/seat-mgr', false),
-  scienceArt('科学与艺术中心', 'CS_SEAT', '/mobile/csseat', false);
+  scienceArt('科学与艺术中心', 'CS_SEAT', '/mobile/csseat', false),
+  qianweichang('钱伟长图书馆', 'CX_QWC', '', false, isChaoxing: true),
+  jiading('嘉定联合馆', 'CX_JD', '', false, isChaoxing: true),
+  wenhui('延长文荟馆', 'CX_WH', '', false, isChaoxing: true);
 
   const BookingVenue(
-      this.label, this.roomType, this.mobilePath, this.showChecks);
+      this.label, this.roomType, this.mobilePath, this.showChecks,
+      {this.isChaoxing = false});
 
   final String label;
   final String roomType;
   final String mobilePath;
   final bool showChecks;
+  final bool isChaoxing;
 }
 
 enum ThereFailureKind {
@@ -139,6 +144,12 @@ class ThereBookingClient {
 
   /// Re-reads each mobile entry because x-hys-session belongs to that entry.
   Future<void> selectVenue(BookingVenue venue) async {
+    if (venue.isChaoxing) {
+      throw const ThereBookingException(
+        ThereFailureKind.business,
+        '该场馆需要通过对应的预约服务访问',
+      );
+    }
     if (_venue == venue && hasBusinessSession) return;
     _venue = venue;
     _sessionId = null;
