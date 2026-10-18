@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../../data/models/otp_token.dart';
@@ -54,15 +55,42 @@ class _OtpTokenPageState extends State<OtpTokenPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.repository.addListener(_onSessionReset);
     _startTicker();
     unawaited(_fetch());
   }
 
   @override
+  void didUpdateWidget(covariant OtpTokenPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.repository == oldWidget.repository) return;
+    oldWidget.repository.removeListener(_onSessionReset);
+    widget.repository.addListener(_onSessionReset);
+    _onSessionReset();
+  }
+
+  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.repository.removeListener(_onSessionReset);
     _ticker?.cancel();
     super.dispose();
+  }
+
+  void _onSessionReset() {
+    if (WidgetsBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _clearToken());
+      return;
+    }
+    _clearToken();
+  }
+
+  void _clearToken() {
+    if (!mounted) return;
+    setState(() => _token = null);
+    _reportedError = null;
+    _webVpnRecoveryRequested = false;
   }
 
   @override

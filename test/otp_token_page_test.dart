@@ -58,6 +58,20 @@ class _FlakyRepository extends OtpTokenRepository {
 }
 
 void main() {
+  testWidgets('clears the displayed code when the account session resets',
+      (tester) async {
+    final repository = _FakeRepository(token: _token());
+    await tester.pumpWidget(
+      MaterialApp(home: OtpTokenPage(repository: repository)),
+    );
+    await tester.pump();
+    expect(find.text('956 370'), findsOneWidget);
+
+    repository.resetSession();
+    await tester.pump();
+    expect(find.text('956 370'), findsNothing);
+  });
+
   testWidgets('shows the code and copies it to the clipboard', (tester) async {
     final repository = _FakeRepository(token: _token());
     final copied = <String>[];

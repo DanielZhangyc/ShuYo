@@ -220,8 +220,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             schedule: demo.classroomSchedule,
           )
         : ClassroomRepository();
-    _otpTokenRepository =
-        widget.isDemo ? DemoOtpTokenRepository() : OtpTokenRepository();
+    _otpTokenRepository = widget.isDemo
+        ? DemoOtpTokenRepository()
+        : OtpTokenRepository(sessionActive: _hasAcademicSession);
     widget.onboardingController.setAccountLogoutHandlers(
       onAcademicLogout: _logoutAcademicAccount,
     );
@@ -483,6 +484,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }) async {
     if (widget.isDemo || _completingAcademicLogin) return;
     _completingAcademicLogin = true;
+    _otpTokenRepository.resetSession();
     try {
       // WebVPN obtains its own business session from the same SSO account.
       // It is independent of the first-use data sync below.
@@ -941,6 +943,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Future<bool> _logoutAcademicAccount() async {
+    _otpTokenRepository.resetSession(sessionActive: false);
     // Let an in-flight recovery finish before deleting credentials, so it
     // cannot install a fresh WebVPN token after the user signs out.
     try {
@@ -1078,6 +1081,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           shuyoRoute(builder: (_) => const NativeLoginPage.webVpn()),
         );
         if (result != NativeLoginResult.authenticated || !mounted) return false;
+        _otpTokenRepository.resetSession();
         await _unifiedAccountService.setWebVpnPendingRecovery(false);
         setState(() {
           _webVpnPendingRecovery = false;
