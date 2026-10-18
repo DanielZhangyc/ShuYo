@@ -82,6 +82,24 @@ class _FakeChaoxingBookingClient extends ChaoxingBookingClient {
       };
 }
 
+class _EmptyThereBookingClient extends ThereBookingClient {
+  @override
+  Future<void> selectVenue(BookingVenue venue) async {}
+
+  @override
+  Future<Map<String, dynamic>> profile() async => {
+        'id': 'USER_1',
+        'loginName': 'STUDENT_1',
+        'isAnonymous': false,
+      };
+
+  @override
+  Future<List<Map<String, dynamic>>> areas(String day) async => [];
+
+  @override
+  Future<List<Map<String, dynamic>>> recent() async => [];
+}
+
 class _PushObserver extends NavigatorObserver {
   int pushes = 0;
 
@@ -107,8 +125,10 @@ void main() {
     testWidgets('${entry.key.label} uses the existing booking steps',
         (tester) async {
       final client = _FakeChaoxingBookingClient();
+      final there = _EmptyThereBookingClient();
       final observer = _PushObserver();
       addTearDown(client.dispose);
+      addTearDown(there.dispose);
       final today = DateTime.parse(ThereBookingClient.schoolDay());
       DateTime schoolMorning() =>
           DateTime.utc(today.year, today.month, today.day, 8);
@@ -118,6 +138,7 @@ void main() {
         navigatorObservers: [observer],
         home: LibraryBookingPage(
           accountService: UnifiedAccountService(),
+          thereClientFactory: (_) => there,
           chaoxingClient: client,
           schoolClock: schoolMorning,
         ),
@@ -181,7 +202,7 @@ void main() {
       expect(client.submission!.seatNum, '001');
       expect(client.submission!.start, isNotEmpty);
       expect(client.submission!.end, isNotEmpty);
-      expect(find.text('待确认'), findsOneWidget);
+      expect(find.text('进行中'), findsOneWidget);
       expect(find.textContaining('超星'), findsNothing);
     });
   }

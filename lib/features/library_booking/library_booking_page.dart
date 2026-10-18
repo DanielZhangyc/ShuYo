@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/cupertino.dart' show CupertinoPicker;
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/services/academic_account_store.dart';
 import '../../data/services/chaoxing_booking_adapter.dart';
@@ -11,6 +10,7 @@ import '../../data/services/library_booking_cache.dart';
 import '../../data/services/there_booking_client.dart';
 import '../../data/services/unified_account_service.dart';
 import '../../shared/navigation/shuyo_route.dart';
+import '../../shared/theme/custom_background.dart';
 import '../../shared/theme/shuyo_theme.dart';
 import '../../shared/widgets/empty_state.dart';
 import '../auth/native_login_page.dart';
@@ -24,7 +24,6 @@ enum _BookingStep {
   date,
   time,
   seat,
-  bookingVenues,
   bookings,
 }
 
@@ -51,7 +50,7 @@ class LibraryBookingPage extends StatefulWidget {
   const LibraryBookingPage({
     super.key,
     required this.accountService,
-    this.client,
+    this.thereClientFactory,
     this.chaoxingClient,
     this.useWebVpn = false,
     this.onWebVpnSessionRequired,
@@ -60,7 +59,7 @@ class LibraryBookingPage extends StatefulWidget {
   });
 
   final UnifiedAccountService accountService;
-  final ThereBookingClient? client;
+  final ThereBookingClient Function(BookingVenue)? thereClientFactory;
   final ChaoxingBookingClient? chaoxingClient;
   final bool useWebVpn;
   final Future<bool> Function()? onWebVpnSessionRequired;
@@ -76,22 +75,100 @@ class LibraryBookingPage extends StatefulWidget {
 class _LibraryBookingPageState extends State<LibraryBookingPage> {
   static const double _timeDigitFontSize = 22;
 
-  late final ThereBookingClient _thereClient =
-      widget.client ?? ThereBookingClient(useWebVpn: widget.useWebVpn);
+  final Map<BookingVenue, ThereBookingClient> _thereClients = {};
+  final Map<BookingVenue, ChaoxingBookingAdapter> _chaoxingAdapters = {};
+  final Map<BookingVenue, Future<void>> _pendingVenueSelections = {};
   ChaoxingBookingClient? _ownedChaoxingClient;
-  ChaoxingBookingAdapter? _chaoxingAdapter;
+  Future<List<Map<String, dynamic>>>? _sharedChaoxingRoomLoad;
+  bool _sharedChaoxingRoomLoadPending = false;
+  DateTime? _sharedChaoxingRoomLoadAt;
+  String? _sharedChaoxingRoomDay;
   BookingVenue _activeClientVenue = BookingVenue.library;
-  ThereBookingClient get _client => _activeClientVenue.isChaoxing
-      ? (_chaoxingAdapter ??= ChaoxingBookingAdapter(
-          client: widget.chaoxingClient ??
-              (_ownedChaoxingClient ??= ChaoxingBookingClient()),
-          schoolClock: () => _schoolNow,
-        ))
-      : _thereClient;
+  ThereBookingClient get _client => _clientForVenue(_activeClientVenue);
 
-  Future<void> _selectBookingVenue(BookingVenue venue) async {
+  Future<List<Map<String, dynamic>>> _loadSharedChaoxingRooms() {
+    final now = DateTime.now();
+    final day = _clockDay;
+    final pending = _sharedChaoxingRoomLoad;
+    final fetchedAt = _sharedChaoxingRoomLoadAt;
+    if (pending != null &&
+        _sharedChaoxingRoomDay == day &&
+        (_sharedChaoxingRoomLoadPending ||
+            (fetchedAt != null &&
+                now.difference(fetchedAt) < const Duration(seconds: 5)))) {
+      return pending;
+    }
+    final client = widget.chaoxingClient ??
+        (_ownedChaoxingClient ??= ChaoxingBookingClient());
+    final load = client.rooms();
+    _sharedChaoxingRoomLoad = load;
+    _sharedChaoxingRoomLoadPending = true;
+    _sharedChaoxingRoomLoadAt = null;
+    _sharedChaoxingRoomDay = day;
+    unawaited(load.then<void>((_) {
+      if (identical(_sharedChaoxingRoomLoad, load)) {
+        _sharedChaoxingRoomLoadPending = false;
+        _sharedChaoxingRoomLoadAt = DateTime.now();
+      }
+    }, onError: (Object _, StackTrace __) {
+      if (identical(_sharedChaoxingRoomLoad, load)) {
+        _sharedChaoxingRoomLoad = null;
+        _sharedChaoxingRoomLoadPending = false;
+        _sharedChaoxingRoomLoadAt = null;
+      }
+    }));
+    return load;
+  }
+
+  ThereBookingClient _clientForVenue(BookingVenue venue) => venue.isChaoxing
+      ? _chaoxingAdapters.putIfAbsent(
+          venue,
+          () => ChaoxingBookingAdapter(
+            client: widget.chaoxingClient ??
+                (_ownedChaoxingClient ??= ChaoxingBookingClient()),
+            schoolClock: () => _schoolNow,
+            loadRooms: _loadSharedChaoxingRooms,
+          ),
+        )
+      : _thereClients.putIfAbsent(
+          venue,
+          () =>
+              widget.thereClientFactory?.call(venue) ??
+              ThereBookingClient(useWebVpn: widget.useWebVpn),
+        );
+
+  Future<void> _ensureVenueSelected(
+      BookingVenue venue, ThereBookingClient client) async {
+    final pending = _pendingVenueSelections[venue];
+    if (pending != null) return pending;
+    final selection = client.selectVenue(venue);
+    _pendingVenueSelections[venue] = selection;
+    try {
+      await selection;
+    } finally {
+      if (identical(_pendingVenueSelections[venue], selection)) {
+        _pendingVenueSelections.remove(venue);
+      }
+    }
+  }
+
+  Future<void> _selectBookingVenue(BookingVenue venue,
+      {bool refresh = false}) async {
+    final client = _clientForVenue(venue);
     _activeClientVenue = venue;
-    await _client.selectVenue(venue);
+    if (refresh) {
+      final pending = _pendingVenueSelections[venue];
+      if (pending != null) {
+        try {
+          await pending;
+        } on Object {
+          // A fresh entry request can recover a failed background selection.
+        }
+      }
+      await client.refreshVenue(venue);
+    } else {
+      await _ensureVenueSelected(venue, client);
+    }
     _sessionVenue = venue;
   }
 
@@ -101,10 +178,13 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   BookingVenue _venue = BookingVenue.library;
   BookingVenue? _sessionVenue;
   bool _viewOnly = false;
+  bool _areaSelectionFromHome = false;
   final Set<BookingVenue> _viewVenueSelection = {};
-  final Set<BookingVenue> _bookingVenueSelection = {};
-  bool _bookingSelectionReady = false;
-  static const _bookingVenuePreference = 'library_booking_selected_venues';
+  final Set<BookingVenue> _expandedVenues = {};
+  final Map<BookingVenue, List<Map<String, dynamic>>> _homeAreasByVenue = {};
+  final Set<BookingVenue> _loadingHomeAreas = {};
+  final Map<BookingVenue, String> _homeAreaErrors = {};
+  final Map<BookingVenue, int> _homeAreaGenerations = {};
   late String _day;
   List<String> _days = [];
   List<Map<String, dynamic>> _areas = [];
@@ -116,6 +196,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   Map<String, dynamic>? _areaData;
   List<Map<String, dynamic>> _rooms = [];
   List<Map<String, dynamic>> _recent = [];
+  final Map<String, Map<String, dynamic>> _prefetchedDetails = {};
   final LibraryBookingCache _bookingCache = LibraryBookingCache();
   List<Map<String, dynamic>> _homeRecent = [];
   bool _homeCacheLoaded = false;
@@ -150,21 +231,37 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   bool _loadingSeats = false;
   bool _busy = false;
   int _generation = 0;
+  Future<void> _authenticationQueue = Future<void>.value();
   String _bookingFilter = '全部';
+  int _bookingAnimationEpoch = 0;
+  bool _bookingsIncomplete = false;
+  bool _bookingsLoading = false;
+  bool _showBookingLoadFailures = true;
+  bool _bookingsLoadedAtLeastOnce = false;
+  Future<void> _bookingsLoadFinished = Future<void>.value();
 
   @override
   void initState() {
     super.initState();
     _day = _clockDay;
-    unawaited(_restoreBookingVenues());
     unawaited(_loadHomeCache());
+    unawaited(_loadBookings(showFailures: false));
+    for (final venue in BookingVenue.values) {
+      unawaited(_loadHomeVenueAreas(venue));
+    }
   }
 
   @override
   void dispose() {
-    if (widget.client == null) _thereClient.dispose();
+    if (widget.thereClientFactory == null) {
+      for (final client in _thereClients.values) {
+        client.dispose();
+      }
+    }
+    for (final adapter in _chaoxingAdapters.values) {
+      adapter.dispose();
+    }
     _ownedChaoxingClient?.dispose();
-    _chaoxingAdapter?.dispose();
     super.dispose();
   }
 
@@ -174,6 +271,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       _slideForward = forward;
       _step = step;
       _loading = false;
+      _bookingsLoading = false;
       _loadingSeats = false;
       _loadingAllAreas = false;
       _error = null;
@@ -193,15 +291,17 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       case _BookingStep.allAreas:
         _setStep(_BookingStep.viewVenues);
       case _BookingStep.date:
-        _setStep(_viewOnly ? _BookingStep.allAreas : _BookingStep.area);
+        _setStep(_viewOnly
+            ? _BookingStep.allAreas
+            : _areaSelectionFromHome
+                ? _BookingStep.venue
+                : _BookingStep.area);
       case _BookingStep.time:
         _setStep(_BookingStep.date);
       case _BookingStep.seat:
         _setStep(_BookingStep.time);
-      case _BookingStep.bookingVenues:
-        _setStep(_BookingStep.venue);
       case _BookingStep.bookings:
-        _setStep(_BookingStep.bookingVenues);
+        _setStep(_BookingStep.venue);
     }
   }
 
@@ -249,6 +349,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                     tooltip: '刷新',
                     onPressed: _busy ||
                             _loading ||
+                            _bookingsLoading ||
                             _loadingSeats ||
                             _loadingAllAreas ||
                             _previewLoading
@@ -291,7 +392,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         _BookingStep.date => '选择日期',
         _BookingStep.time => '选择时间',
         _BookingStep.seat => _viewOnly ? '查看座位情况' : '选择座位',
-        _BookingStep.bookingVenues => '选择场馆',
         _BookingStep.bookings => '我的预约',
       };
 
@@ -309,12 +409,11 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   Widget _stepBody() => switch (_step) {
         _BookingStep.venue => _venuePage(),
         _BookingStep.area => _areaPage(),
-        _BookingStep.viewVenues => _venueSelectionPage(viewOnly: true),
+        _BookingStep.viewVenues => _viewVenueSelectionPage(),
         _BookingStep.allAreas => _allAreasPage(),
         _BookingStep.date => _datePage(),
         _BookingStep.time => _timePage(),
         _BookingStep.seat => _seatPage(),
-        _BookingStep.bookingVenues => _venueSelectionPage(viewOnly: false),
         _BookingStep.bookings => _bookingsPage(),
       };
 
@@ -375,20 +474,37 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   void _showSeatsMap() =>
       unawaited(showLibraryBookingImage(context, librarySeatsAsset));
 
-  Widget _campusBar() => DefaultTabController(
-        length: _BookingCampus.values.length,
-        initialIndex: _campus.index,
+  Widget _selectionTabBar({
+    required List<String> labels,
+    required int selectedIndex,
+    required ValueChanged<int> onTap,
+    bool isScrollable = false,
+  }) =>
+      DefaultTabController(
+        length: labels.length,
+        initialIndex: selectedIndex,
         child: TabBar(
-          labelPadding: EdgeInsets.zero,
+          isScrollable: isScrollable,
+          labelPadding: isScrollable
+              ? const EdgeInsets.symmetric(horizontal: 14)
+              : EdgeInsets.zero,
           tabs: [
-            for (final campus in _BookingCampus.values) Tab(text: campus.label),
+            for (final label in labels) Tab(text: label),
           ],
-          onTap: (index) =>
-              setState(() => _campus = _BookingCampus.values[index]),
+          onTap: onTap,
         ),
       );
 
+  Widget _campusBar() => _selectionTabBar(
+        labels: [for (final campus in _BookingCampus.values) campus.label],
+        selectedIndex: _campus.index,
+        onTap: (index) =>
+            setState(() => _campus = _BookingCampus.values[index]),
+      );
+
   Widget _venuePage() => _pageList([
+        _homeRecentSection(),
+        const SizedBox(height: 18),
         Row(children: [
           Expanded(
               child:
@@ -398,19 +514,34 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         const SizedBox(height: 16),
         _campusBar(),
         const SizedBox(height: 16),
-        for (final venue in _campus.venues) ...[
-          _surface(
-            padding: EdgeInsets.zero,
-            child: ListTile(
-              title: Text(venue.label),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () {
-                setState(() => _venue = venue);
-                unawaited(_loadVenue());
-              },
-            ),
+        for (final (index, venue) in _campus.venues.indexed) ...[
+          if (index > 0) Divider(height: 1, color: context.shuyoColors.border),
+          ListTile(
+            key: ValueKey('home-venue-${venue.name}'),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            title: Text(venue.label),
+            trailing: _loadingHomeAreas.contains(venue)
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(_expandedVenues.contains(venue)
+                    ? Icons.keyboard_arrow_up
+                    : Icons.keyboard_arrow_down),
+            onTap: () => _toggleHomeVenue(venue),
+            // The old area step remains available in the page state, but the
+            // venue row now expands its areas directly on this screen.
+            // onTap: () { setState(() => _venue = venue); unawaited(_loadVenue()); },
           ),
-          const SizedBox(height: 10),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            alignment: Alignment.topCenter,
+            curve: Curves.easeOutCubic,
+            child: _expandedVenues.contains(venue)
+                ? _homeVenueAreas(venue)
+                : const SizedBox(width: double.infinity),
+          ),
         ],
         const SizedBox(height: 8),
         OutlinedButton(
@@ -420,69 +551,174 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           },
           child: const Text('仅查看座位情况'),
         ),
-        const SizedBox(height: 12),
-        InkWell(
-          onTap: _openBookings,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(0, 12, 16, 12),
-            child: Row(children: [
-              Expanded(
-                  child: Text('我的预约',
-                      style: Theme.of(context).textTheme.titleLarge)),
-              const Icon(Icons.chevron_right),
-            ]),
-          ),
-        ),
-        const SizedBox(height: 10),
-        _homeRecentSection(),
       ]);
+
+  Widget _homeVenueAreas(BookingVenue venue) {
+    final areas = _homeAreasByVenue[venue];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 4, 12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (_homeAreaErrors.containsKey(venue) && areas == null)
+          TextButton.icon(
+            onPressed: _loadingHomeAreas.contains(venue)
+                ? null
+                : () => unawaited(
+                    _loadHomeVenueAreas(venue, interactiveAuth: true)),
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('分区暂时无法加载，重试'),
+          )
+        else if (areas != null && _selectableAreas(areas).isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text('当前场馆没有可选分区'),
+          )
+        else if (areas != null)
+          for (final area in _selectableAreas(areas)) ...[
+            _areaCard(venue, area, areas, embedded: true),
+            Divider(height: 1, color: context.shuyoColors.border),
+          ],
+        if (venue == BookingVenue.studySpace) ...[
+          const SizedBox(height: 12),
+          Wrap(spacing: 16, runSpacing: 8, children: [
+            _infoLink('座位分布', _showSeatsMap, icon: Icons.map_outlined),
+            _infoLink('常见问题', () => _openInfo('常见问题', libraryQaAsset)),
+          ]),
+        ],
+      ]),
+    );
+  }
 
   Widget _homeRecentSection() {
     final colors = context.shuyoColors;
+    final records = _homeActiveBookings();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if (!_homeCacheLoaded)
-        const SizedBox(
-            height: 64,
-            child: Center(child: CircularProgressIndicator(strokeWidth: 2)))
-      else if (_homeRecent.isEmpty)
-        SizedBox(
-            height: 64,
-            child: Center(
-                child: Text('暂无本地记录',
-                    style: TextStyle(color: colors.textTertiary))))
-      else
-        _surface(
-            child: Column(children: [
-          for (var index = 0;
-              index < _homeRecent.length && index < 3;
-              index++) ...[
-            if (index > 0) Divider(color: colors.border, height: 20),
-            Row(children: [
-              Expanded(
-                  child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                      '${_homeRecent[index]['roomName'] ?? '座位'} · '
-                      '${_homeRecent[index]['officeAreaName'] ?? ''}',
-                      style: Theme.of(context).textTheme.bodyMedium),
-                  const SizedBox(height: 4),
-                  Text(
-                      '${_bookingTime(_homeRecent[index]['beginTime'])} — '
-                      '${_bookingTime(_homeRecent[index]['endTime'])}',
-                      style: Theme.of(context).textTheme.bodySmall),
-                ],
-              )),
-              const SizedBox(width: 10),
-              Text(_bookingCategory(_homeRecent[index]),
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: colors.textSecondary)),
-            ]),
-          ],
-        ])),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(0, 8, 16, 8),
+        child: Text('我的预约', style: Theme.of(context).textTheme.titleLarge),
+      ),
+      if (records.isEmpty && _homeCacheLoaded && !_bookingsLoading)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Text('暂无待履约或进行中的预约',
+              style: TextStyle(color: colors.textTertiary)),
+        ),
+      for (final (index, item) in records.indexed) ...[
+        if (index > 0)
+          CustomBackgroundScope.maybeOf(context) != null
+              ? const SizedBox.shrink()
+              : Divider(height: 1, color: colors.border),
+        _BookingListTile(
+          key:
+              ValueKey<String>('home:${ThereBookingClient.string(item['id'])}'),
+          index: index,
+          item: item,
+          venueName: _bookingVenueName(item),
+          status: _bookingCategory(item),
+          beginTime: _bookingTime(item['beginTime']),
+          endTime: _bookingTime(item['endTime']),
+          onTap: ThereBookingClient.string(item['id']) == null
+              ? null
+              : () => _openDetail(item),
+        ),
+      ],
+      Align(
+        alignment: Alignment.centerRight,
+        child: TextButton(
+          onPressed: _openBookings,
+          style: TextButton.styleFrom(foregroundColor: colors.textSecondary),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('查看历史预约'),
+              SizedBox(width: 2),
+              Icon(Icons.chevron_right, size: 18),
+            ],
+          ),
+        ),
+      ),
     ]);
+  }
+
+  List<Map<String, dynamic>> _homeActiveBookings() {
+    final byId = <String, Map<String, dynamic>>{};
+    for (final item in [..._homeRecent, ..._recent]) {
+      final id = ThereBookingClient.string(item['id']);
+      if (id != null) byId[id] = item;
+    }
+    final records = byId.values
+        .where((item) =>
+            _bookingCategory(item) == '待履约' || _bookingCategory(item) == '进行中')
+        .toList();
+    records.sort((a, b) => (ThereBookingClient.string(b['beginTime']) ?? '')
+        .compareTo(ThereBookingClient.string(a['beginTime']) ?? ''));
+    return records;
+  }
+
+  Future<void> _loadHomeVenueAreas(BookingVenue venue,
+      {bool interactiveAuth = false}) async {
+    if (!mounted) return;
+    final generation = (_homeAreaGenerations[venue] ?? 0) + 1;
+    _homeAreaGenerations[venue] = generation;
+    setState(() {
+      _loadingHomeAreas.add(venue);
+      _homeAreaErrors.remove(venue);
+    });
+    final client = _clientForVenue(venue);
+    try {
+      final request = () async {
+        final profile = await _read(() async {
+          if (interactiveAuth && !venue.isChaoxing) {
+            await _selectBookingVenue(venue, refresh: true);
+          } else {
+            await _ensureVenueSelected(venue, client);
+          }
+          return client.profile();
+        }, venue: venue, client: client, interactiveAuth: interactiveAuth);
+        await _checkAccount(profile, client: client);
+        return _read(() => client.areas(_clockDay),
+            venue: venue, client: client, interactiveAuth: interactiveAuth);
+      }();
+      final areas = await (interactiveAuth
+          ? request
+          : request.timeout(const Duration(seconds: 15)));
+      if (!mounted || _homeAreaGenerations[venue] != generation) return;
+      final supported = areas
+          .where((area) => ThereBookingClient.strings(area['supportRoomTypes'])
+              .contains(venue.roomType))
+          .toList();
+      if (!venue.isChaoxing && supported.isEmpty) {
+        throw const ThereBookingException(
+          ThereFailureKind.uncertain,
+          '分区列表暂时不可用',
+        );
+      }
+      setState(() {
+        _homeAreasByVenue[venue] = supported;
+        _loadingHomeAreas.remove(venue);
+      });
+    } on Object {
+      if (!mounted || _homeAreaGenerations[venue] != generation) return;
+      setState(() {
+        _loadingHomeAreas.remove(venue);
+        _homeAreaErrors[venue] = '分区暂时无法加载';
+      });
+    }
+  }
+
+  void _toggleHomeVenue(BookingVenue venue) {
+    final expand = !_expandedVenues.contains(venue);
+    setState(() {
+      if (expand) {
+        _expandedVenues.add(venue);
+      } else {
+        _expandedVenues.remove(venue);
+      }
+    });
+    if (expand &&
+        !_loadingHomeAreas.contains(venue) &&
+        !_homeAreasByVenue.containsKey(venue)) {
+      unawaited(_loadHomeVenueAreas(venue, interactiveAuth: true));
+    }
   }
 
   Future<void> _loadHomeCache() async {
@@ -560,11 +796,10 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     }
   }
 
-  Widget _venueSelectionPage({required bool viewOnly}) {
-    final selected = viewOnly ? _viewVenueSelection : _bookingVenueSelection;
+  Widget _viewVenueSelectionPage() {
+    final selected = _viewVenueSelection;
     return _pageList([
-      Text(viewOnly ? '选择要查看的场馆' : '选择要查看预约的场馆',
-          style: Theme.of(context).textTheme.titleLarge),
+      Text('选择要查看的场馆', style: Theme.of(context).textTheme.titleLarge),
       const SizedBox(height: 16),
       _campusBar(),
       const SizedBox(height: 16),
@@ -572,39 +807,24 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         _surface(
           padding: EdgeInsets.zero,
           child: CheckboxListTile(
-            key: ValueKey('${viewOnly ? 'view' : 'booking'}-${venue.name}'),
+            key: ValueKey('view-${venue.name}'),
             title: Text(venue.label),
             value: selected.contains(venue),
             controlAffinity: ListTileControlAffinity.trailing,
-            onChanged: !viewOnly && !_bookingSelectionReady
-                ? null
-                : (value) => setState(() {
-                      if (value == true) {
-                        selected.add(venue);
-                      } else {
-                        selected.remove(venue);
-                      }
-                    }),
+            onChanged: (value) => setState(() {
+              if (value == true) {
+                selected.add(venue);
+              } else {
+                selected.remove(venue);
+              }
+            }),
           ),
         ),
         const SizedBox(height: 10),
       ],
       const SizedBox(height: 8),
       FilledButton(
-        onPressed: selected.isEmpty || (!viewOnly && !_bookingSelectionReady)
-            ? null
-            : () {
-                if (viewOnly) {
-                  unawaited(_loadAllAreas());
-                } else {
-                  unawaited(_saveBookingVenues());
-                  setState(() {
-                    _slideForward = true;
-                    _step = _BookingStep.bookings;
-                  });
-                  unawaited(_loadBookings());
-                }
-              },
+        onPressed: selected.isEmpty ? null : () => unawaited(_loadAllAreas()),
         child: const Text('下一步'),
       ),
     ]);
@@ -682,46 +902,52 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   }
 
   Widget _areaCard(BookingVenue venue, Map<String, dynamic> area,
-          List<Map<String, dynamic>> areas) =>
-      _surface(
-        padding: EdgeInsets.zero,
-        child: InkWell(
-          onTap: _step == _BookingStep.allAreas && _loadingAllAreas
-              ? null
-              : () {
-                  setState(() {
-                    _slideForward = true;
-                    _venue = venue;
-                    _areas = areas;
-                    _selectedArea = area;
-                    _rooms = [];
-                    _selectedRoomId = null;
-                    _step = _BookingStep.date;
-                    _loadingAllAreas = false;
-                    _clearPreview();
-                  });
-                  unawaited(_loadDays());
-                },
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(children: [
-                  Expanded(
-                      child: Text(_areaName(area, areas: areas),
-                          style: Theme.of(context).textTheme.titleMedium)),
-                  const Icon(Icons.chevron_right),
-                ]),
-                const SizedBox(height: 12),
-                Text('开放时间：${_openingHours(area)}'),
-                const SizedBox(height: 12),
-                _areaStats(area),
-              ],
-            ),
-          ),
+      List<Map<String, dynamic>> areas,
+      {bool embedded = false}) {
+    final content = InkWell(
+      onTap: _step == _BookingStep.allAreas && _loadingAllAreas
+          ? null
+          : () {
+              setState(() {
+                _slideForward = true;
+                _venue = venue;
+                _areaSelectionFromHome = embedded;
+                if (embedded) _viewOnly = false;
+                _areas = areas;
+                _selectedArea = area;
+                _rooms = [];
+                _selectedRoomId = null;
+                _step = _BookingStep.date;
+                _loadingAllAreas = false;
+                _clearPreview();
+              });
+              unawaited(_loadDays());
+            },
+      child: Padding(
+        padding: embedded
+            ? const EdgeInsets.fromLTRB(4, 12, 8, 14)
+            : const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Expanded(
+                  child: Text(_areaName(area, areas: areas),
+                      style: Theme.of(context).textTheme.titleMedium)),
+              const Icon(Icons.chevron_right),
+            ]),
+            const SizedBox(height: 12),
+            Text('开放时间：${_openingHours(area)}'),
+            const SizedBox(height: 12),
+            _areaStats(area),
+          ],
         ),
-      );
+      ),
+    );
+    return embedded
+        ? content
+        : _surface(padding: EdgeInsets.zero, child: content);
+  }
 
   Widget _areaStats(Map<String, dynamic> area) {
     final open =
@@ -1503,87 +1729,63 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         .where((item) =>
             _bookingFilter == '全部' || _bookingCategory(item) == _bookingFilter)
         .toList();
-    return _pageList([
-      SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            for (final filter in filters)
-              SizedBox(
-                width: 86,
-                child: Semantics(
-                  button: true,
-                  selected: _bookingFilter == filter,
-                  child: Column(children: [
-                    InkWell(
-                      onTap: () => setState(() => _bookingFilter = filter),
-                      child: SizedBox(
-                          height: 42,
-                          child: Center(
-                            child: Text(filter,
-                                style: TextStyle(
-                                  color: _bookingFilter == filter
-                                      ? context.shuyoColors.accent
-                                      : context.shuyoColors.textSecondary,
-                                  fontWeight: _bookingFilter == filter
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                )),
-                          )),
-                    ),
-                    Container(
-                        height: 2,
-                        color: _bookingFilter == filter
-                            ? context.shuyoColors.accent
-                            : Colors.transparent),
-                  ]),
-                ),
-              ),
-          ],
+    final visibleIndices = <String, int>{
+      for (final (index, item) in visible.indexed)
+        if (ThereBookingClient.string(item['id']) case final String id)
+          '$_bookingAnimationEpoch:$id': index,
+    };
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        child: _selectionTabBar(
+          labels: filters,
+          selectedIndex: filters.indexOf(_bookingFilter),
+          onTap: (index) {
+            if (_bookingFilter == filters[index]) return;
+            setState(() {
+              _bookingFilter = filters[index];
+              _bookingAnimationEpoch++;
+            });
+          },
         ),
       ),
-      const SizedBox(height: 16),
-      if (visible.isEmpty) Text(_recent.isEmpty ? '暂无预约记录' : '没有符合条件的预约'),
-      for (final item in visible) ...[
-        _surface(
-            padding: EdgeInsets.zero,
-            child: InkWell(
-              onTap: () => _openDetail(item),
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child:
-                    Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  Expanded(
-                      child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+      Expanded(
+        child: visible.isEmpty
+            ? _bookingsLoading
+                ? const SizedBox.shrink()
+                : ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                     children: [
-                      Text(
-                          '${ThereBookingClient.string(item['roomName']) ?? '座位'} · '
-                          '${ThereBookingClient.string(item['officeAreaName']) ?? _bookingVenueName(item)}',
-                          style: Theme.of(context).textTheme.titleMedium),
-                      const SizedBox(height: 6),
-                      Text(_bookingVenueName(item),
-                          style: Theme.of(context).textTheme.bodySmall),
-                      const SizedBox(height: 8),
-                      Text(
-                          '${_bookingTime(item['beginTime'])} — '
-                          '${_bookingTime(item['endTime'])}',
-                          style: Theme.of(context).textTheme.bodySmall),
+                      Text(_recent.isEmpty
+                          ? (_bookingsIncomplete ? '暂无可显示的预约记录' : '暂无预约记录')
+                          : '没有符合条件的预约'),
                     ],
-                  )),
-                  const SizedBox(width: 12),
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 2),
-                    child: Text(
-                        _finishedEarly(item) ? '已提前结束' : _bookingCategory(item),
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: context.shuyoColors.textSecondary)),
-                  ),
-                ]),
+                  )
+            : ListView.separated(
+                padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
+                itemCount: visible.length,
+                findItemIndexCallback: (key) =>
+                    key is ValueKey<String> ? visibleIndices[key.value] : null,
+                itemBuilder: (context, index) {
+                  final item = visible[index];
+                  final id = ThereBookingClient.string(item['id']);
+                  return _BookingListTile(
+                    key: ValueKey<String>('$_bookingAnimationEpoch:$id'),
+                    index: index,
+                    item: item,
+                    venueName: _bookingVenueName(item),
+                    status: _bookingCategory(item),
+                    beginTime: _bookingTime(item['beginTime']),
+                    endTime: _bookingTime(item['endTime']),
+                    onTap: id == null ? null : () => _openDetail(item),
+                  );
+                },
+                separatorBuilder: (context, index) =>
+                    CustomBackgroundScope.maybeOf(context) != null
+                        ? const SizedBox.shrink()
+                        : Divider(height: 1, color: context.shuyoColors.border),
               ),
-            )),
-        const SizedBox(height: 10),
-      ],
+      ),
     ]);
   }
 
@@ -1638,11 +1840,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         item['duration'] == 0;
   }
 
-  String _bookingStatusText(Map<String, dynamic> item) => _finishedEarly(item)
-      ? '已提前结束'
-      : ThereBookingClient.string(item['statusLabel']) ??
-          _bookingCategory(item);
-
   void _retry() {
     switch (_step) {
       case _BookingStep.venue:
@@ -1659,8 +1856,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         unawaited(_loadAreaRules());
       case _BookingStep.seat:
         unawaited(_refreshSeats());
-      case _BookingStep.bookingVenues:
-        break;
       case _BookingStep.bookings:
         unawaited(_loadBookings());
     }
@@ -1668,39 +1863,19 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
 
   void _openBookings() {
     if (_busy) return;
+    _showBookingLoadFailures = true;
+    final shouldLoad = !_bookingsLoading && !_bookingsLoadedAtLeastOnce;
+    final showPreviousFailure =
+        !_bookingsLoading && _bookingsLoadedAtLeastOnce && _bookingsIncomplete;
     setState(() {
       _slideForward = true;
-      _step = _BookingStep.bookingVenues;
+      _step = _BookingStep.bookings;
       _bookingFilter = '全部';
     });
-  }
-
-  Future<void> _restoreBookingVenues() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final saved = prefs.getStringList(_bookingVenuePreference) ?? const [];
-      if (!mounted) return;
-      setState(() {
-        _bookingVenueSelection
-          ..clear()
-          ..addAll(BookingVenue.values
-              .where((venue) => saved.contains(venue.roomType)));
-        _bookingSelectionReady = true;
-      });
-    } on Object {
-      if (mounted) setState(() => _bookingSelectionReady = true);
-    }
-  }
-
-  Future<void> _saveBookingVenues() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setStringList(_bookingVenuePreference, [
-        for (final venue in BookingVenue.values)
-          if (_bookingVenueSelection.contains(venue)) venue.roomType,
-      ]);
-    } on Object {
-      // A local preference failure must not block reading bookings.
+    if (shouldLoad) {
+      unawaited(_loadBookings());
+    } else if (showPreviousFailure) {
+      _showMessage(_recent.isEmpty ? '预约加载失败，请稍后刷新' : '部分预约加载失败，请稍后刷新');
     }
   }
 
@@ -1711,6 +1886,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       _slideForward = true;
       _step = _BookingStep.area;
       _loading = true;
+      _bookingsLoading = false;
       _loadingLabel = '正在连接至${_venue.label}';
       _error = null;
       _selectedArea = null;
@@ -1766,6 +1942,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       _step = _BookingStep.allAreas;
       _viewOnly = true;
       _loading = true;
+      _bookingsLoading = false;
       _loadingAllAreas = true;
       _loadingLabel = '正在连接至座位预约系统';
       _allAreasError = null;
@@ -1906,58 +2083,144 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     }
   }
 
-  Future<void> _loadBookings() async {
+  Future<void> _loadBookings({bool showFailures = true}) async {
     final generation = ++_generation;
+    _showBookingLoadFailures = showFailures;
+    final loadFinished = Completer<void>();
+    _bookingsLoadFinished = loadFinished.future;
     setState(() {
-      _loading = true;
-      _loadingLabel = '正在连接至座位预约系统';
+      _bookingsLoading = true;
+      _recent = [];
+      _prefetchedDetails.clear();
       _error = null;
+      _bookingsIncomplete = false;
     });
-    try {
-      final byId = <String, Map<String, dynamic>>{};
-      final verifiedClients = <bool>{};
-      for (final venue
-          in BookingVenue.values.where(_bookingVenueSelection.contains)) {
+    var hadFailure = false;
+    var successfulVenues = 0;
+    var cacheWrite = Future<void>.value();
+
+    Future<void> loadSystem(bool isChaoxing) async {
+      var verified = false;
+      for (final venue in BookingVenue.values
+          .where((venue) => venue.isChaoxing == isChaoxing)) {
         if (!mounted || generation != _generation) return;
-        setState(() => _loadingLabel = '正在读取${venue.label}的预约');
-        await _read(() async {
-          await _selectBookingVenue(venue);
-          if (!verifiedClients.contains(venue.isChaoxing)) {
-            await _checkAccount(await _client.profile());
-            verifiedClients.add(venue.isChaoxing);
+        final client = _clientForVenue(venue);
+        try {
+          await _read(() async {
+            await _ensureVenueSelected(venue, client);
+            if (!verified) {
+              await _checkAccount(await client.profile(), client: client);
+              verified = true;
+            }
+            return true;
+          }, venue: venue, client: client, interactiveAuth: showFailures);
+          final recent = await _read(client.recent,
+              venue: venue, client: client, interactiveAuth: showFailures);
+          if (!mounted || generation != _generation) return;
+          successfulVenues++;
+          cacheWrite =
+              cacheWrite.then((_) => _cacheRecentForVenue(venue, recent));
+          for (final item in recent) {
+            final id = ThereBookingClient.string(item['id']);
+            if (id == null ||
+                item['roomType'] != venue.roomType ||
+                _awaitingWriteStatus.containsKey(id)) {
+              continue;
+            }
+            Map<String, dynamic>? prefetchedDetail;
+            final recentAllowsCancellation =
+                ThereBookingClient.strings(item['abilities'])
+                    .contains('cancel');
+            if (isChaoxing ||
+                (_bookingCategory(item) != '已取消' &&
+                    !_finishedEarly(item) &&
+                    (_bookingCategory(item) != '已结束' ||
+                        ThereBookingClient.string(item['endTime']) == null))) {
+              try {
+                final detail = isChaoxing
+                    ? item
+                    : await _read(() => client.detail(id),
+                        venue: venue,
+                        client: client,
+                        interactiveAuth: showFailures);
+                if (!mounted || generation != _generation) return;
+                prefetchedDetail = detail;
+              } on Object {
+                // Recent carries the same cancel ability as the detail API.
+                // Keep the action available when only detail loading fails.
+                if (recentAllowsCancellation) prefetchedDetail = item;
+              }
+            }
+            if (!mounted || generation != _generation) return;
+            setState(() {
+              if (prefetchedDetail == null) {
+                _prefetchedDetails.remove(id);
+              } else {
+                _prefetchedDetails[id] = prefetchedDetail;
+              }
+              _recent.removeWhere((existing) =>
+                  ThereBookingClient.string(existing['id']) == id);
+              final begin = ThereBookingClient.string(item['beginTime']) ?? '';
+              final index = _recent.indexWhere((existing) =>
+                  (ThereBookingClient.string(existing['beginTime']) ?? '')
+                      .compareTo(begin) <
+                  0);
+              _recent.insert(index < 0 ? _recent.length : index, item);
+            });
           }
-          return true;
-        });
-        final recent = await _read(_client.recent);
-        await _cacheRecentForVenue(venue, recent);
-        for (final item in recent) {
-          final id = ThereBookingClient.string(item['id']);
-          if (id != null &&
-              !_awaitingWriteStatus.containsKey(id) &&
-              _bookingVenueSelection
-                  .any((selected) => selected.roomType == item['roomType'])) {
-            byId[id] = item;
+        } on Object catch (error) {
+          if (!mounted || generation != _generation) return;
+          hadFailure = true;
+          if (error is ThereBookingException &&
+              (error.kind == ThereFailureKind.loginRequired ||
+                  error.kind == ThereFailureKind.webVpnLoginRequired ||
+                  error.kind == ThereFailureKind.unreachable)) {
+            return;
           }
         }
       }
-      if (!mounted || generation != _generation) return;
-      setState(() {
-        _recent = byId.values.toList()
-          ..sort((a, b) => (ThereBookingClient.string(b['beginTime']) ?? '')
-              .compareTo(ThereBookingClient.string(a['beginTime']) ?? ''));
-        _loading = false;
-      });
-    } on Object catch (error) {
-      if (!mounted || generation != _generation) return;
-      setState(() {
-        _loading = false;
-        _error = _friendlyError(error);
-      });
+    }
+
+    try {
+      await Future.wait<void>([loadSystem(false), loadSystem(true)]);
+      await cacheWrite;
+    } finally {
+      loadFinished.complete();
+    }
+    if (!mounted || generation != _generation) return;
+    setState(() {
+      _bookingsLoading = false;
+      _bookingsIncomplete = hadFailure;
+    });
+    _bookingsLoadedAtLeastOnce = successfulVenues > 0 || !hadFailure;
+    if (hadFailure && _showBookingLoadFailures) {
+      _showMessage(successfulVenues == 0 ? '预约加载失败，请稍后刷新' : '部分预约加载失败，请稍后刷新');
     }
   }
 
-  Future<bool> _authenticate() async {
-    if (_activeClientVenue.isChaoxing) {
+  Future<bool> _authenticate({
+    BookingVenue? venue,
+    ThereBookingClient? client,
+  }) async {
+    final preceding = _authenticationQueue;
+    final finished = Completer<void>();
+    _authenticationQueue = finished.future;
+    await preceding;
+    try {
+      if (!mounted) return false;
+      return await _authenticateNow(venue: venue, client: client);
+    } finally {
+      finished.complete();
+    }
+  }
+
+  Future<bool> _authenticateNow({
+    BookingVenue? venue,
+    ThereBookingClient? client,
+  }) async {
+    final activeVenue = venue ?? _activeClientVenue;
+    final activeClient = client ?? _client;
+    if (activeVenue.isChaoxing) {
       final login = widget.onChaoxingLoginRequired;
       if (login != null) return login();
       if (!mounted) return false;
@@ -1967,15 +2230,15 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         ),
       );
       if (result == NativeLoginResult.authenticated) {
-        _client.resetSession();
+        activeClient.resetSession();
         return true;
       }
       return false;
     }
-    await _client.prepareOAuth();
+    await activeClient.prepareOAuth();
     final callback = await widget.accountService.authorizeThere();
     if (callback != null) {
-      await _client.completeOAuth(callback);
+      await activeClient.completeOAuth(callback);
       return true;
     }
     if (widget.useWebVpn) {
@@ -1993,7 +2256,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       ),
     );
     if (result == NativeLoginResult.authenticated) {
-      _client.resetSession();
+      activeClient.resetSession();
       return true;
     }
     return false;
@@ -2002,48 +2265,73 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   Future<T> _read<T>(
     Future<T> Function() operation, {
     Future<void> Function(T)? validateAfterRecovery,
+    BookingVenue? venue,
+    ThereBookingClient? client,
+    bool interactiveAuth = true,
   }) async {
+    final activeVenue = venue ?? _activeClientVenue;
+    final activeClient = client ?? _client;
     try {
       return await operation();
     } on ThereBookingException catch (error) {
+      if (!interactiveAuth &&
+          (error.kind == ThereFailureKind.loginRequired ||
+              error.kind == ThereFailureKind.webVpnLoginRequired)) {
+        rethrow;
+      }
       if (error.kind == ThereFailureKind.webVpnLoginRequired &&
           widget.useWebVpn) {
         final restored = await widget.onWebVpnSessionRequired?.call() ?? false;
         if (!restored) rethrow;
-        _client.resetSession();
-        return _readAfterRecovery(operation, validateAfterRecovery);
+        activeClient.resetSession();
+        return _readAfterRecovery(operation, validateAfterRecovery,
+            venue: activeVenue,
+            client: activeClient,
+            selectGlobalVenue: client == null);
       }
       if (error.kind != ThereFailureKind.loginRequired) rethrow;
     }
-    final authenticated = await _authenticate();
+    final authenticated =
+        await _authenticate(venue: activeVenue, client: activeClient);
     if (!authenticated) {
       throw const ThereBookingException(
         ThereFailureKind.loginRequired,
         '请先登录图书馆预约',
       );
     }
-    return _readAfterRecovery(operation, validateAfterRecovery);
+    return _readAfterRecovery(operation, validateAfterRecovery,
+        venue: activeVenue,
+        client: activeClient,
+        selectGlobalVenue: client == null);
   }
 
   Future<T> _readAfterRecovery<T>(
     Future<T> Function() operation,
-    Future<void> Function(T)? validateAfterRecovery,
-  ) async {
-    await _selectBookingVenue(_activeClientVenue);
+    Future<void> Function(T)? validateAfterRecovery, {
+    required BookingVenue venue,
+    required ThereBookingClient client,
+    required bool selectGlobalVenue,
+  }) async {
+    if (selectGlobalVenue) {
+      await _selectBookingVenue(venue);
+    } else {
+      await client.selectVenue(venue);
+    }
     if (validateAfterRecovery != null) {
       final result = await operation();
       await validateAfterRecovery(result);
       return result;
     }
-    await _checkAccount(await _client.profile());
+    await _checkAccount(await client.profile(), client: client);
     return operation();
   }
 
-  Future<void> _checkAccount(Map<String, dynamic> profile) async {
+  Future<void> _checkAccount(Map<String, dynamic> profile,
+      {ThereBookingClient? client}) async {
     final expected = await AcademicAccountStore().loadStudentId();
     if (expected != null &&
         !ThereBookingClient.matchesAccount(profile, expected)) {
-      await _client.clearSession();
+      await (client ?? _client).clearSession();
       throw const ThereBookingException(
         ThereFailureKind.business,
         '图书馆预约登录的是另一个校园账户，请退出校园账户后重新登录',
@@ -2081,7 +2369,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     setState(() => _busy = true);
     String? createdId;
     try {
-      await _selectBookingVenue(_venue);
+      await _selectBookingVenue(_venue, refresh: true);
       createdId = await _client.create(
         areaId: areaId,
         roomId: roomId,
@@ -2136,15 +2424,29 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
               .where((item) => item.roomType == booking['roomType'])
               .firstOrNull ??
           _venue;
-      final detail = await _read(() async {
-        await _selectBookingVenue(venue);
-        return _client.detail(id);
-      });
+      final prefix = 'cx:${venue.roomType}:';
+      final displayId = venue.isChaoxing
+          ? 'cx:${id.startsWith(prefix) ? id.substring(prefix.length) : id}'
+          : 'there:$id';
+      final Map<String, dynamic> detail = {
+        ...booking,
+        ...(_prefetchedDetails[id] ??
+            (ThereBookingClient.string(booking['beginTime']) != null
+                ? booking
+                : await _read<Map<String, dynamic>>(() async {
+                    await _selectBookingVenue(venue);
+                    return _client.detail(id);
+                  }))),
+      };
       if (!mounted) return;
       await showModalBottomSheet<void>(
         context: context,
         isScrollControlled: true,
-        backgroundColor: Colors.transparent,
+        backgroundColor: context.shuyoColors.surface,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        clipBehavior: Clip.antiAlias,
         constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width),
         builder: (sheetContext) => SafeArea(
           top: false,
@@ -2152,11 +2454,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
             width: double.infinity,
             constraints: BoxConstraints(
                 maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.85),
-            decoration: BoxDecoration(
-              color: sheetContext.shuyoColors.surface,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(20)),
-            ),
             child: SingleChildScrollView(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(22, 10, 22, 28),
@@ -2185,7 +2482,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                               color: sheetContext.shuyoColors.accent,
                               shape: BoxShape.circle)),
                       const SizedBox(width: 7),
-                      Text(_bookingStatusText(detail),
+                      Text(_bookingCategory(detail),
                           style: Theme.of(sheetContext)
                               .textTheme
                               .bodySmall
@@ -2206,12 +2503,20 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                             ThereBookingClient.string(
                                 booking['officeAreaName']) ??
                             ''),
-                    _bookingDetailField(sheetContext, '座位',
-                        ThereBookingClient.string(detail['roomName']) ?? ''),
                     _bookingDetailField(sheetContext, '开始时间',
                         _bookingTime(detail['beginTime'])),
                     _bookingDetailField(
                         sheetContext, '结束时间', _bookingTime(detail['endTime'])),
+                    if (ThereBookingClient.string(detail['createdAt'])
+                        case final String createdAt)
+                      _bookingDetailField(
+                          sheetContext,
+                          '预约时间',
+                          createdAt.length >= 16
+                              ? createdAt.substring(0, 16)
+                              : createdAt),
+                    _bookingDetailField(sheetContext, '预约编号', displayId,
+                        selectable: true),
                     if (ThereBookingClient.strings(detail['abilities'])
                         .contains('cancel')) ...[
                       const SizedBox(height: 6),
@@ -2220,7 +2525,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                           child: OutlinedButton.icon(
                             onPressed: () {
                               Navigator.pop(sheetContext);
-                              unawaited(_cancelBooking(id));
+                              unawaited(_cancelBooking(id, venue: venue));
                             },
                             icon: const Icon(Icons.event_busy_outlined),
                             label: const Text('取消预约'),
@@ -2234,7 +2539,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                           child: OutlinedButton.icon(
                             onPressed: () {
                               Navigator.pop(sheetContext);
-                              unawaited(_finishBooking(id));
+                              unawaited(_finishBooking(id, venue: venue));
                             },
                             icon: const Icon(Icons.stop_circle_outlined),
                             label: const Text('提前结束'),
@@ -2252,7 +2557,8 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     }
   }
 
-  Widget _bookingDetailField(BuildContext context, String label, String value) {
+  Widget _bookingDetailField(BuildContext context, String label, String value,
+      {bool selectable = false}) {
     if (value.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
@@ -2264,12 +2570,12 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                     .textTheme
                     .bodySmall
                     ?.copyWith(color: context.shuyoColors.textSecondary))),
-        Expanded(child: Text(value)),
+        Expanded(child: selectable ? SelectableText(value) : Text(value)),
       ]),
     );
   }
 
-  Future<void> _cancelBooking(String id) async {
+  Future<void> _cancelBooking(String id, {required BookingVenue venue}) async {
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
@@ -2289,10 +2595,14 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         ) ??
         false;
     if (!confirmed || !mounted) return;
+    if (_bookingsLoading) await _bookingsLoadFinished;
+    if (!mounted) return;
     setState(() => _busy = true);
     var cancelled = false;
     var uncertain = false;
     try {
+      await _read(() => _selectBookingVenue(venue, refresh: true),
+          venue: venue, client: _clientForVenue(venue));
       await _client.cancel(id);
       cancelled = true;
     } on ThereBookingException catch (error) {
@@ -2333,7 +2643,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     }
   }
 
-  Future<void> _finishBooking(String id) async {
+  Future<void> _finishBooking(String id, {required BookingVenue venue}) async {
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
@@ -2353,9 +2663,13 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         ) ??
         false;
     if (!confirmed || !mounted) return;
+    if (_bookingsLoading) await _bookingsLoadFinished;
+    if (!mounted) return;
     setState(() => _busy = true);
     var finished = false;
     try {
+      await _read(() => _selectBookingVenue(venue, refresh: true),
+          venue: venue, client: _clientForVenue(venue));
       await _client.finish(id);
       finished = true;
     } on ThereBookingException catch (error) {
@@ -2453,7 +2767,146 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
 
   void _showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(behavior: SnackBarBehavior.fixed, content: Text(message)),
+    );
+  }
+}
+
+class _BookingListTile extends StatefulWidget {
+  const _BookingListTile({
+    super.key,
+    required this.index,
+    required this.item,
+    required this.venueName,
+    required this.status,
+    required this.beginTime,
+    required this.endTime,
+    required this.onTap,
+  });
+
+  final int index;
+  final Map<String, dynamic> item;
+  final String venueName;
+  final String status;
+  final String beginTime;
+  final String endTime;
+  final VoidCallback? onTap;
+
+  @override
+  State<_BookingListTile> createState() => _BookingListTileState();
+}
+
+class _BookingListTileState extends State<_BookingListTile>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _entrance;
+  Timer? _entranceTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _entrance = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    );
+    _entranceTimer = Timer(
+      Duration(milliseconds: (widget.index % 6) * 55),
+      () {
+        if (mounted) _entrance.forward();
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _entranceTimer?.cancel();
+    _entrance.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.shuyoColors;
+    final item = widget.item;
+    final highlightedStatus = widget.status == '待履约' || widget.status == '进行中';
+    return SlideTransition(
+      position: Tween<Offset>(
+        begin: const Offset(0.12, 0),
+        end: Offset.zero,
+      ).animate(CurvedAnimation(parent: _entrance, curve: Curves.easeOutCubic)),
+      child: FadeTransition(
+        opacity: _entrance,
+        child: InkWell(
+          onTap: widget.onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${ThereBookingClient.string(item['roomName']) ?? '座位'} · '
+                        '${ThereBookingClient.string(item['officeAreaName']) ?? widget.venueName}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 7),
+                      Text(widget.venueName,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: colors.textTertiary)),
+                      const SizedBox(height: 8),
+                      Text('${widget.beginTime} — ${widget.endTime}',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: colors.textMuted)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: widget.onTap == null ? 64 : 88,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          widget.status,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                color: highlightedStatus
+                                    ? colors.accent
+                                    : colors.textSecondary,
+                                fontWeight:
+                                    highlightedStatus ? FontWeight.w600 : null,
+                              ),
+                        ),
+                      ),
+                      if (widget.onTap != null) ...[
+                        const SizedBox(width: 2),
+                        Icon(Icons.chevron_right,
+                            color: highlightedStatus
+                                ? colors.accent
+                                : colors.textMuted),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

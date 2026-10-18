@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart' show CupertinoPicker;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -17,14 +19,26 @@ class _BookingClient extends ThereBookingClient {
       : super(cookieLoader: (_) async => [], cookieSetter: (_) async {});
 
   final selectedVenues = <BookingVenue>[];
+  final refreshedVenues = <BookingVenue>[];
   int areaListCalls = 0;
   int detailAreaCalls = 0;
+  int bookingDetailCalls = 0;
   bool created = false;
   bool cancelled = false;
+  BookingVenue? cancellationVenue;
+  String? submittedDay;
+  String? submittedStart;
+  String? submittedEnd;
 
   @override
   Future<void> selectVenue(BookingVenue venue) async {
     selectedVenues.add(venue);
+  }
+
+  @override
+  Future<void> refreshVenue(BookingVenue venue) async {
+    refreshedVenues.add(venue);
+    await super.refreshVenue(venue);
   }
 
   @override
@@ -122,23 +136,30 @@ class _BookingClient extends ThereBookingClient {
     required String start,
     required String end,
   }) async {
+    submittedDay = day;
+    submittedStart = start;
+    submittedEnd = end;
     created = true;
     return 'BOOKING_1';
   }
 
   @override
-  Future<Map<String, dynamic>> detail(String bookingId) async => {
-        'id': bookingId,
-        'roomName': '2E015',
-        'allOfficeAreaName': '校本部图书馆-二楼东侧',
-        'beginTime': '2026-10-03 08:30:00',
-        'endTime': '2026-10-03 09:30:00',
-        'statusLabel': cancelled ? '已取消' : '已预约',
-        'abilities': cancelled ? <String>[] : ['cancel'],
-      };
+  Future<Map<String, dynamic>> detail(String bookingId) async {
+    bookingDetailCalls++;
+    return {
+      'id': bookingId,
+      'roomName': '2E015',
+      'allOfficeAreaName': '校本部图书馆-二楼东侧',
+      'beginTime': '2026-10-03 08:30:00',
+      'endTime': '2026-10-03 09:30:00',
+      'statusLabel': cancelled ? '已取消' : '已预约',
+      'abilities': cancelled ? <String>[] : ['cancel'],
+    };
+  }
 
   @override
   Future<void> cancel(String bookingId) async {
+    cancellationVenue = selectedVenues.last;
     cancelled = true;
   }
 }
@@ -150,6 +171,77 @@ class _UnreachableBookingClient extends _BookingClient {
         ThereFailureKind.unreachable,
         '暂时无法访问预约系统。请连接校园网、学校VPN，或开启WebVPN后重试。',
       );
+}
+
+class _GatedAreaListClient extends _BookingClient {
+  final gate = Completer<void>();
+  int started = 0;
+
+  @override
+  Future<List<Map<String, dynamic>>> areas(String day) async {
+    started++;
+    await gate.future;
+    return super.areas(day);
+  }
+}
+
+class _GatedVenueSelectionClient extends _BookingClient {
+  final gate = Completer<void>();
+  final selectionCalls = <BookingVenue, int>{};
+
+  @override
+  Future<void> selectVenue(BookingVenue venue) async {
+    selectionCalls.update(venue, (count) => count + 1, ifAbsent: () => 1);
+    await gate.future;
+    await super.selectVenue(venue);
+  }
+}
+
+class _VenueScopedBookingClient extends _BookingClient {
+  _VenueScopedBookingClient(this.expectedVenue);
+
+  final BookingVenue expectedVenue;
+
+  @override
+  Future<void> selectVenue(BookingVenue venue) async {
+    if (venue != expectedVenue) {
+      throw StateError('Another venue took over this client');
+    }
+    await super.selectVenue(venue);
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> areas(String day) async {
+    areaListCalls++;
+    return [
+      {
+        'id': expectedVenue.roomType,
+        'name': '${expectedVenue.label}分区',
+        'supportRoomTypes': [expectedVenue.roomType],
+        'totalResourceCount': 12,
+        'disabledResourceCount': 2,
+        'bookingTimes': {'startHour': 8, 'endHour': 22},
+      },
+    ];
+  }
+}
+
+class _EmptyThereAreaClient extends _BookingClient {
+  @override
+  Future<List<Map<String, dynamic>>> areas(String day) async => [];
+}
+
+class _EmptyOnceThereAreaClient extends _VenueScopedBookingClient {
+  _EmptyOnceThereAreaClient(super.expectedVenue);
+
+  @override
+  Future<List<Map<String, dynamic>>> areas(String day) async {
+    if (areaListCalls == 0) {
+      areaListCalls++;
+      return [];
+    }
+    return super.areas(day);
+  }
 }
 
 class _GatewayRecoveryClient extends _BookingClient {
@@ -184,7 +276,8 @@ class _HistoryClient extends _BookingClient {
         'officeAreaName': 'B',
         'beginTime': '$day 08:30:00',
         'endTime': '$day 09:30:00',
-        'status': cancelled ? 'CANCEL' : 'NORMAL',
+        'createdAt': '2026-10-18 20:15:42',
+        'status': cancelled ? 'CANCEL' : 'OPEN',
         'statusLabel': cancelled ? '已取消' : '正常',
       },
       {
@@ -194,6 +287,7 @@ class _HistoryClient extends _BookingClient {
         'officeAreaName': 'A',
         'beginTime': '2026-01-01 08:30:00',
         'endTime': '2026-01-01 08:30:00',
+        'createdAt': '2025-12-31 21:05:00',
         'origEndAt': '2026-01-01 09:30:00',
         'duration': 0,
         'status': 'CANCEL',
@@ -201,6 +295,60 @@ class _HistoryClient extends _BookingClient {
       },
     ];
   }
+}
+
+class _CloseOnlyClient extends _HistoryClient {
+  @override
+  Future<List<Map<String, dynamic>>> recent() async {
+    final upcoming = (await super.recent()).first;
+    return [
+      {...upcoming, 'id': 'CLOSE_ONLY', 'roomName': 'C-007'},
+    ];
+  }
+
+  @override
+  Future<Map<String, dynamic>> detail(String bookingId) async {
+    final item = await super.detail(bookingId);
+    return {
+      ...item,
+      'abilities': ['close']
+    };
+  }
+}
+
+class _GatedDetailHistoryClient extends _HistoryClient {
+  final detailGate = Completer<void>();
+
+  @override
+  Future<List<Map<String, dynamic>>> recent() async =>
+      (await super.recent()).reversed.toList();
+
+  @override
+  Future<Map<String, dynamic>> detail(String bookingId) async {
+    await detailGate.future;
+    return super.detail(bookingId);
+  }
+}
+
+class _RecentCancelableDetailFailureClient extends _HistoryClient {
+  @override
+  Future<List<Map<String, dynamic>>> recent() async => [
+        for (final item in await super.recent())
+          if (item['id'] == 'UPCOMING')
+            {
+              ...item,
+              'abilities': ['cancel']
+            }
+          else
+            item,
+      ];
+
+  @override
+  Future<Map<String, dynamic>> detail(String bookingId) async =>
+      throw const ThereBookingException(
+        ThereFailureKind.unreachable,
+        '预约详情暂时不可用',
+      );
 }
 
 class _ManyDaysClient extends _BookingClient {
@@ -220,6 +368,16 @@ class _ManyDaysClient extends _BookingClient {
       ],
     };
   }
+}
+
+class _TomorrowBookingClient extends _BookingClient {
+  @override
+  Future<Map<String, dynamic>> overview(String day) async => {
+        'bookingDays': [
+          {'day': day},
+          {'day': '2026-10-19'},
+        ],
+      };
 }
 
 class _NoMinimumClient extends _BookingClient {
@@ -260,12 +418,112 @@ class _LibraryBranchClient extends ChaoxingBookingClient {
   }
 }
 
+class _EmptyChaoxingBookingClient extends _LibraryBranchClient {
+  int homeCalls = 0;
+
+  @override
+  Future<Map<String, dynamic>> home() async {
+    homeCalls++;
+    return {
+      'curReserves': <Map<String, dynamic>>[],
+      'nearReserves': <Map<String, dynamic>>[],
+    };
+  }
+}
+
+class _BookedChaoxingBookingClient extends _EmptyChaoxingBookingClient {
+  @override
+  Future<Map<String, dynamic>> home() async {
+    homeCalls++;
+    return {
+      'curReserves': [
+        for (final (index, hall) in [
+          '钱伟长图书馆',
+          '嘉定联合馆',
+          '延长文荟馆',
+        ].indexed)
+          {
+            'id': '${index + 1}',
+            'secondLevelName': hall,
+            'thirdLevelName': '阅览室',
+            'seatNum': 'CX-${index + 1}',
+            'status': '0',
+          },
+      ],
+      'nearReserves': <Map<String, dynamic>>[],
+    };
+  }
+}
+
+class _UnavailableChaoxingBookingClient extends _EmptyChaoxingBookingClient {
+  @override
+  Future<Map<String, dynamic>> home() async {
+    homeCalls++;
+    throw const ChaoxingBookingException(
+        ChaoxingFailureKind.unreachable, '图书馆座位系统暂时无法访问');
+  }
+}
+
+class _GatedBookingClient extends _BookingClient {
+  final gate = Completer<void>();
+  bool recentStarted = false;
+
+  @override
+  Future<List<Map<String, dynamic>>> recent() async {
+    recentStarted = true;
+    await gate.future;
+    final day = ThereBookingClient.schoolDay();
+    return [
+      {
+        'id': 'LIB-LATE',
+        'roomType': BookingVenue.library.roomType,
+        'roomName': 'LIB-LATE',
+        'beginTime': '$day 16:00:00',
+        'endTime': '$day 17:00:00',
+      },
+    ];
+  }
+}
+
+class _GatedChaoxingBookingClient extends _EmptyChaoxingBookingClient {
+  final gate = Completer<void>();
+  bool homeStarted = false;
+
+  @override
+  Future<Map<String, dynamic>> home() async {
+    homeStarted = true;
+    await gate.future;
+    final day = DateTime.parse(ThereBookingClient.schoolDay());
+    return {
+      'curReserves': [
+        {
+          'id': '1',
+          'secondLevelName': '钱伟长图书馆',
+          'thirdLevelName': '阅览室',
+          'seatNum': 'CX-EARLY',
+          'status': '0',
+          'startTime': DateTime.utc(day.year, day.month, day.day, 1)
+              .millisecondsSinceEpoch,
+          'endTime': DateTime.utc(day.year, day.month, day.day, 2)
+              .millisecondsSinceEpoch,
+        },
+      ],
+      'nearReserves': <Map<String, dynamic>>[],
+    };
+  }
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   Future<void> showBottomAction(WidgetTester tester, Finder target) async {
-    await tester.scrollUntilVisible(target, 180);
-    await tester.drag(find.byType(Scrollable).first, const Offset(0, -100));
+    await tester.scrollUntilVisible(target, 180,
+        scrollable: find
+            .descendant(
+                of: find.byType(ListView).first,
+                matching: find.byType(Scrollable))
+            .first);
+    await tester.drag(find.byType(ListView).first, const Offset(0, -100));
     await tester.pumpAndSettle();
   }
 
@@ -291,7 +549,7 @@ void main() {
       ),
       home: LibraryBookingPage(
         accountService: UnifiedAccountService(),
-        client: client,
+        thereClientFactory: (_) => client,
         schoolClock: () {
           final day = DateTime.parse(ThereBookingClient.schoolDay());
           return DateTime.utc(day.year, day.month, day.day, 8);
@@ -300,9 +558,11 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(find.byType(ShuYoRouteSurface), findsOneWidget);
+    expect(find.text('图书馆预约'), findsOneWidget);
 
-    await showBottomAction(tester, find.text('仅查看座位情况'));
-    await tester.tap(find.text('仅查看座位情况'));
+    await showBottomAction(
+        tester, find.widgetWithText(OutlinedButton, '仅查看座位情况'));
+    await tester.tap(find.widgetWithText(OutlinedButton, '仅查看座位情况').last);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 120));
     expect(find.byType(ShuYoRouteSurface), findsNWidgets(2));
@@ -330,7 +590,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       home: LibraryBookingPage(
         accountService: UnifiedAccountService(),
-        client: there,
+        thereClientFactory: (_) => there,
         chaoxingClient: library,
         useWebVpn: true,
         schoolClock: () => DateTime.utc(day.year, day.month, day.day, 8),
@@ -343,18 +603,26 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
+    expect(find.text('图书馆预约'), findsOneWidget);
+    final previousThereAttempts = there.selectionAttempts;
+    final previousLibraryRoomCalls = library.roomsCalls;
     await tester.scrollUntilVisible(
-      find.text(BookingVenue.qianweichang.label),
+      find.widgetWithText(ListTile, BookingVenue.qianweichang.label),
       180,
+      scrollable: find
+          .descendant(
+              of: find.byType(ListView).first,
+              matching: find.byType(Scrollable))
+          .first,
     );
-    await tester.ensureVisible(find.text(BookingVenue.qianweichang.label));
+    await tester.ensureVisible(find.text(BookingVenue.qianweichang.label).last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text(BookingVenue.qianweichang.label));
+    await tester.tap(find.text(BookingVenue.qianweichang.label).last);
     await tester.pumpAndSettle();
 
     expect(find.text('四楼阅览室'), findsOneWidget);
-    expect(library.roomsCalls, 1);
-    expect(there.selectionAttempts, 0);
+    expect(library.roomsCalls, previousLibraryRoomCalls);
+    expect(there.selectionAttempts, previousThereAttempts);
     expect(there.areaListCalls, 0);
     expect(webVpnRecoveries, 0);
   });
@@ -412,11 +680,14 @@ void main() {
       AcademicAccountStore.studentIdKey: 'STUDENT_1',
     });
     final client = _BookingClient();
+    final library = _EmptyChaoxingBookingClient();
     addTearDown(client.dispose);
+    addTearDown(library.dispose);
     await tester.pumpWidget(MaterialApp(
       home: LibraryBookingPage(
         accountService: UnifiedAccountService(),
-        client: client,
+        thereClientFactory: (_) => client,
+        chaoxingClient: library,
         schoolClock: schoolMorning,
       ),
     ));
@@ -448,10 +719,14 @@ void main() {
     await tester.tap(find.text('宝山校区'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('我的预约'), 180);
-    expect(tester.getTopLeft(find.text('仅查看座位情况')).dy,
-        lessThan(tester.getTopLeft(find.text('我的预约')).dy));
-    expect(find.text('暂无本地记录'), findsOneWidget);
+    expect(tester.getTopLeft(find.text('我的预约')).dy,
+        lessThan(tester.getTopLeft(find.text('选择场馆')).dy));
+    expect(find.text('暂无待履约或进行中的预约'), findsOneWidget);
     await tester.tap(find.text('我的预约'));
+    await tester.pumpAndSettle();
+    expect(find.text('选择场馆'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
+    await tester.tap(find.text('查看历史预约'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('返回上一步'));
     await tester.pumpAndSettle();
@@ -512,46 +787,229 @@ void main() {
     expect(client.created, isTrue);
     expect(client.selectedVenues.last, BookingVenue.library);
     expect(find.text('取消预约'), findsOneWidget);
+    expect(find.text('预约编号'), findsOneWidget);
+    expect(find.text('there:BOOKING_1'), findsOneWidget);
+    expect(find.text('座位'), findsNothing);
+    final createdDetailSheet =
+        tester.widget<BottomSheet>(find.byType(BottomSheet));
+    expect(createdDetailSheet.backgroundColor,
+        ShuYoThemes.byId(ShuYoThemes.defaultId).colors.surface);
+    expect(createdDetailSheet.clipBehavior, Clip.antiAlias);
+    expect((createdDetailSheet.shape as RoundedRectangleBorder).borderRadius,
+        const BorderRadius.vertical(top: Radius.circular(20)));
     await tester.tap(find.text('取消预约'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('确认'));
     await tester.pumpAndSettle();
     expect(client.cancelled, isTrue);
-    for (var step = 0; step < 4; step++) {
+    for (var step = 0; step < 3; step++) {
       await tester.tap(find.byTooltip('返回上一步'));
       await tester.pumpAndSettle();
     }
-    await tester.scrollUntilVisible(find.textContaining('2E015'), 180);
     expect(find.text('暂无本地记录'), findsNothing);
-    expect(find.textContaining('2E015'), findsOneWidget);
+    expect(find.textContaining('2E015'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpWidget(MaterialApp(
         home: LibraryBookingPage(
       accountService: UnifiedAccountService(),
-      client: client,
+      thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.textContaining('2E015'), 180);
-    expect(find.textContaining('2E015'), findsOneWidget);
+    expect(find.textContaining('2E015'), findsNothing);
   });
 
-  testWidgets('unreachable campus service suggests campus network',
+  testWidgets('venues load areas concurrently and expand in place',
       (tester) async {
-    final client = _UnreachableBookingClient();
-    addTearDown(client.dispose);
+    final client = _GatedAreaListClient();
+    final library = _EmptyChaoxingBookingClient();
+    addTearDown(() {
+      if (!client.gate.isCompleted) client.gate.complete();
+      client.dispose();
+      library.dispose();
+    });
+    await tester.pumpWidget(MaterialApp(
+        home: LibraryBookingPage(
+      accountService: UnifiedAccountService(),
+      thereClientFactory: (_) => client,
+      chaoxingClient: library,
+      schoolClock: schoolMorning,
+    )));
+    for (var attempt = 0; attempt < 5 && client.started < 4; attempt++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(client.started, 4);
+    final venue = find.byKey(const ValueKey('home-venue-library'));
+    expect(
+        find.ancestor(
+          of: venue,
+          matching: find.byWidgetPredicate((widget) =>
+              widget is Material && widget.shape is RoundedRectangleBorder),
+        ),
+        findsNothing);
+    expect(
+        find.descendant(
+            of: venue, matching: find.byType(CircularProgressIndicator)),
+        findsOneWidget);
+    await tester.tap(venue);
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(
+        find.descendant(
+            of: venue, matching: find.byType(CircularProgressIndicator)),
+        findsOneWidget);
+
+    client.gate.complete();
+    await tester.pumpAndSettle();
+    expect(library.roomsCalls, 1);
+    expect(
+        find.descendant(
+            of: venue, matching: find.byIcon(Icons.keyboard_arrow_up)),
+        findsOneWidget);
+    expect(find.text('校本部图书馆自修区 - 二楼东侧'), findsOneWidget);
+    expect(find.text('开放时间：08:00–22:00'), findsOneWidget);
+    expect(find.textContaining('开放座位数 9'), findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.byKey(const ValueKey('home-venue-studySpace')),
+            matching: find.byIcon(Icons.keyboard_arrow_down)),
+        findsOneWidget);
+    await tester.tap(venue);
+    await tester.pumpAndSettle();
+    expect(
+        find.descendant(
+            of: venue, matching: find.byIcon(Icons.keyboard_arrow_down)),
+        findsOneWidget);
+    expect(find.text('校本部图书馆自修区 - 二楼东侧'), findsNothing);
+  });
+
+  testWidgets('area and booking preloads share each venue entry request',
+      (tester) async {
+    final client = _GatedVenueSelectionClient();
+    final library = _EmptyChaoxingBookingClient();
+    addTearDown(() {
+      if (!client.gate.isCompleted) client.gate.complete();
+      client.dispose();
+      library.dispose();
+    });
     await tester.pumpWidget(MaterialApp(
       home: LibraryBookingPage(
         accountService: UnifiedAccountService(),
-        client: client,
+        thereClientFactory: (_) => client,
+        chaoxingClient: library,
+        schoolClock: schoolMorning,
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 20));
+    for (final venue in BookingVenue.values.where((item) => !item.isChaoxing)) {
+      expect(client.selectionCalls[venue], 1);
+    }
+    client.gate.complete();
+    await tester.pumpAndSettle();
+    expect(client.areaListCalls, 4);
+  });
+
+  testWidgets('parallel There areas retain their own venue sessions',
+      (tester) async {
+    final clients = <BookingVenue, _VenueScopedBookingClient>{};
+    final library = _EmptyChaoxingBookingClient();
+    addTearDown(() {
+      for (final client in clients.values) {
+        client.dispose();
+      }
+      library.dispose();
+    });
+    await tester.pumpWidget(MaterialApp(
+      home: LibraryBookingPage(
+        accountService: UnifiedAccountService(),
+        thereClientFactory: (venue) =>
+            clients.putIfAbsent(venue, () => _VenueScopedBookingClient(venue)),
+        chaoxingClient: library,
+        schoolClock: schoolMorning,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    for (final venue in BookingVenue.values.where((item) => !item.isChaoxing)) {
+      expect(clients[venue]?.areaListCalls, 1);
+      expect(clients[venue]?.selectedVenues.toSet(), {venue});
+    }
+    await tester.tap(find.text(BookingVenue.library.label));
+    await tester.pumpAndSettle();
+    expect(find.text('校本部图书馆分区'), findsOneWidget);
+    await tester.tap(find.text('延长校区'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(BookingVenue.scienceArt.label));
+    await tester.pumpAndSettle();
+    expect(find.text('科学与艺术中心分区'), findsOneWidget);
+  });
+
+  testWidgets('empty There response offers retry instead of claiming no areas',
+      (tester) async {
+    final client = _EmptyThereAreaClient();
+    final library = _EmptyChaoxingBookingClient();
+    addTearDown(client.dispose);
+    addTearDown(library.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: LibraryBookingPage(
+        accountService: UnifiedAccountService(),
+        thereClientFactory: (_) => client,
+        chaoxingClient: library,
         schoolClock: schoolMorning,
       ),
     ));
     await tester.pumpAndSettle();
     await tester.tap(find.text(BookingVenue.library.label));
     await tester.pumpAndSettle();
-    expect(find.textContaining('请连接校园网、学校VPN，或开启WebVPN后重试'), findsOneWidget);
-    expect(find.text('重试'), findsOneWidget);
+    expect(find.text('分区暂时无法加载，重试'), findsOneWidget);
+    expect(find.text('当前场馆没有可选分区'), findsNothing);
+  });
+
+  testWidgets('opening a venue retries after an empty response',
+      (tester) async {
+    final clients = <BookingVenue, _VenueScopedBookingClient>{};
+    final library = _EmptyChaoxingBookingClient();
+    addTearDown(() {
+      for (final client in clients.values) {
+        client.dispose();
+      }
+      library.dispose();
+    });
+    await tester.pumpWidget(MaterialApp(
+      home: LibraryBookingPage(
+        accountService: UnifiedAccountService(),
+        thereClientFactory: (venue) => clients.putIfAbsent(
+          venue,
+          () => venue == BookingVenue.library
+              ? _EmptyOnceThereAreaClient(venue)
+              : _VenueScopedBookingClient(venue),
+        ),
+        chaoxingClient: library,
+        schoolClock: schoolMorning,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(BookingVenue.library.label));
+    await tester.pumpAndSettle();
+    expect(find.text('校本部图书馆分区'), findsOneWidget);
+    expect(clients[BookingVenue.library]?.refreshedVenues,
+        contains(BookingVenue.library));
+  });
+
+  testWidgets('unreachable campus service offers an inline retry',
+      (tester) async {
+    final client = _UnreachableBookingClient();
+    addTearDown(client.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: LibraryBookingPage(
+        accountService: UnifiedAccountService(),
+        thereClientFactory: (_) => client,
+        schoolClock: schoolMorning,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(BookingVenue.library.label));
+    await tester.pumpAndSettle();
+    expect(find.text('分区暂时无法加载，重试'), findsOneWidget);
+    expect(find.byIcon(Icons.keyboard_arrow_up), findsOneWidget);
   });
 
   testWidgets('proxy page restores gateway before reading bookings',
@@ -562,7 +1020,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       home: LibraryBookingPage(
         accountService: UnifiedAccountService(),
-        client: client,
+        thereClientFactory: (_) => client,
         schoolClock: schoolMorning,
         useWebVpn: true,
         onWebVpnSessionRequired: () async {
@@ -576,7 +1034,8 @@ void main() {
     await tester.tap(find.text(BookingVenue.library.label));
     await tester.pumpAndSettle();
     expect(recoveries, 1);
-    expect(find.text('选择分区'), findsOneWidget);
+    expect(find.text('校本部图书馆自修区 - 二楼东侧'), findsOneWidget);
+    expect(find.text('选择分区'), findsNothing);
   });
 
   testWidgets('view-only seats return to venue selection', (tester) async {
@@ -585,15 +1044,16 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: LibraryBookingPage(
       accountService: UnifiedAccountService(),
-      client: client,
+      thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
     await tester.pumpAndSettle();
+    final previousAreaListCalls = client.areaListCalls;
     await showBottomAction(tester, find.text('仅查看座位情况'));
     await tester.tap(find.text('仅查看座位情况'));
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.visibility_outlined), findsNothing);
-    expect(client.areaListCalls, 0);
+    expect(client.areaListCalls, previousAreaListCalls);
     await tester.tap(find.byKey(const ValueKey('view-library')));
     await tester.tap(find.text('延长校区'));
     await tester.pumpAndSettle();
@@ -613,7 +1073,7 @@ void main() {
         lessThan(tester.getTopLeft(find.text('下一步')).dy));
     await tester.tap(find.text('下一步'));
     await tester.pumpAndSettle();
-    expect(client.areaListCalls, 2);
+    expect(client.areaListCalls, previousAreaListCalls + 2);
     expect(client.detailAreaCalls, 0);
     expect(find.byTooltip('我的预约'), findsNothing);
     expect(find.textContaining('开放座位数 9'), findsAtLeastNWidgets(1));
@@ -644,11 +1104,13 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: LibraryBookingPage(
       accountService: UnifiedAccountService(),
-      client: client,
+      thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
     await tester.pumpAndSettle();
     await tester.tap(find.text(BookingVenue.library.label));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('校本部图书馆自修区 - 二楼东侧'));
     await tester.pump(const Duration(milliseconds: 50));
     final enteringArea = tester.getTopLeft(find.byType(Scaffold).last).dx;
     expect(enteringArea, greaterThan(0));
@@ -668,7 +1130,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: LibraryBookingPage(
       accountService: UnifiedAccountService(),
-      client: client,
+      thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
     await tester.pumpAndSettle();
@@ -697,6 +1159,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('座位分布'), findsOneWidget);
     expect(find.text('常见问题'), findsOneWidget);
+    expect(
+        tester.getTopLeft(find.text('座位分布')).dy,
+        greaterThan(
+            tester.getTopLeft(find.text(BookingVenue.studySpace.label)).dy));
     expect(find.byIcon(Icons.map_outlined), findsOneWidget);
     expect(tester.widget<Text>(find.text('座位分布')).style?.fontSize,
         rulesText.style?.fontSize);
@@ -766,7 +1232,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: LibraryBookingPage(
       accountService: UnifiedAccountService(),
-      client: client,
+      thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
     await tester.pumpAndSettle();
@@ -798,7 +1264,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: LibraryBookingPage(
       accountService: UnifiedAccountService(),
-      client: client,
+      thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
     await tester.tap(find.text(BookingVenue.library.label));
@@ -824,7 +1290,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: LibraryBookingPage(
       accountService: UnifiedAccountService(),
-      client: client,
+      thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
     await tester.tap(find.text(BookingVenue.library.label));
@@ -867,6 +1333,43 @@ void main() {
     expect(boxValue(tester, 'end-minute'), '30');
   });
 
+  testWidgets('October 18 selection submits October 19 library booking',
+      (tester) async {
+    final client = _TomorrowBookingClient();
+    final library = _EmptyChaoxingBookingClient();
+    addTearDown(client.dispose);
+    addTearDown(library.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: LibraryBookingPage(
+        accountService: UnifiedAccountService(),
+        thereClientFactory: (_) => client,
+        chaoxingClient: library,
+        schoolClock: () => DateTime.utc(2026, 10, 18, 21, 18),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(BookingVenue.library.label));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('校本部图书馆自修区 - 二楼东侧'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('10月19日'));
+    await tester.pumpAndSettle();
+    await pickTime(tester, 'start-hour', '20', '30');
+    await pickTime(tester, 'end-hour', '22', '00');
+    await tester.tap(find.text('下一步'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('2E015'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('确认预约'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('提交'));
+    await tester.pumpAndSettle();
+    expect(client.submittedDay, '2026-10-19');
+    expect(client.submittedStart, '20:30');
+    expect(client.submittedEnd, '22:00');
+    expect(client.refreshedVenues, contains(BookingVenue.library));
+  });
+
   testWidgets('missing minimum uses the smallest selectable step',
       (tester) async {
     final client = _NoMinimumClient();
@@ -874,7 +1377,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: LibraryBookingPage(
       accountService: UnifiedAccountService(),
-      client: client,
+      thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
     await tester.tap(find.text(BookingVenue.library.label));
@@ -898,7 +1401,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: LibraryBookingPage(
       accountService: UnifiedAccountService(),
-      client: client,
+      thereClientFactory: (_) => client,
       schoolClock: () => DateTime.utc(day.year, day.month, day.day, 21, 46),
     )));
     await tester.tap(find.text(BookingVenue.library.label));
@@ -922,7 +1425,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: LibraryBookingPage(
       accountService: UnifiedAccountService(),
-      client: client,
+      thereClientFactory: (_) => client,
       schoolClock: () => DateTime.utc(day.year, day.month, day.day, 8, 7),
     )));
     await tester.tap(find.text(BookingVenue.library.label));
@@ -946,7 +1449,7 @@ void main() {
       theme: spec.themeData(),
       home: LibraryBookingPage(
         accountService: UnifiedAccountService(),
-        client: client,
+        thereClientFactory: (_) => client,
         schoolClock: schoolMorning,
       ),
     ));
@@ -1016,72 +1519,222 @@ void main() {
     expect(previousSelected.style?.fontWeight, FontWeight.w400);
   });
 
-  testWidgets('booking venue choices persist and limit queries',
+  testWidgets('my bookings directly loads every venue and returns in one step',
       (tester) async {
     final client = _BookingClient();
+    final library = _BookedChaoxingBookingClient();
     addTearDown(client.dispose);
+    addTearDown(library.dispose);
+    SharedPreferences.setMockInitialValues({
+      'library_booking_selected_venues': [BookingVenue.studySpace.roomType],
+    });
     Widget page() => MaterialApp(
             home: LibraryBookingPage(
           accountService: UnifiedAccountService(),
-          client: client,
+          thereClientFactory: (_) => client,
+          chaoxingClient: library,
           schoolClock: schoolMorning,
         ));
     await tester.pumpWidget(page());
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('我的预约'), 180);
-    await tester.tap(find.text('我的预约'));
+    await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
+    await tester.tap(find.text('查看历史预约'));
     await tester.pumpAndSettle();
-    final next = find.text('下一步');
+    expect(find.text('选择要查看预约的场馆'), findsNothing);
+    for (final (index, venue) in [
+      BookingVenue.qianweichang,
+      BookingVenue.jiading,
+      BookingVenue.wenhui,
+    ].indexed) {
+      expect(
+          find.byKey(ValueKey<String>('0:cx:${venue.roomType}:${index + 1}')),
+          findsOneWidget);
+    }
+    expect(find.textContaining('CX-1'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey<String>('0:cx:CX_QWC:1')));
+    await tester.pumpAndSettle();
+    expect(find.text('预约编号'), findsOneWidget);
+    expect(find.text('cx:1'), findsOneWidget);
+    expect(find.textContaining('cx:CX_QWC:'), findsNothing);
+    await tester.tapAt(const Offset(20, 20));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.chevron_right), findsNWidgets(3));
+    expect(find.byType(TabBar), findsOneWidget);
+    expect(tester.widget<TabBar>(find.byType(TabBar)).isScrollable, isFalse);
     expect(
-        tester
-            .widget<FilledButton>(find.widgetWithText(FilledButton, '下一步'))
-            .onPressed,
-        isNull);
-    await tester.tap(find.byKey(const ValueKey('booking-studySpace')));
+        find.ancestor(of: find.byType(TabBar), matching: find.byType(ListView)),
+        findsNothing);
+    expect(client.selectedVenues.toSet(),
+        BookingVenue.values.where((venue) => !venue.isChaoxing).toSet());
+    expect(library.homeCalls, greaterThan(0));
+    await tester.tap(find.byTooltip('返回上一步'));
     await tester.pumpAndSettle();
-    await showBottomAction(tester, next);
-    await tester.tap(next);
+    expect(find.text('图书馆预约'), findsOneWidget);
+  });
+
+  testWidgets('available bookings remain visible when one service fails',
+      (tester) async {
+    final client = _HistoryClient();
+    final library = _UnavailableChaoxingBookingClient();
+    addTearDown(client.dispose);
+    addTearDown(library.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: LibraryBookingPage(
+      accountService: UnifiedAccountService(),
+      thereClientFactory: (_) => client,
+      chaoxingClient: library,
+      schoolClock: schoolMorning,
+    )));
     await tester.pumpAndSettle();
-    expect(client.selectedVenues.toSet(), {BookingVenue.studySpace});
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pumpWidget(page());
+    await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
+    await tester.tap(find.text('查看历史预约'));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('我的预约'), 180);
-    await tester.tap(find.text('我的预约'));
+    expect(find.byKey(const ValueKey<String>('0:UPCOMING')), findsOneWidget);
+    expect(find.textContaining('B-034'), findsOneWidget);
+    final notice = tester.widget<SnackBar>(find.byType(SnackBar));
+    expect((notice.content as Text).data, '部分预约加载失败，请稍后刷新');
+    expect(notice.behavior, SnackBarBehavior.fixed);
+    expect(find.text('暂无可显示的预约记录'), findsNothing);
+    expect(library.homeCalls, 1);
+  });
+
+  testWidgets('all booking failures use the bottom notice', (tester) async {
+    final there = _UnreachableBookingClient();
+    final library = _UnavailableChaoxingBookingClient();
+    addTearDown(there.dispose);
+    addTearDown(library.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: LibraryBookingPage(
+      accountService: UnifiedAccountService(),
+      thereClientFactory: (_) => there,
+      chaoxingClient: library,
+      schoolClock: schoolMorning,
+    )));
     await tester.pumpAndSettle();
-    final selected = tester.widget<CheckboxListTile>(
-        find.byKey(const ValueKey('booking-studySpace')));
-    expect(selected.value, isTrue);
-    expect(
-        tester
-            .widget<CheckboxListTile>(
-                find.byKey(const ValueKey('booking-library')))
-            .value,
-        isFalse);
+    await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
+    await tester.tap(find.text('查看历史预约'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TabBar), findsOneWidget);
+    expect(find.text('暂无可显示的预约记录'), findsOneWidget);
+    final notice = tester.widget<SnackBar>(find.byType(SnackBar));
+    expect((notice.content as Text).data, '预约加载失败，请稍后刷新');
+    expect(notice.behavior, SnackBarBehavior.fixed);
+  });
+
+  testWidgets('booking systems load together and results stay time-ordered',
+      (tester) async {
+    final there = _GatedBookingClient();
+    final library = _GatedChaoxingBookingClient();
+    addTearDown(there.dispose);
+    addTearDown(library.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: LibraryBookingPage(
+      accountService: UnifiedAccountService(),
+      thereClientFactory: (_) => there,
+      chaoxingClient: library,
+      schoolClock: schoolMorning,
+    )));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
+    await tester.tap(find.text('查看历史预约'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(there.recentStarted, isTrue);
+    expect(library.homeStarted, isTrue);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.text('正在获取预约记录…'), findsNothing);
+
+    library.gate.complete();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const ValueKey<String>('0:cx:CX_QWC:1')), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('0:LIB-LATE')), findsNothing);
+    expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+    const earlyKey = ValueKey<String>('0:cx:CX_QWC:1');
+    final earlyTileState = tester.state(find.byKey(earlyKey));
+
+    there.gate.complete();
+    await tester.pumpAndSettle();
+    const lateKey = ValueKey<String>('0:LIB-LATE');
+    expect(find.byKey(lateKey), findsOneWidget);
+    expect(tester.getTopLeft(find.byKey(lateKey)).dy,
+        lessThan(tester.getTopLeft(find.byKey(earlyKey)).dy));
+    expect(tester.state(find.byKey(earlyKey)), same(earlyTileState));
+
+    await tester.tap(find.text('待履约').first);
+    await tester.pump();
+    const replayKey = ValueKey<String>('1:cx:CX_QWC:1');
+    expect(find.byKey(earlyKey), findsNothing);
+    expect(tester.state(find.byKey(replayKey)), isNot(same(earlyTileState)));
+    final replaySlide = tester.widget<SlideTransition>(find.descendant(
+      of: find.byKey(replayKey),
+      matching: find.byType(SlideTransition),
+    ));
+    expect(replaySlide.position.value, isNot(Offset.zero));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('booking tabs fit a narrow screen without scrolling',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final there = _BookingClient();
+    final library = _EmptyChaoxingBookingClient();
+    addTearDown(there.dispose);
+    addTearDown(library.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: LibraryBookingPage(
+      accountService: UnifiedAccountService(),
+      thereClientFactory: (_) => there,
+      chaoxingClient: library,
+      schoolClock: schoolMorning,
+    )));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
+    await tester.tap(find.text('查看历史预约'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(tester.widget<TabBar>(find.byType(TabBar)).isScrollable, isFalse);
+    expect(find.text('已取消'), findsOneWidget);
   });
 
   testWidgets('bookings filter future and early-finished records',
       (tester) async {
     final client = _HistoryClient();
+    final library = _EmptyChaoxingBookingClient();
     addTearDown(client.dispose);
+    addTearDown(library.dispose);
     await tester.pumpWidget(MaterialApp(
         home: LibraryBookingPage(
       accountService: UnifiedAccountService(),
-      client: client,
+      thereClientFactory: (_) => client,
+      chaoxingClient: library,
       schoolClock: schoolMorning,
     )));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('我的预约'), 180);
-    await tester.tap(find.text('我的预约'));
+    expect(
+        find.descendant(
+            of: find.byKey(const ValueKey<String>('home:UPCOMING')),
+            matching: find.textContaining('B-034')),
+        findsOneWidget);
+    await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
+    await tester.tap(find.text('查看历史预约'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('booking-studySpace')));
-    await tester.pumpAndSettle();
-    await showBottomAction(tester, find.text('下一步'));
-    await tester.tap(find.text('下一步'));
-    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey<String>('0:UPCOMING')), findsOneWidget);
     expect(find.textContaining('B-034'), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey<String>('0:FINISHED_EARLY')), findsOneWidget);
     expect(find.textContaining('A-001'), findsOneWidget);
-    expect(find.byIcon(Icons.chevron_right), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey<String>('0:UPCOMING')),
+        matching: find.text('待履约'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byIcon(Icons.chevron_right), findsNWidgets(2));
+    expect(find.byType(FadeTransition), findsWidgets);
     final nextDay = DateTime.parse(ThereBookingClient.schoolDay())
         .add(const Duration(days: 1));
     final day = '${nextDay.year}-${nextDay.month.toString().padLeft(2, '0')}-'
@@ -1090,28 +1743,147 @@ void main() {
     expect(find.textContaining('${day.substring(5)} 08:30'), findsOneWidget);
     await tester.tap(find.text('待履约').first);
     await tester.pumpAndSettle();
-    expect(find.textContaining('B-034'), findsOneWidget);
-    expect(find.textContaining('A-001'), findsNothing);
-    await tester.tap(find.textContaining('B-034'));
+    const upcomingKey = ValueKey<String>('1:UPCOMING');
+    expect(find.byKey(upcomingKey), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey<String>('1:FINISHED_EARLY')), findsNothing);
+    final detailsBeforeTap = client.bookingDetailCalls;
+    await tester.tap(find.byKey(upcomingKey));
     await tester.pumpAndSettle();
-    expect(client.selectedVenues.last, BookingVenue.studySpace);
+    expect(client.bookingDetailCalls, detailsBeforeTap);
+    final listedDetailSheet =
+        tester.widget<BottomSheet>(find.byType(BottomSheet));
+    expect(listedDetailSheet.backgroundColor,
+        ShuYoThemes.byId(ShuYoThemes.defaultId).colors.surface);
+    expect(listedDetailSheet.clipBehavior, Clip.antiAlias);
     expect(find.text('开始时间'), findsOneWidget);
     expect(find.text('结束时间'), findsOneWidget);
+    expect(find.text('预约时间'), findsOneWidget);
+    expect(find.text('2026-10-18 20:15'), findsOneWidget);
+    expect(find.text('2E015'), findsOneWidget);
+    expect(find.text('预约编号'), findsOneWidget);
+    expect(find.text('there:UPCOMING'), findsOneWidget);
+    expect(find.text('座位'), findsNothing);
     await tester.tapAt(const Offset(20, 20));
     await tester.pumpAndSettle();
     await tester.tap(find.text('已结束'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('A-001'), findsOneWidget);
-    expect(find.textContaining('B-034'), findsNothing);
-    expect(find.text('已提前结束'), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey<String>('2:FINISHED_EARLY')), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('2:UPCOMING')), findsNothing);
+    expect(find.text('已结束'), findsNWidgets(2));
+    expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey<String>('2:FINISHED_EARLY')));
+    await tester.pumpAndSettle();
+    expect(find.byType(BottomSheet), findsOneWidget);
+    expect(find.text('2025-12-31 21:05'), findsOneWidget);
+    expect(find.text('取消预约'), findsNothing);
+    await tester.tapAt(const Offset(20, 20));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('全部'));
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('B-034'));
+    await tester.tap(find.byKey(const ValueKey<String>('3:UPCOMING')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('取消预约'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('确认'));
     await tester.pumpAndSettle();
     expect(client.cancelled, isTrue);
+    expect(client.cancellationVenue, BookingVenue.studySpace);
+  });
+
+  testWidgets('bookings without cancellation can open a detail sheet',
+      (tester) async {
+    final client = _CloseOnlyClient();
+    final library = _EmptyChaoxingBookingClient();
+    addTearDown(client.dispose);
+    addTearDown(library.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: LibraryBookingPage(
+      accountService: UnifiedAccountService(),
+      thereClientFactory: (_) => client,
+      chaoxingClient: library,
+      schoolClock: schoolMorning,
+    )));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
+    await tester.tap(find.text('查看历史预约'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey<String>('0:CLOSE_ONLY')), findsOneWidget);
+    expect(find.textContaining('C-007'), findsOneWidget);
+    expect(client.bookingDetailCalls, 1);
+    expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey<String>('0:CLOSE_ONLY')));
+    await tester.pumpAndSettle();
+    expect(find.byType(BottomSheet), findsOneWidget);
+    expect(find.text('取消预约'), findsNothing);
+    expect(find.text('提前结束'), findsOneWidget);
+    expect(client.bookingDetailCalls, 1);
+  });
+
+  testWidgets('recent cancel ability survives a failed detail prefetch',
+      (tester) async {
+    final client = _RecentCancelableDetailFailureClient();
+    final library = _EmptyChaoxingBookingClient();
+    addTearDown(client.dispose);
+    addTearDown(library.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: LibraryBookingPage(
+      accountService: UnifiedAccountService(),
+      thereClientFactory: (_) => client,
+      chaoxingClient: library,
+      schoolClock: schoolMorning,
+    )));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
+    await tester.tap(find.text('查看历史预约'));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.chevron_right), findsNWidgets(2));
+    await tester.tap(find.byKey(const ValueKey<String>('0:UPCOMING')));
+    await tester.pumpAndSettle();
+    expect(find.text('取消预约'), findsOneWidget);
+    await tester.tap(find.text('取消预约'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('确认'));
+    await tester.pumpAndSettle();
+    expect(client.cancelled, isTrue);
+  });
+
+  testWidgets('booking row and centered arrow appear together after detail',
+      (tester) async {
+    final client = _GatedDetailHistoryClient();
+    final library = _EmptyChaoxingBookingClient();
+    addTearDown(client.dispose);
+    addTearDown(library.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: LibraryBookingPage(
+      accountService: UnifiedAccountService(),
+      thereClientFactory: (_) => client,
+      chaoxingClient: library,
+      schoolClock: schoolMorning,
+    )));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
+    await tester.tap(find.text('查看历史预约'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+        find.byKey(const ValueKey<String>('0:FINISHED_EARLY')), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('0:UPCOMING')), findsNothing);
+
+    client.detailGate.complete();
+    await tester.pumpAndSettle();
+    const tileKey = ValueKey<String>('0:UPCOMING');
+    final tile = find.byKey(tileKey);
+    final arrow = find.descendant(
+      of: tile,
+      matching: find.byIcon(Icons.chevron_right),
+    );
+    final status = find.descendant(of: tile, matching: find.text('待履约'));
+    expect(find.byKey(tileKey), findsOneWidget);
+    expect(arrow, findsOneWidget);
+    expect((tester.getCenter(arrow).dy - tester.getCenter(tile).dy).abs(),
+        lessThan(3));
+    expect(tester.getBottomRight(status).dy,
+        greaterThan(tester.getCenter(arrow).dy));
   });
 }
