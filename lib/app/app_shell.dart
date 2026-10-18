@@ -833,14 +833,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _openingLibraryBooking = true;
     try {
       final useWebVpn = _webVpnEnabled;
-      final client = useWebVpn
-          ? (_webVpnBookingClient ??= ThereBookingClient(useWebVpn: true))
-          : (_directBookingClient ??= ThereBookingClient());
       await Navigator.of(context).push<void>(
         shuyoRoute(
           builder: (_) => LibraryBookingPage(
             accountService: _unifiedAccountService,
-            client: client,
+            // The page owns one There client per venue for concurrent loads.
             chaoxingClient: _chaoxingBookingClient ??= ChaoxingBookingClient(),
             useWebVpn: useWebVpn,
             onWebVpnSessionRequired: () =>

@@ -11,11 +11,14 @@ class ChaoxingBookingAdapter extends ThereBookingClient {
   ChaoxingBookingAdapter({
     required ChaoxingBookingClient client,
     DateTime Function()? schoolClock,
+    Future<List<Map<String, dynamic>>> Function()? loadRooms,
   })  : _client = client,
+        _loadRooms = loadRooms,
         _schoolClock = schoolClock ??
             (() => DateTime.now().toUtc().add(const Duration(hours: 8)));
 
   final ChaoxingBookingClient _client;
+  final Future<List<Map<String, dynamic>>> Function()? _loadRooms;
   final DateTime Function() _schoolClock;
   BookingVenue? _selectedVenue;
   Future<void>? _pendingReset;
@@ -222,7 +225,7 @@ class ChaoxingBookingAdapter extends ThereBookingClient {
         }
         if (_roomSnapshot == null ||
             !_canShare(_roomSnapshotAt, venue, _roomSnapshotServed)) {
-          _roomSnapshot = await _client.rooms();
+          _roomSnapshot = await (_loadRooms?.call() ?? _client.rooms());
           _roomSnapshotAt = DateTime.now();
           _roomSnapshotServed.clear();
         }
