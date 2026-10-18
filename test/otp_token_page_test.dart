@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -38,6 +40,17 @@ class _RotatingRepository extends OtpTokenRepository {
   }
 }
 
+class _PendingThenFreshRepository extends OtpTokenRepository {
+  final pending = Completer<OtpToken>();
+  int calls = 0;
+
+  @override
+  Future<OtpToken> fetchToken() {
+    calls++;
+    return calls == 1 ? pending.future : Future.value(_token(code: '685970'));
+  }
+}
+
 /// Serves one good read, then fails every time.
 class _FlakyRepository extends OtpTokenRepository {
   int calls = 0;
@@ -70,6 +83,26 @@ void main() {
     repository.resetSession();
     await tester.pump();
     expect(find.text('956 370'), findsNothing);
+  });
+
+  testWidgets('a pending old read does not block or replace the new code',
+      (tester) async {
+    final repository = _PendingThenFreshRepository();
+    await tester.pumpWidget(
+      MaterialApp(home: OtpTokenPage(repository: repository)),
+    );
+    expect(repository.calls, 1);
+
+    repository.resetSession();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    expect(repository.calls, greaterThan(1));
+    expect(find.text('685 970'), findsOneWidget);
+
+    repository.pending.complete(_token(code: '111111'));
+    await tester.pump();
+    expect(find.text('111 111'), findsNothing);
+    expect(find.text('685 970'), findsOneWidget);
   });
 
   testWidgets('shows the code and copies it to the clipboard', (tester) async {

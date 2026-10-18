@@ -832,6 +832,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Future<void> _openOtp() async {
+    if (!widget.isDemo && !_hasAcademicSession) {
+      _showSnack('请先登录校园账户');
+      _openAccountManager();
+      return;
+    }
     await Navigator.of(context).push<void>(
       shuyoRoute(
         builder: (_) => OtpTokenPage(

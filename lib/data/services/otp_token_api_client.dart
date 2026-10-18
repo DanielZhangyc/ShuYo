@@ -90,7 +90,7 @@ class OtpTokenApiClient {
   SessionCookieJar get _cookieJar =>
       _cookieJarInstance ??= SessionCookieJar.shared;
 
-  bool _ssoAdopted = false;
+  String? _adoptedSsoSignature;
   String? _portalWebVpnToken;
 
   void dispose() => _client.close(force: true);
@@ -156,15 +156,14 @@ class OtpTokenApiClient {
 
   /// Loads the cookies shared with the rest of the app.
   ///
-  /// Both steps are idempotent and retried while they have nothing: the user
-  /// can log in, or restore WebVPN, while this page is open.
+  /// Refreshes shared credentials before each read, so a background WebVPN
+  /// recovery can replace either cookie while this page is open.
   Future<void> _prepareContext() async {
-    if (!_ssoAdopted) {
-      _ssoAdopted = await _adoptSsoCookies();
-    }
-    if (OtpUrlResolver.usesWebVpn && _portalWebVpnToken == null) {
+    await _adoptSsoCookies();
+    if (OtpUrlResolver.usesWebVpn) {
       final portal = Uri.parse(WebVpnUrls.portal);
       final portalCookies = await _cookieJar.getCookies(domain: portal);
+      _portalWebVpnToken = null;
       for (final cookie in portalCookies) {
         if (cookie.name == 'webvpn-token' && cookie.value.isNotEmpty) {
           _portalWebVpnToken = cookie.value;
@@ -177,40 +176,41 @@ class OtpTokenApiClient {
   ///
   /// The stored scope is preserved, so a cookie the identity host issued for
   /// `shu.edu.cn` also reaches the token host, exactly like a browser.
-  /// Returns true when a session was actually adopted.
-  Future<bool> _adoptSsoCookies() async {
+  Future<void> _adoptSsoCookies() async {
     final ssoUri = Uri.parse(WeComConstants.ssoBase);
     final direct = await _cookieJar.getCookies(domain: ssoUri);
-    var adopted = 0;
-    for (final cookie in direct) {
-      if (cookie.name != WeComConstants.sessionCookieName ||
-          cookie.value.isEmpty) {
-        continue;
-      }
-      _cookies.save(ssoUri, [
-        Cookie(cookie.name, cookie.value)
-          ..domain = cookie.domain.isEmpty ? ssoUri.host : cookie.domain
-          ..path = cookie.path.isEmpty ? '/' : cookie.path,
-      ]);
-      adopted++;
-    }
-    if (adopted > 0) return true;
+    final directSession = direct
+        .where((cookie) =>
+            cookie.name == WeComConstants.sessionCookieName &&
+            cookie.value.isNotEmpty)
+        .toList();
 
     // `WebVpnSessionStore` also clears `SHU_OAUTH2` from the gateway's identity
     // host, because a WebVPN login can leave the session there. Its value is a
     // newsso session all the same, so it is reused against the direct host.
-    final proxied = await _cookieJar.getCookies(domain: _webVpnSsoHost);
-    for (final cookie in proxied) {
-      if (cookie.name != WeComConstants.sessionCookieName ||
-          cookie.value.isEmpty) {
-        continue;
-      }
+    final fromProxy = directSession.isEmpty;
+    final session = fromProxy
+        ? (await _cookieJar.getCookies(domain: _webVpnSsoHost))
+            .where((cookie) =>
+                cookie.name == WeComConstants.sessionCookieName &&
+                cookie.value.isNotEmpty)
+            .toList()
+        : directSession;
+    final signature = session
+        .map((cookie) =>
+            '${fromProxy ? 'proxy' : 'direct'}|${cookie.domain}|${cookie.path}|${cookie.value}')
+        .join('\n');
+    if (signature == _adoptedSsoSignature) return;
+    _adoptedSsoSignature = signature;
+    _cookies.removeByName(WeComConstants.sessionCookieName);
+    for (final cookie in session) {
       _cookies.save(ssoUri, [
-        Cookie(cookie.name, cookie.value)..domain = ssoUri.host,
+        Cookie(cookie.name, cookie.value)
+          ..domain =
+              fromProxy || cookie.domain.isEmpty ? ssoUri.host : cookie.domain
+          ..path = fromProxy || cookie.path.isEmpty ? '/' : cookie.path,
       ]);
-      adopted++;
     }
-    return adopted > 0;
   }
 
   /// Warms up `state`, authorizes, and completes the token session.

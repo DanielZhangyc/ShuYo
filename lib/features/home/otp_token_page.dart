@@ -41,6 +41,7 @@ class _OtpTokenPageState extends State<OtpTokenPage>
   /// True while a read is in flight, which also keeps the ticker from stacking
   /// requests when one takes longer than the polling interval.
   bool _fetching = false;
+  int _fetchRevision = 0;
 
   /// Set once a failed read has already asked the shell to restore WebVPN, so
   /// a run of failures does not repeat that request every second.
@@ -88,6 +89,8 @@ class _OtpTokenPageState extends State<OtpTokenPage>
 
   void _clearToken() {
     if (!mounted) return;
+    _fetchRevision++;
+    _fetching = false;
     setState(() => _token = null);
     _reportedError = null;
     _webVpnRecoveryRequested = false;
@@ -110,19 +113,20 @@ class _OtpTokenPageState extends State<OtpTokenPage>
 
   Future<void> _fetch() async {
     if (_fetching) return;
+    final revision = _fetchRevision;
     _fetching = true;
     try {
       final token = await widget.repository.fetchToken();
-      if (!mounted) return;
+      if (!mounted || revision != _fetchRevision) return;
       _webVpnRecoveryRequested = false;
       _reportedError = null;
       setState(() => _token = token);
     } on OtpTokenException catch (error) {
-      _onFailure(error);
+      if (revision == _fetchRevision) _onFailure(error);
     } on Object {
-      _onFailure(null);
+      if (revision == _fetchRevision) _onFailure(null);
     } finally {
-      _fetching = false;
+      if (revision == _fetchRevision) _fetching = false;
     }
   }
 
