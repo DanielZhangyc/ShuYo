@@ -186,7 +186,16 @@ void main() {
     expect(seen, contains('GET /api/v3/my/profile LIB_SEAT SESSION_LIB'));
   });
 
-  test('create rechecks the seat and cancel checks detail ability', () async {
+  test('refreshing the venue obtains a new business session', () async {
+    await client.selectVenue(BookingVenue.library);
+    await client.refreshVenue(BookingVenue.library);
+    expect(
+      seen.where((entry) => entry.startsWith('GET /mobile/libseat')),
+      hasLength(2),
+    );
+  });
+
+  test('create rechecks the seat and cancel uses the server action', () async {
     await client.selectVenue(BookingVenue.library);
     final id = await client.create(
       areaId: 'AREA_1',
@@ -205,6 +214,29 @@ void main() {
         seen,
         contains('DELETE /api/v3/bookings/BOOKING_1/cancel '
             'LIB_SEAT SESSION_LIB'));
+    expect(
+        seen.where(
+            (entry) => entry.startsWith('GET /api/v3/bookings/BOOKING_1 ')),
+        isEmpty);
+  });
+
+  test('next-day library booking sends the selected date and time', () async {
+    await client.selectVenue(BookingVenue.library);
+    await client.create(
+      areaId: 'AREA_1',
+      roomId: 'ROOM_1',
+      day: '2026-10-19',
+      start: '20:30',
+      end: '22:00',
+    );
+    expect(createdBody?['times'], [
+      {
+        'startDate': '2026-10-19',
+        'startTime': '20:30',
+        'endDate': '2026-10-19',
+        'endTime': '22:00',
+      },
+    ]);
   });
 
   test('HTTP 200 with a rejected business code is not success', () async {

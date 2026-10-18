@@ -209,6 +209,11 @@ class ThereBookingClient {
     _sessionId = session;
   }
 
+  Future<void> refreshVenue(BookingVenue venue) async {
+    _sessionId = null;
+    await selectVenue(venue);
+  }
+
   Future<Map<String, dynamic>> profile() async {
     final data = object((await _api('GET', '/api/v3/my/profile'))['data']);
     if (data == null ||
@@ -346,13 +351,8 @@ class ThereBookingClient {
   }
 
   Future<void> cancel(String bookingId) async {
-    final current = await detail(bookingId);
-    if (!strings(current['abilities']).contains('cancel')) {
-      throw const ThereBookingException(
-        ThereFailureKind.business,
-        '当前预约不可取消',
-      );
-    }
+    // The server checks cancellation eligibility when handling DELETE. A
+    // separate detail read can fail even while the recent list grants cancel.
     await _api(
         'DELETE', '/api/v3/bookings/${Uri.encodeComponent(bookingId)}/cancel');
   }
