@@ -516,17 +516,6 @@ class _GatedChaoxingBookingClient extends _EmptyChaoxingBookingClient {
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  Future<void> showBottomAction(WidgetTester tester, Finder target) async {
-    await tester.scrollUntilVisible(target, 180,
-        scrollable: find
-            .descendant(
-                of: find.byType(ListView).first,
-                matching: find.byType(Scrollable))
-            .first);
-    await tester.drag(find.byType(ListView).first, const Offset(0, -100));
-    await tester.pumpAndSettle();
-  }
-
   testWidgets('custom photo travels with each booking step', (tester) async {
     SharedPreferences.setMockInitialValues({
       AcademicAccountStore.studentIdKey: 'STUDENT_1',
@@ -560,9 +549,9 @@ void main() {
     expect(find.byType(ShuYoRouteSurface), findsOneWidget);
     expect(find.text('图书馆预约'), findsOneWidget);
 
-    await showBottomAction(
-        tester, find.widgetWithText(OutlinedButton, '仅查看座位情况'));
-    await tester.tap(find.widgetWithText(OutlinedButton, '仅查看座位情况').last);
+    await tester.tap(find.text(BookingVenue.library.label));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('校本部图书馆自修区 - 二楼东侧'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 120));
     expect(find.byType(ShuYoRouteSurface), findsNWidgets(2));
@@ -693,8 +682,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(find.text('图书馆预约'), findsOneWidget);
-    expect(tester.getTopLeft(find.text('选择场馆')).dy,
-        lessThan(tester.getTopLeft(find.text('仅查看座位情况')).dy));
+    expect(find.text('仅查看座位情况'), findsNothing);
     for (final venue in [
       BookingVenue.library,
       BookingVenue.studySpace,
@@ -1038,7 +1026,8 @@ void main() {
     expect(find.text('选择分区'), findsNothing);
   });
 
-  testWidgets('view-only seats return to venue selection', (tester) async {
+  testWidgets('seat preview entry is hidden while venue selection remains',
+      (tester) async {
     final client = _BookingClient();
     addTearDown(client.dispose);
     await tester.pumpWidget(MaterialApp(
@@ -1048,53 +1037,11 @@ void main() {
       schoolClock: schoolMorning,
     )));
     await tester.pumpAndSettle();
-    final previousAreaListCalls = client.areaListCalls;
-    await showBottomAction(tester, find.text('仅查看座位情况'));
-    await tester.tap(find.text('仅查看座位情况'));
+    expect(find.text('仅查看座位情况'), findsNothing);
+    expect(find.text(BookingVenue.library.label), findsWidgets);
+    await tester.tap(find.text(BookingVenue.library.label));
     await tester.pumpAndSettle();
-    expect(find.byIcon(Icons.visibility_outlined), findsNothing);
-    expect(client.areaListCalls, previousAreaListCalls);
-    await tester.tap(find.byKey(const ValueKey('view-library')));
-    await tester.tap(find.text('延长校区'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('view-scienceArt')));
-    await tester.tap(find.text('宝山校区'));
-    await tester.pumpAndSettle();
-    expect(
-        tester
-            .widget<CheckboxListTile>(
-                find.byKey(const ValueKey('view-library')))
-            .value,
-        isTrue);
-    await tester.tap(find.text('延长校区'));
-    await tester.pumpAndSettle();
-    await showBottomAction(tester, find.text('下一步'));
-    expect(tester.getTopLeft(find.text(BookingVenue.wenhui.label)).dy,
-        lessThan(tester.getTopLeft(find.text('下一步')).dy));
-    await tester.tap(find.text('下一步'));
-    await tester.pumpAndSettle();
-    expect(client.areaListCalls, previousAreaListCalls + 2);
-    expect(client.detailAreaCalls, 0);
-    expect(find.byTooltip('我的预约'), findsNothing);
-    expect(find.textContaining('开放座位数 9'), findsAtLeastNWidgets(1));
-    await tester.tap(find.text('校本部图书馆自修区 - 二楼东侧'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text(monthDay()));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('查看座位'));
-    await tester.pumpAndSettle();
-    expect(find.text('2E015'), findsOneWidget);
-    expect(find.text('2E016'), findsOneWidget);
-    await tester.tap(find.text('仅看可选座位'));
-    await tester.pumpAndSettle();
-    expect(find.text('2E016'), findsNothing);
-    expect(find.text('确认预约'), findsNothing);
-    expect(find.text('退出查看'), findsNothing);
-    for (var step = 0; step < 5; step++) {
-      await tester.tap(find.byTooltip('返回上一步'));
-      await tester.pumpAndSettle();
-    }
-    expect(find.text('选择场馆'), findsOneWidget);
+    expect(find.text('校本部图书馆自修区 - 二楼东侧'), findsOneWidget);
   });
 
   testWidgets('forward and back steps slide in opposite directions',

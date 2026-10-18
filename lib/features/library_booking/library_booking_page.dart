@@ -14,6 +14,8 @@ import '../../shared/theme/custom_background.dart';
 import '../../shared/theme/shuyo_theme.dart';
 import '../../shared/widgets/empty_state.dart';
 import '../auth/native_login_page.dart';
+import 'library_booking_list_tile.dart';
+import 'library_booking_record.dart';
 import 'library_booking_resources.dart';
 
 enum _BookingStep {
@@ -543,14 +545,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                 : const SizedBox(width: double.infinity),
           ),
         ],
-        const SizedBox(height: 8),
-        OutlinedButton(
-          onPressed: () {
-            _viewOnly = true;
-            _setStep(_BookingStep.viewVenues, forward: true);
-          },
-          child: const Text('仅查看座位情况'),
-        ),
       ]);
 
   Widget _homeVenueAreas(BookingVenue venue) {
@@ -607,19 +601,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           CustomBackgroundScope.maybeOf(context) != null
               ? const SizedBox.shrink()
               : Divider(height: 1, color: colors.border),
-        _BookingListTile(
-          key:
-              ValueKey<String>('home:${ThereBookingClient.string(item['id'])}'),
-          index: index,
-          item: item,
-          venueName: _bookingVenueName(item),
-          status: _bookingCategory(item),
-          beginTime: _bookingTime(item['beginTime']),
-          endTime: _bookingTime(item['endTime']),
-          onTap: ThereBookingClient.string(item['id']) == null
-              ? null
-              : () => _openDetail(item),
-        ),
+        _bookingTile(item, index,
+            key: ValueKey<String>(
+                'home:${ThereBookingClient.string(item['id'])}')),
       ],
       Align(
         alignment: Alignment.centerRight,
@@ -639,20 +623,46 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     ]);
   }
 
+  Widget _bookingTile(Map<String, dynamic> item, int index,
+      {required Key key}) {
+    final id = ThereBookingClient.string(item['id']);
+    final schoolNow = _schoolNow;
+    final venueName = LibraryBookingRecord.venueName(item);
+    return LibraryBookingListTile(
+      key: key,
+      index: index,
+      title: '${ThereBookingClient.string(item['roomName']) ?? '座位'} · '
+          '${ThereBookingClient.string(item['officeAreaName']) ?? venueName}',
+      venueName: venueName,
+      status: LibraryBookingRecord.category(item, schoolNow),
+      beginTime: LibraryBookingRecord.displayTime(item['beginTime'], schoolNow),
+      endTime: LibraryBookingRecord.displayTime(item['endTime'], schoolNow),
+      onTap: id == null ? null : () => _openDetail(item),
+    );
+  }
+
   List<Map<String, dynamic>> _homeActiveBookings() {
     final byId = <String, Map<String, dynamic>>{};
     for (final item in [..._homeRecent, ..._recent]) {
       final id = ThereBookingClient.string(item['id']);
       if (id != null) byId[id] = item;
     }
-    final records = byId.values
-        .where((item) =>
-            _bookingCategory(item) == '待履约' || _bookingCategory(item) == '进行中')
-        .toList();
+    final schoolNow = _schoolNow;
+    final records = byId.values.where((item) {
+      final category = LibraryBookingRecord.category(item, schoolNow);
+      return category == '待履约' || category == '进行中';
+    }).toList();
     records.sort((a, b) => (ThereBookingClient.string(b['beginTime']) ?? '')
         .compareTo(ThereBookingClient.string(a['beginTime']) ?? ''));
     return records;
   }
+
+  List<Map<String, dynamic>> _areasForVenue(
+          List<Map<String, dynamic>> areas, BookingVenue venue) =>
+      areas
+          .where((area) => ThereBookingClient.strings(area['supportRoomTypes'])
+              .contains(venue.roomType))
+          .toList();
 
   Future<void> _loadHomeVenueAreas(BookingVenue venue,
       {bool interactiveAuth = false}) async {
@@ -682,10 +692,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           ? request
           : request.timeout(const Duration(seconds: 15)));
       if (!mounted || _homeAreaGenerations[venue] != generation) return;
-      final supported = areas
-          .where((area) => ThereBookingClient.strings(area['supportRoomTypes'])
-              .contains(venue.roomType))
-          .toList();
+      final supported = _areasForVenue(areas, venue);
       if (!venue.isChaoxing && supported.isEmpty) {
         throw const ThereBookingException(
           ThereFailureKind.uncertain,
@@ -753,7 +760,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         final expectsFinish = id == null ? null : _awaitingWriteStatus[id];
         if (expectsFinish != null) {
           final accepted = expectsFinish
-              ? _finishedEarly(item)
+              ? LibraryBookingRecord.finishedEarly(item)
               : (ThereBookingClient.string(item['status']) == 'CANCEL' ||
                   (ThereBookingClient.string(item['statusLabel']) ?? '')
                       .contains('取消'));
@@ -1727,7 +1734,8 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     const filters = ['全部', '待履约', '进行中', '已结束', '已取消'];
     final visible = _recent
         .where((item) =>
-            _bookingFilter == '全部' || _bookingCategory(item) == _bookingFilter)
+            _bookingFilter == '全部' ||
+            LibraryBookingRecord.category(item, _schoolNow) == _bookingFilter)
         .toList();
     final visibleIndices = <String, int>{
       for (final (index, item) in visible.indexed)
@@ -1769,16 +1777,8 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                 itemBuilder: (context, index) {
                   final item = visible[index];
                   final id = ThereBookingClient.string(item['id']);
-                  return _BookingListTile(
-                    key: ValueKey<String>('$_bookingAnimationEpoch:$id'),
-                    index: index,
-                    item: item,
-                    venueName: _bookingVenueName(item),
-                    status: _bookingCategory(item),
-                    beginTime: _bookingTime(item['beginTime']),
-                    endTime: _bookingTime(item['endTime']),
-                    onTap: id == null ? null : () => _openDetail(item),
-                  );
+                  return _bookingTile(item, index,
+                      key: ValueKey<String>('$_bookingAnimationEpoch:$id'));
                 },
                 separatorBuilder: (context, index) =>
                     CustomBackgroundScope.maybeOf(context) != null
@@ -1787,57 +1787,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
               ),
       ),
     ]);
-  }
-
-  String _bookingVenueName(Map<String, dynamic> item) =>
-      BookingVenue.values
-          .where((venue) => venue.roomType == item['roomType'])
-          .firstOrNull
-          ?.label ??
-      '图书馆预约';
-
-  String _bookingCategory(Map<String, dynamic> item) {
-    final status =
-        (ThereBookingClient.string(item['status']) ?? '').toUpperCase();
-    final label = ThereBookingClient.string(item['statusLabel']) ?? '';
-    if (_finishedEarly(item)) return '已结束';
-    if (status == 'CANCEL' || label.contains('取消')) return '已取消';
-    if (status == 'CX_7') return '已结束';
-    if (status.startsWith('CX_') && status != 'CX_0') {
-      return label.isEmpty ? '状态待确认' : label;
-    }
-    final schoolNow = _schoolNow;
-    final now = DateTime.utc(
-      schoolNow.year,
-      schoolNow.month,
-      schoolNow.day,
-      schoolNow.hour,
-      schoolNow.minute,
-      schoolNow.second,
-      schoolNow.millisecond,
-      schoolNow.microsecond,
-    );
-    DateTime? parse(Object? value) {
-      final text = ThereBookingClient.string(value);
-      return text == null
-          ? null
-          : DateTime.tryParse('${text.replaceFirst(' ', 'T')}Z');
-    }
-
-    final begin = parse(item['beginTime']);
-    final end = parse(item['endTime']);
-    if (begin != null && now.isBefore(begin)) return '待履约';
-    if (end != null && now.isBefore(end)) return '进行中';
-    return '已结束';
-  }
-
-  bool _finishedEarly(Map<String, dynamic> item) {
-    final original = ThereBookingClient.string(item['origEndAt']);
-    final end = ThereBookingClient.string(item['endTime']);
-    return original != null &&
-        end != null &&
-        end.compareTo(original) < 0 &&
-        item['duration'] == 0;
   }
 
   void _retry() {
@@ -1902,11 +1851,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       final areas = await _read(() => _client.areas(_clockDay));
       if (!mounted || generation != _generation) return;
       setState(() {
-        _areas = areas
-            .where((area) =>
-                ThereBookingClient.strings(area['supportRoomTypes'])
-                    .contains(_venue.roomType))
-            .toList();
+        _areas = _areasForVenue(areas, _venue);
         _loading = false;
       });
       if (!_venue.isChaoxing) {
@@ -1967,11 +1912,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         final areas = await _read(() => _client.areas(_clockDay));
         if (!mounted || generation != _generation) return;
         setState(() {
-          _allAreasByVenue[venue] = areas
-              .where((area) =>
-                  ThereBookingClient.strings(area['supportRoomTypes'])
-                      .contains(venue.roomType))
-              .toList();
+          _allAreasByVenue[venue] = _areasForVenue(areas, venue);
           _loading = false;
         });
       } on Object catch (error) {
@@ -2132,9 +2073,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                 ThereBookingClient.strings(item['abilities'])
                     .contains('cancel');
             if (isChaoxing ||
-                (_bookingCategory(item) != '已取消' &&
-                    !_finishedEarly(item) &&
-                    (_bookingCategory(item) != '已结束' ||
+                (LibraryBookingRecord.category(item, _schoolNow) != '已取消' &&
+                    !LibraryBookingRecord.finishedEarly(item) &&
+                    (LibraryBookingRecord.category(item, _schoolNow) != '已结束' ||
                         ThereBookingClient.string(item['endTime']) == null))) {
               try {
                 final detail = isChaoxing
@@ -2482,7 +2423,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                               color: sheetContext.shuyoColors.accent,
                               shape: BoxShape.circle)),
                       const SizedBox(width: 7),
-                      Text(_bookingCategory(detail),
+                      Text(LibraryBookingRecord.category(detail, _schoolNow),
                           style: Theme.of(sheetContext)
                               .textTheme
                               .bodySmall
@@ -2503,10 +2444,16 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                             ThereBookingClient.string(
                                 booking['officeAreaName']) ??
                             ''),
-                    _bookingDetailField(sheetContext, '开始时间',
-                        _bookingTime(detail['beginTime'])),
                     _bookingDetailField(
-                        sheetContext, '结束时间', _bookingTime(detail['endTime'])),
+                        sheetContext,
+                        '开始时间',
+                        LibraryBookingRecord.displayTime(
+                            detail['beginTime'], _schoolNow)),
+                    _bookingDetailField(
+                        sheetContext,
+                        '结束时间',
+                        LibraryBookingRecord.displayTime(
+                            detail['endTime'], _schoolNow)),
                     if (ThereBookingClient.string(detail['createdAt'])
                         case final String createdAt)
                       _bookingDetailField(
@@ -2752,14 +2699,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       room['isBooked'] != true &&
       ThereBookingClient.strings(room['abilities']).contains('booking');
 
-  String _bookingTime(Object? value) {
-    final text = ThereBookingClient.string(value);
-    if (text == null || text.length < 16) return text ?? '待确认';
-    final year = int.tryParse(text.substring(0, 4));
-    final currentYear = _schoolNow.year;
-    return year == currentYear ? text.substring(5, 16) : text.substring(0, 16);
-  }
-
   String _friendlyError(Object error) {
     if (error is ThereBookingException) return error.message;
     return '图书馆预约暂时无法使用，请稍后重试';
@@ -2768,145 +2707,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   void _showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(behavior: SnackBarBehavior.fixed, content: Text(message)),
-    );
-  }
-}
-
-class _BookingListTile extends StatefulWidget {
-  const _BookingListTile({
-    super.key,
-    required this.index,
-    required this.item,
-    required this.venueName,
-    required this.status,
-    required this.beginTime,
-    required this.endTime,
-    required this.onTap,
-  });
-
-  final int index;
-  final Map<String, dynamic> item;
-  final String venueName;
-  final String status;
-  final String beginTime;
-  final String endTime;
-  final VoidCallback? onTap;
-
-  @override
-  State<_BookingListTile> createState() => _BookingListTileState();
-}
-
-class _BookingListTileState extends State<_BookingListTile>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _entrance;
-  Timer? _entranceTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    _entrance = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 280),
-    );
-    _entranceTimer = Timer(
-      Duration(milliseconds: (widget.index % 6) * 55),
-      () {
-        if (mounted) _entrance.forward();
-      },
-    );
-  }
-
-  @override
-  void dispose() {
-    _entranceTimer?.cancel();
-    _entrance.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.shuyoColors;
-    final item = widget.item;
-    final highlightedStatus = widget.status == '待履约' || widget.status == '进行中';
-    return SlideTransition(
-      position: Tween<Offset>(
-        begin: const Offset(0.12, 0),
-        end: Offset.zero,
-      ).animate(CurvedAnimation(parent: _entrance, curve: Curves.easeOutCubic)),
-      child: FadeTransition(
-        opacity: _entrance,
-        child: InkWell(
-          onTap: widget.onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${ThereBookingClient.string(item['roomName']) ?? '座位'} · '
-                        '${ThereBookingClient.string(item['officeAreaName']) ?? widget.venueName}',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 7),
-                      Text(widget.venueName,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(color: colors.textTertiary)),
-                      const SizedBox(height: 8),
-                      Text('${widget.beginTime} — ${widget.endTime}',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(color: colors.textMuted)),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: widget.onTap == null ? 64 : 88,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          widget.status,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                color: highlightedStatus
-                                    ? colors.accent
-                                    : colors.textSecondary,
-                                fontWeight:
-                                    highlightedStatus ? FontWeight.w600 : null,
-                              ),
-                        ),
-                      ),
-                      if (widget.onTap != null) ...[
-                        const SizedBox(width: 2),
-                        Icon(Icons.chevron_right,
-                            color: highlightedStatus
-                                ? colors.accent
-                                : colors.textMuted),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
