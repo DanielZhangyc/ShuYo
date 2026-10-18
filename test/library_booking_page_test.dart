@@ -226,6 +226,23 @@ class _VenueScopedBookingClient extends _BookingClient {
   }
 }
 
+class _ThreeAreaBookingClient extends _VenueScopedBookingClient {
+  _ThreeAreaBookingClient(super.expectedVenue);
+
+  @override
+  Future<List<Map<String, dynamic>>> areas(String day) async => [
+        for (final name in ['A', 'B', 'C'])
+          {
+            'id': 'ZONE_$name',
+            'name': '分区$name',
+            'supportRoomTypes': [expectedVenue.roomType],
+            'totalResourceCount': 12,
+            'disabledResourceCount': 2,
+            'bookingTimes': {'startHour': 8, 'endHour': 22},
+          },
+      ];
+}
+
 class _EmptyThereAreaClient extends _BookingClient {
   @override
   Future<List<Map<String, dynamic>>> areas(String day) async => [];
@@ -827,6 +844,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 20));
     }
     expect(client.started, 4);
+    expect(
+        find.descendant(
+            of: find.byKey(const ValueKey('home-venue-library')),
+            matching: find.textContaining('分区')),
+        findsNothing);
     final venue = find.byKey(const ValueKey('home-venue-library'));
     expect(
         find.ancestor(
@@ -848,6 +870,8 @@ void main() {
 
     client.gate.complete();
     await tester.pumpAndSettle();
+    expect(
+        find.descendant(of: venue, matching: find.text('1分区')), findsOneWidget);
     expect(library.roomsCalls, 1);
     expect(
         find.descendant(
@@ -868,6 +892,40 @@ void main() {
             of: venue, matching: find.byIcon(Icons.keyboard_arrow_down)),
         findsOneWidget);
     expect(find.text('校本部图书馆自修区 - 二楼东侧'), findsNothing);
+  });
+
+  testWidgets('venue subtitle counts its selectable areas', (tester) async {
+    final clients = <BookingVenue, _VenueScopedBookingClient>{};
+    final library = _EmptyChaoxingBookingClient();
+    addTearDown(() {
+      for (final client in clients.values) {
+        client.dispose();
+      }
+      library.dispose();
+    });
+    await tester.pumpWidget(MaterialApp(
+      home: LibraryBookingPage(
+        accountService: UnifiedAccountService(),
+        thereClientFactory: (venue) => clients.putIfAbsent(
+          venue,
+          () => venue == BookingVenue.studySpace
+              ? _ThreeAreaBookingClient(venue)
+              : _VenueScopedBookingClient(venue),
+        ),
+        chaoxingClient: library,
+        schoolClock: schoolMorning,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final venue = find.byKey(const ValueKey('home-venue-studySpace'));
+    expect(
+        find.descendant(of: venue, matching: find.text('3分区')), findsOneWidget);
+    expect(find.text('3 个场馆'), findsNothing);
+    await tester.tap(venue);
+    await tester.pumpAndSettle();
+    for (final name in ['A', 'B', 'C']) {
+      expect(find.text('分区$name'), findsOneWidget);
+    }
   });
 
   testWidgets('area and booking preloads share each venue entry request',
@@ -945,6 +1003,11 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
+    expect(
+        find.descendant(
+            of: find.byKey(const ValueKey('home-venue-library')),
+            matching: find.textContaining('分区')),
+        findsNothing);
     await tester.tap(find.text(BookingVenue.library.label));
     await tester.pumpAndSettle();
     expect(find.text('分区暂时无法加载，重试'), findsOneWidget);
@@ -975,9 +1038,19 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
+    expect(
+        find.descendant(
+            of: find.byKey(const ValueKey('home-venue-library')),
+            matching: find.textContaining('分区')),
+        findsNothing);
     await tester.tap(find.text(BookingVenue.library.label));
     await tester.pumpAndSettle();
     expect(find.text('校本部图书馆分区'), findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.byKey(const ValueKey('home-venue-library')),
+            matching: find.text('1分区')),
+        findsOneWidget);
     expect(clients[BookingVenue.library]?.refreshedVenues,
         contains(BookingVenue.library));
   });

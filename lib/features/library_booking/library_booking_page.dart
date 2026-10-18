@@ -521,7 +521,22 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           ListTile(
             key: ValueKey('home-venue-${venue.name}'),
             contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-            title: Text(venue.label),
+            title: Row(children: [
+              Flexible(
+                child: Text(venue.label,
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+              if (!_loadingHomeAreas.contains(venue))
+                if (_homeAreasByVenue[venue]
+                    case final List<Map<String, dynamic>> areas) ...[
+                  const SizedBox(width: 8),
+                  Text('${_selectableAreas(areas).length}分区',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: context.shuyoColors.textTertiary)),
+                ],
+            ]),
             trailing: _loadingHomeAreas.contains(venue)
                 ? const SizedBox(
                     width: 20,
