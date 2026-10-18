@@ -787,12 +787,14 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('确认预约'));
     await tester.pumpAndSettle();
+    expect(find.textContaining('宝山校区 校本部图书馆'), findsOneWidget);
     await tester.tap(find.text('提交'));
     await tester.pumpAndSettle();
     expect(client.created, isTrue);
     expect(client.selectedVenues.last, BookingVenue.library);
     expect(find.text('取消预约'), findsOneWidget);
     expect(find.text('预约编号'), findsOneWidget);
+    expect(find.text('宝山校区 校本部图书馆'), findsOneWidget);
     expect(find.text('there:BOOKING_1'), findsOneWidget);
     expect(find.text('座位'), findsNothing);
     final createdDetailSheet =
@@ -1570,9 +1572,23 @@ void main() {
           find.byKey(ValueKey<String>('0:cx:${venue.roomType}:${index + 1}')),
           findsOneWidget);
     }
+    for (final name in [
+      '宝山校区 钱伟长图书馆',
+      '嘉定校区 嘉定联合馆',
+      '延长校区 延长文荟馆',
+    ]) {
+      expect(find.text(name), findsOneWidget);
+    }
     expect(find.textContaining('CX-1'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey<String>('0:cx:CX_QWC:1')));
     await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.text('宝山校区 钱伟长图书馆'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('预约编号'), findsOneWidget);
     expect(find.text('cx:1'), findsOneWidget);
     expect(find.textContaining('cx:CX_QWC:'), findsNothing);

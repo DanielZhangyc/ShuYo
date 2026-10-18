@@ -46,6 +46,12 @@ enum _BookingCampus {
 
   final String label;
   final List<BookingVenue> venues;
+
+  static String venueLabel(BookingVenue venue) {
+    final campus =
+        values.where((item) => item.venues.contains(venue)).firstOrNull;
+    return campus == null ? venue.label : '${campus.label} ${venue.label}';
+  }
 }
 
 class LibraryBookingPage extends StatefulWidget {
@@ -643,12 +649,15 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     final id = ThereBookingClient.string(item['id']);
     final schoolNow = _schoolNow;
     final venueName = LibraryBookingRecord.venueName(item);
+    final venue = BookingVenue.values
+        .where((itemVenue) => itemVenue.roomType == item['roomType'])
+        .firstOrNull;
     return LibraryBookingListTile(
       key: key,
       index: index,
       title: '${ThereBookingClient.string(item['roomName']) ?? '座位'} · '
           '${ThereBookingClient.string(item['officeAreaName']) ?? venueName}',
-      venueName: venueName,
+      venueName: venue == null ? venueName : _BookingCampus.venueLabel(venue),
       status: LibraryBookingRecord.category(item, schoolNow),
       beginTime: LibraryBookingRecord.displayTime(item['beginTime'], schoolNow),
       endTime: LibraryBookingRecord.displayTime(item['endTime'], schoolNow),
@@ -2304,7 +2313,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('确认预约'),
-            content: Text('${_venue.label}\n'
+            content: Text('${_BookingCampus.venueLabel(_venue)}\n'
                 '${ThereBookingClient.string(_selectedArea?['name']) ?? ''} · '
                 '${ThereBookingClient.string(room?['name']) ?? '座位'}\n'
                 '$_day  $_start—$_end'),
@@ -2448,7 +2457,8 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                     const SizedBox(height: 18),
                     Divider(color: sheetContext.shuyoColors.border),
                     const SizedBox(height: 12),
-                    _bookingDetailField(sheetContext, '场馆', venue.label),
+                    _bookingDetailField(
+                        sheetContext, '场馆', _BookingCampus.venueLabel(venue)),
                     _bookingDetailField(
                         sheetContext,
                         '分区',
