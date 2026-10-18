@@ -424,10 +424,29 @@ void main() {
     expect(find.text('图书馆预约'), findsOneWidget);
     expect(tester.getTopLeft(find.text('选择场馆')).dy,
         lessThan(tester.getTopLeft(find.text('仅查看座位情况')).dy));
-    for (final venue
-        in BookingVenue.values.where((venue) => !venue.isChaoxing)) {
+    for (final venue in [
+      BookingVenue.library,
+      BookingVenue.studySpace,
+      BookingVenue.qianweichang,
+    ]) {
       expect(find.text(venue.label), findsWidgets);
     }
+    await tester.tap(find.text('延长校区'));
+    await tester.pumpAndSettle();
+    expect(find.text(BookingVenue.library.label), findsNothing);
+    for (final venue in [
+      BookingVenue.scienceArt,
+      BookingVenue.yanchang,
+      BookingVenue.wenhui,
+    ]) {
+      expect(find.text(venue.label), findsOneWidget);
+    }
+    await tester.tap(find.text('嘉定校区'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ListTile), findsOneWidget);
+    expect(find.text(BookingVenue.jiading.label), findsOneWidget);
+    await tester.tap(find.text('宝山校区'));
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('我的预约'), 180);
     expect(tester.getTopLeft(find.text('仅查看座位情况')).dy,
         lessThan(tester.getTopLeft(find.text('我的预约')).dy));
@@ -576,7 +595,18 @@ void main() {
     expect(find.byIcon(Icons.visibility_outlined), findsNothing);
     expect(client.areaListCalls, 0);
     await tester.tap(find.byKey(const ValueKey('view-library')));
+    await tester.tap(find.text('延长校区'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('view-scienceArt')));
+    await tester.tap(find.text('宝山校区'));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<CheckboxListTile>(
+                find.byKey(const ValueKey('view-library')))
+            .value,
+        isTrue);
+    await tester.tap(find.text('延长校区'));
     await tester.pumpAndSettle();
     await showBottomAction(tester, find.text('下一步'));
     expect(tester.getTopLeft(find.text(BookingVenue.wenhui.label)).dy,

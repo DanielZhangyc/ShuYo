@@ -28,6 +28,25 @@ enum _BookingStep {
   bookings,
 }
 
+enum _BookingCampus {
+  baoshan('宝山校区', [
+    BookingVenue.library,
+    BookingVenue.studySpace,
+    BookingVenue.qianweichang,
+  ]),
+  yanchang('延长校区', [
+    BookingVenue.scienceArt,
+    BookingVenue.yanchang,
+    BookingVenue.wenhui,
+  ]),
+  jiading('嘉定校区', [BookingVenue.jiading]);
+
+  const _BookingCampus(this.label, this.venues);
+
+  final String label;
+  final List<BookingVenue> venues;
+}
+
 class LibraryBookingPage extends StatefulWidget {
   const LibraryBookingPage({
     super.key,
@@ -77,6 +96,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   }
 
   _BookingStep _step = _BookingStep.venue;
+  _BookingCampus _campus = _BookingCampus.baoshan;
   bool _slideForward = true;
   BookingVenue _venue = BookingVenue.library;
   BookingVenue? _sessionVenue;
@@ -355,6 +375,19 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   void _showSeatsMap() =>
       unawaited(showLibraryBookingImage(context, librarySeatsAsset));
 
+  Widget _campusBar() => DefaultTabController(
+        length: _BookingCampus.values.length,
+        initialIndex: _campus.index,
+        child: TabBar(
+          labelPadding: EdgeInsets.zero,
+          tabs: [
+            for (final campus in _BookingCampus.values) Tab(text: campus.label),
+          ],
+          onTap: (index) =>
+              setState(() => _campus = _BookingCampus.values[index]),
+        ),
+      );
+
   Widget _venuePage() => _pageList([
         Row(children: [
           Expanded(
@@ -363,7 +396,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           _infoLink('使用规则', () => _openInfo('使用规则', libraryRulesAsset)),
         ]),
         const SizedBox(height: 16),
-        for (final venue in BookingVenue.values) ...[
+        _campusBar(),
+        const SizedBox(height: 16),
+        for (final venue in _campus.venues) ...[
           _surface(
             padding: EdgeInsets.zero,
             child: ListTile(
@@ -531,7 +566,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       Text(viewOnly ? '选择要查看的场馆' : '选择要查看预约的场馆',
           style: Theme.of(context).textTheme.titleLarge),
       const SizedBox(height: 16),
-      for (final venue in BookingVenue.values) ...[
+      _campusBar(),
+      const SizedBox(height: 16),
+      for (final venue in _campus.venues) ...[
         _surface(
           padding: EdgeInsets.zero,
           child: CheckboxListTile(

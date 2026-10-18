@@ -126,6 +126,14 @@ void main() {
       final initialPushes = observer.pushes;
       expect(find.text('图书馆预约'), findsOneWidget);
 
+      final campus = switch (entry.key) {
+        BookingVenue.jiading => '嘉定校区',
+        BookingVenue.wenhui => '延长校区',
+        _ => '宝山校区',
+      };
+      await tester.tap(find.text(campus));
+      await tester.pumpAndSettle();
+
       await tester.scrollUntilVisible(find.text(entry.key.label), 160,
           scrollable: find.byType(Scrollable).first);
       await tester.ensureVisible(find.text(entry.key.label));
