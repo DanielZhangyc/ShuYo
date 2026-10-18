@@ -698,24 +698,10 @@ class ThereBookingClient {
       );
     } on TimeoutException {
       _logTransportFailure(path, 'timeout', timer.elapsedMilliseconds);
-      throw ThereBookingException(
-        createRequest
-            ? ThereFailureKind.uncertain
-            : ThereFailureKind.unreachable,
-        createRequest
-            ? '预约提交结果未确认，请先查看我的预约'
-            : '暂时无法访问预约系统。请连接校园网、学校VPN，或开启WebVPN后重试。',
-      );
+      throw _connectionFailure(createRequest);
     } on SocketException {
       _logTransportFailure(path, 'socket', timer.elapsedMilliseconds);
-      throw ThereBookingException(
-        createRequest
-            ? ThereFailureKind.uncertain
-            : ThereFailureKind.unreachable,
-        createRequest
-            ? '预约提交结果未确认，请先查看我的预约'
-            : '暂时无法访问预约系统。请连接校园网、学校VPN，或开启WebVPN后重试。',
-      );
+      throw _connectionFailure(createRequest);
     } on HandshakeException {
       _logTransportFailure(path, 'tls', timer.elapsedMilliseconds);
       throw const ThereBookingException(
@@ -724,6 +710,16 @@ class ThereBookingClient {
       );
     }
   }
+
+  ThereBookingException _connectionFailure(bool createRequest) => createRequest
+      ? const ThereBookingException(
+          ThereFailureKind.uncertain,
+          '预约提交结果未确认，请先查看我的预约',
+        )
+      : const ThereBookingException(
+          ThereFailureKind.unreachable,
+          '暂时无法访问预约系统。请连接校园网、学校VPN，或开启WebVPN后重试。',
+        );
 
   void _logTransportFailure(String path, String kind, int durationMs) {
     if (!kDebugMode) return;
@@ -829,10 +825,7 @@ class ThereBookingClient {
   }
 
   void _requirePage(_ThereResponse response) {
-    if (response.status == 401 ||
-        (response.status >= 300 &&
-            response.status < 400 &&
-            _isLoginRedirect(response.location))) {
+    if (_requiresLogin(response)) {
       throw const ThereBookingException(
         ThereFailureKind.loginRequired,
         '图书馆预约需要登录',
@@ -847,10 +840,7 @@ class ThereBookingClient {
   }
 
   void _requireBusinessResponse(_ThereResponse response) {
-    if (response.status == 401 ||
-        (response.status >= 300 &&
-            response.status < 400 &&
-            _isLoginRedirect(response.location))) {
+    if (_requiresLogin(response)) {
       throw const ThereBookingException(
         ThereFailureKind.loginRequired,
         '图书馆预约需要登录',
@@ -863,6 +853,12 @@ class ThereBookingClient {
       );
     }
   }
+
+  bool _requiresLogin(_ThereResponse response) =>
+      response.status == 401 ||
+      (response.status >= 300 &&
+          response.status < 400 &&
+          _isLoginRedirect(response.location));
 
   bool _isLoginRedirect(Uri? location) =>
       location != null &&
