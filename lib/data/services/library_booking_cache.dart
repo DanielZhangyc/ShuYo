@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// A small, account-scoped snapshot of server-confirmed recent bookings.
+/// Account-scoped local history of server-confirmed bookings.
 class LibraryBookingCache {
   LibraryBookingCache({Future<SharedPreferences> Function()? preferencesLoader})
       : _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance;
@@ -12,17 +12,27 @@ class LibraryBookingCache {
   String _key(String studentId) =>
       'library_booking.recent.v1.${Uri.encodeComponent(studentId)}';
 
+  String? _bookingId(Object? value) {
+    if (value is! String && value is! num) return null;
+    final id = value.toString().trim();
+    return id.isEmpty ? null : id;
+  }
+
   Future<List<Map<String, dynamic>>> load(String studentId) async {
     try {
       final raw = (await _preferencesLoader()).getString(_key(studentId));
       if (raw == null) return [];
       final decoded = jsonDecode(raw);
       if (decoded is! List) return [];
-      return [
-        for (final item in decoded)
-          if (item is Map)
-            item.map((key, value) => MapEntry(key.toString(), value)),
-      ];
+      final records = <Map<String, dynamic>>[];
+      for (final item in decoded) {
+        if (item is! Map) continue;
+        final record =
+            item.map((key, value) => MapEntry(key.toString(), value));
+        final id = _bookingId(record['id']);
+        if (id != null) records.add({...record, 'id': id});
+      }
+      return records;
     } on Object {
       return [];
     }
@@ -33,45 +43,82 @@ class LibraryBookingCache {
     final existing = await load(studentId);
     final byId = <String, Map<String, dynamic>>{};
     for (final item in existing) {
-      final id = item['id'];
-      if (id is String && item['roomType'] != roomType) byId[id] = item;
+      final id = _bookingId(item['id']);
+      if (id != null && item['roomType'] != roomType) {
+        byId[id] = {...item, 'id': id};
+      }
     }
     for (final item in recent) {
       if (item['roomType'] != roomType) continue;
-      final id = item['id'];
-      if (id is! String || id.isEmpty) continue;
-      byId[id] = {
-        for (final key in [
-          'id',
-          'roomType',
-          'roomName',
-          'officeAreaName',
-          'allOfficeAreaName',
-          'beginTime',
-          'endTime',
-          'status',
-          'statusLabel',
-          'origEndAt',
-          'duration',
-        ])
-          if (item[key] is String || item[key] is num) key: item[key],
-      };
+      final id = _bookingId(item['id']);
+      if (id == null) continue;
+      byId[id] = _storedRecord(item, id);
     }
     final records = byId.values.toList()
       ..sort((a, b) => (b['beginTime']?.toString() ?? '')
           .compareTo(a['beginTime']?.toString() ?? ''));
     try {
       final prefs = await _preferencesLoader();
-      await prefs.setString(
-          _key(studentId), jsonEncode(records.take(30).toList()));
+      await prefs.setString(_key(studentId), jsonEncode(records));
     } on Object {
       // Local storage is advisory; a successful server read remains usable.
     }
   }
 
+  /// Adds or updates records without dropping older history for this venue.
+  Future<void> mergeVenue(String studentId, String roomType,
+      List<Map<String, dynamic>> recent) async {
+    final byId = <String, Map<String, dynamic>>{};
+    for (final item in await load(studentId)) {
+      final id = _bookingId(item['id']);
+      if (id != null) byId[id] = {...item, 'id': id};
+    }
+    for (final item in recent) {
+      if (item['roomType'] != roomType) continue;
+      final id = _bookingId(item['id']);
+      if (id == null) continue;
+      byId[id] = _storedRecord(item, id);
+    }
+    final records = byId.values.toList()
+      ..sort((a, b) => (b['beginTime']?.toString() ?? '')
+          .compareTo(a['beginTime']?.toString() ?? ''));
+    try {
+      final prefs = await _preferencesLoader();
+      await prefs.setString(_key(studentId), jsonEncode(records));
+    } on Object {
+      // Local storage is advisory; a successful server read remains usable.
+    }
+  }
+
+  Map<String, dynamic> _storedRecord(Map<String, dynamic> item, String id) => {
+        for (final key in [
+          'roomType',
+          'roomName',
+          'officeAreaName',
+          'allOfficeAreaName',
+          'beginTime',
+          'endTime',
+          'createdAt',
+          'checkInAt',
+          'status',
+          'statusLabel',
+          'origEndAt',
+          'duration',
+        ])
+          if (item[key] is String || item[key] is num) key: item[key],
+        'id': id,
+        if (item['cxCurrent'] is bool) 'cxCurrent': item['cxCurrent'],
+        if (item['abilities'] is List)
+          'abilities': (item['abilities'] as List)
+              .whereType<String>()
+              .where((value) =>
+                  value == 'cancel' || value == 'sign' || value == 'close')
+              .toList(),
+      };
+
   Future<void> removeBooking(String studentId, String bookingId) async {
     final records = await load(studentId);
-    records.removeWhere((item) => item['id'] == bookingId);
+    records.removeWhere((item) => _bookingId(item['id']) == bookingId);
     try {
       final prefs = await _preferencesLoader();
       await prefs.setString(_key(studentId), jsonEncode(records));
