@@ -487,6 +487,31 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     });
   }
 
+  Future<void> _reloadHistoryCache() async {
+    final revision = _homeRecordsRevision;
+    String? studentId;
+    var cached = <Map<String, dynamic>>[];
+    try {
+      studentId = await AcademicAccountStore().loadStudentId();
+      if (studentId != null) cached = await _bookingCache.load(studentId);
+    } on Object {
+      // Online history remains usable when local storage is unavailable.
+    }
+    if (!mounted) return;
+    _cacheStudentId = studentId ?? _cacheStudentId;
+    setState(() {
+      _homeCacheLoaded = true;
+      final cachedHome = _activeHomeRecords(cached);
+      _homeRecent = revision == _homeRecordsRevision
+          ? _mergeBookingRecords(cachedHome, _homeRecent)
+          : _mergeBookingRecords(
+              cachedHome.where((item) =>
+                  !_homeRefreshedRoomTypes.contains(item['roomType'])),
+              _homeRecent);
+      _cachedHistory = _mergeBookingRecords(cached, _cachedHistory);
+    });
+  }
+
   List<Map<String, dynamic>> _activeHomeRecords(
       Iterable<Map<String, dynamic>> records) {
     final byId = <String, Map<String, dynamic>>{};
@@ -1602,17 +1627,29 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
             ),
             child: Row(children: [
               Expanded(
-                child: Text(
-                  selectedPreviewRoomName ?? '■■■',
-                  key: const ValueKey('selected-seat-label'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: selectedPreviewRoomName == null
-                            ? Colors.black
-                            : null,
-                        fontWeight: FontWeight.w700,
-                      ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('座位号',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: colors.textTertiary)),
+                    Text(
+                      selectedPreviewRoomName ?? '——',
+                      key: const ValueKey('selected-seat-label'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontSize: 24,
+                            color: selectedPreviewRoomName == null
+                                ? colors.textMuted
+                                : null,
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                  ],
                 ),
               ),
               Tooltip(
@@ -2259,7 +2296,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
               final room = visible[index];
               final id = ThereBookingClient.string(room['id']);
               final name =
-                  ThereBookingClient.string(room['name']) ?? id ?? '■■■';
+                  ThereBookingClient.string(room['name']) ?? id ?? '——';
               final isPlaceholder =
                   ThereBookingClient.string(room['name']) == null && id == null;
               final enabled = _isBookable(room);
@@ -2291,7 +2328,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                         child: Text(name,
                             style: TextStyle(
                               color: isPlaceholder
-                                  ? Colors.black
+                                  ? colors.textMuted
                                   : selected
                                       ? colors.onAccent
                                       : enabled
@@ -2347,13 +2384,13 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                                     color: colors.textTertiary,
                                   )),
                       Text(
-                        selectedRoomName ?? '■■■',
+                        selectedRoomName ?? '——',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
                               fontSize: 24,
                               color: selectedRoomName == null
-                                  ? Colors.black
+                                  ? colors.textMuted
                                   : null,
                               fontWeight: FontWeight.w700,
                             ),
@@ -2463,18 +2500,19 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   void _openBookings() {
     if (_busy) return;
     _showBookingLoadFailures = true;
-    if (!_homeCacheLoaded) unawaited(_loadHomeCache());
     setState(() {
       _slideForward = true;
       _step = _BookingStep.bookings;
       _bookingFilter = '全部';
     });
+    unawaited(_reloadHistoryCache());
     unawaited(_refreshBookingsOnOpen());
   }
 
   Future<void> _refreshBookingsOnOpen() async {
-    if (_bookingsLoading) return;
-    if (mounted && _step == _BookingStep.bookings) await _loadBookings();
+    if (mounted && _step == _BookingStep.bookings) {
+      await _loadBookings();
+    }
   }
 
   Future<void> _loadVenue() async {
@@ -2889,20 +2927,14 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       final venues = BookingVenue.values
           .where((venue) => venue.isChaoxing == isChaoxing)
           .toList();
-      if (_step == _BookingStep.venue) {
-        await Future.wait<void>(venues.map((venue) async {
-          await loadVenue(venue, verifyAccount: true, prefetchDetails: false);
-        }));
-        return;
-      }
-      var verified = false;
-      for (final venue in venues) {
-        if (!mounted || generation != _generation) return;
-        final result = await loadVenue(venue,
-            verifyAccount: !verified, prefetchDetails: true);
-        if (result == null) return;
-        verified = result || verified;
-      }
+      final historyMode = _step == _BookingStep.bookings;
+      await Future.wait<void>(venues.map((venue) async {
+        await loadVenue(
+          venue,
+          verifyAccount: true,
+          prefetchDetails: historyMode,
+        );
+      }));
     }
 
     try {

@@ -2046,7 +2046,7 @@ void main() {
     expect(find.text('可选座位数：1/2'), findsNothing);
     await tester.scrollUntilVisible(
         find.widgetWithText(FilledButton, '创建预约'), 180);
-    expect(find.text('■■■'), findsOneWidget);
+    expect(find.text('——'), findsOneWidget);
     for (final key in ['manual-seat-button', 'random-seat-button']) {
       expect(tester.widget<OutlinedButton>(find.byKey(ValueKey(key))).onPressed,
           isNull);
