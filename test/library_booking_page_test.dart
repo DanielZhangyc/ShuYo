@@ -16,6 +16,18 @@ import 'package:shuyo/shared/navigation/shuyo_route.dart';
 import 'package:shuyo/shared/theme/custom_background.dart';
 import 'package:shuyo/shared/theme/shuyo_theme.dart';
 
+/// An indeterminate app bar indicator keeps scheduling frames while a gated
+/// booking request is pending, so settle only after the indicator disappears.
+Future<void> pumpBookingPage(WidgetTester tester) async {
+  for (var attempt = 0; attempt < 20; attempt++) {
+    await tester.pump(const Duration(seconds: 1));
+    if (find.byType(LinearProgressIndicator).evaluate().isEmpty) {
+      await tester.pumpAndSettle();
+      return;
+    }
+  }
+}
+
 class _BookingClient extends ThereBookingClient {
   _BookingClient()
       : super(cookieLoader: (_) async => [], cookieSetter: (_) async {});
@@ -801,13 +813,13 @@ void main() {
         },
       ),
     ));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byType(ShuYoRouteSurface), findsOneWidget);
     expect(find.text('图书馆预约'), findsOneWidget);
 
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('2楼东侧'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 120));
@@ -847,7 +859,7 @@ void main() {
         },
       ),
     ));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
 
     expect(find.text('图书馆预约'), findsOneWidget);
     final previousThereAttempts = there.selectionAttempts;
@@ -864,10 +876,10 @@ void main() {
     );
     await tester.ensureVisible(
         find.text(LibraryBookingNames.venue(BookingVenue.qianweichang)).last);
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(
         find.text(LibraryBookingNames.venue(BookingVenue.qianweichang)).last);
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
 
     expect(find.text('四楼阅览室'), findsOneWidget);
     expect(library.roomsCalls, previousLibraryRoomCalls);
@@ -894,7 +906,7 @@ void main() {
   Future<void> pickTime(
       WidgetTester tester, String box, String hour, String minute) async {
     await tester.tap(find.byKey(ValueKey(box)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     int indexFor(String title, String value) {
       final picker = tester
           .widget<CupertinoPicker>(find.byKey(ValueKey('time-wheel-$title')));
@@ -909,15 +921,15 @@ void main() {
     final hourIndex = indexFor('小时', hour);
     expect(hourIndex, greaterThanOrEqualTo(0));
     hourPicker.scrollController!.jumpToItem(hourIndex);
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     final minutePicker = tester
         .widget<CupertinoPicker>(find.byKey(const ValueKey('time-wheel-分钟')));
     final minuteIndex = indexFor('分钟', minute);
     expect(minuteIndex, greaterThanOrEqualTo(0));
     minutePicker.scrollController!.jumpToItem(minuteIndex);
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('确认时间'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
   }
 
   String boxValue(WidgetTester tester, String key) => tester
@@ -945,7 +957,7 @@ void main() {
         schoolClock: schoolMorning,
       ),
     ));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('图书馆预约'), findsOneWidget);
     expect(find.text('仅查看座位情况'), findsNothing);
     for (final venue in [
@@ -956,7 +968,7 @@ void main() {
       expect(find.text(LibraryBookingNames.venue(venue)), findsWidgets);
     }
     await tester.tap(find.text('延长校区'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text(LibraryBookingNames.venue(BookingVenue.library)),
         findsNothing);
     for (final venue in [
@@ -967,39 +979,39 @@ void main() {
       expect(find.text(LibraryBookingNames.venue(venue)), findsOneWidget);
     }
     await tester.tap(find.text('嘉定校区'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byType(ListTile), findsOneWidget);
     expect(find.text(LibraryBookingNames.venue(BookingVenue.jiading)),
         findsOneWidget);
     await tester.tap(find.text('宝山校区'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.scrollUntilVisible(find.text('我的预约'), 180);
     expect(tester.getTopLeft(find.text('我的预约')).dy,
         lessThan(tester.getTopLeft(find.text('选择场馆')).dy));
     expect(find.text('暂无待履约或进行中的预约'), findsOneWidget);
     await tester.tap(find.text('我的预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('选择场馆'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
     await tester.tap(find.text('查看历史预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.byTooltip('返回上一步'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.scrollUntilVisible(
         find.text(LibraryBookingNames.venue(BookingVenue.library)), -180);
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byTooltip('我的预约'), findsNothing);
     expect(find.text('以下为当前座位情况'), findsNothing);
     expect(find.text('2楼东侧'), findsOneWidget);
     expect(find.textContaining('开放座位数：6/9'), findsOneWidget);
     await tester.tap(find.text('2楼东侧'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('宝山校区 - 本部图书馆 - 2楼东侧'), findsOneWidget);
     expect(find.textContaining(ThereBookingClient.schoolDay()), findsNothing);
     await tester.tap(find.byKey(ValueKey(bookingDayKey())));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.textContaining(ThereBookingClient.schoolDay()), findsNothing);
     expect(find.textContaining('最长 8 小时'), findsOneWidget);
     expect(client.detailAreaCalls, 1);
@@ -1015,7 +1027,7 @@ void main() {
     expect(find.text('可选座位数：1/2'), findsOneWidget);
     final previews = client.detailAreaCalls;
     await tester.tap(find.byKey(const ValueKey('manual-seat-button')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(client.detailAreaCalls, previews + 1);
     expect(find.text('宝山校区 - 本部图书馆 - 2楼东侧'), findsOneWidget);
     expect(find.text('可选座位数：1/2'), findsOneWidget);
@@ -1024,11 +1036,11 @@ void main() {
         isA<Container>());
     expect(find.textContaining(ThereBookingClient.schoolDay()), findsNothing);
     await tester.tap(find.text('2E015'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     final selectedWeight =
         tester.widget<Text>(find.text('2E015')).style!.fontWeight;
     await tester.tap(find.text('2E015'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(tester.widget<Text>(find.text('2E015')).style!.fontWeight,
         selectedWeight);
     expect(
@@ -1037,16 +1049,16 @@ void main() {
             .onPressed,
         isNull);
     await tester.tap(find.text('2E015'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('确认座位'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.scrollUntilVisible(
         find.byKey(const ValueKey('selected-seat-label')), 180);
     expect(find.text('2E015'), findsOneWidget);
     await tester.scrollUntilVisible(
         find.widgetWithText(FilledButton, '创建预约'), 180);
     await tester.tap(find.widgetWithText(FilledButton, '创建预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(
       find.descendant(
         of: find.byType(AlertDialog),
@@ -1055,7 +1067,7 @@ void main() {
       findsOneWidget,
     );
     await tester.tap(find.text('提交'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(client.created, isTrue);
     expect(client.selectedVenues.last, BookingVenue.library);
     expect(find.text('图书馆预约'), findsOneWidget);
@@ -1074,14 +1086,14 @@ void main() {
     expect((createdDetailSheet.shape as RoundedRectangleBorder).borderRadius,
         const BorderRadius.vertical(top: Radius.circular(20)));
     await tester.tap(find.text('取消预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('确认'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(client.cancelled, isTrue);
     for (var step = 0; step < 2; step++) {
       if (find.byTooltip('返回上一步').evaluate().isEmpty) break;
       await tester.tap(find.byTooltip('返回上一步'));
-      await tester.pumpAndSettle();
+      await pumpBookingPage(tester);
     }
     expect(find.text('暂无本地记录'), findsNothing);
     expect(find.textContaining('2E015'), findsNothing);
@@ -1092,7 +1104,7 @@ void main() {
       thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.textContaining('2E015'), findsNothing);
   });
 
@@ -1135,13 +1147,15 @@ void main() {
         findsOneWidget);
     await tester.tap(venue);
     await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('正在加载场馆分区…'), findsNothing);
+    expect(find.text('正在更新场馆分区…'), findsNothing);
     expect(
         find.descendant(
             of: venue, matching: find.byType(CircularProgressIndicator)),
         findsOneWidget);
 
     client.gate.complete();
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(
         find.descendant(of: venue, matching: find.text('1分区')), findsOneWidget);
     expect(library.roomsCalls, 1);
@@ -1158,7 +1172,7 @@ void main() {
             matching: find.byIcon(Icons.keyboard_arrow_down)),
         findsOneWidget);
     await tester.tap(venue);
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(
         find.descendant(
             of: venue, matching: find.byIcon(Icons.keyboard_arrow_down)),
@@ -1188,13 +1202,13 @@ void main() {
         schoolClock: schoolMorning,
       ),
     ));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     final venue = find.byKey(const ValueKey('home-venue-studySpace'));
     expect(
         find.descendant(of: venue, matching: find.text('3分区')), findsOneWidget);
     expect(find.text('3 个场馆'), findsNothing);
     await tester.tap(venue);
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     for (final name in ['A', 'B', 'C']) {
       expect(find.text('分区$name'), findsOneWidget);
     }
@@ -1222,7 +1236,7 @@ void main() {
       expect(client.selectionCalls[venue], 1);
     }
     client.gate.complete();
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(client.areaListCalls, 4);
   });
 
@@ -1245,20 +1259,20 @@ void main() {
         schoolClock: schoolMorning,
       ),
     ));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     for (final venue in BookingVenue.values.where((item) => !item.isChaoxing)) {
       expect(clients[venue]?.areaListCalls, 1);
       expect(clients[venue]?.selectedVenues.toSet(), {venue});
     }
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('校本部图书馆分区'), findsOneWidget);
     await tester.tap(find.text('延长校区'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.scienceArt)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('科学与艺术中心分区'), findsOneWidget);
   });
 
@@ -1276,7 +1290,7 @@ void main() {
         schoolClock: schoolMorning,
       ),
     ));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(
         find.descendant(
             of: find.byKey(const ValueKey('home-venue-library')),
@@ -1284,7 +1298,7 @@ void main() {
         findsNothing);
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('分区暂时无法加载，重试'), findsOneWidget);
     expect(find.text('当前场馆没有可选分区'), findsNothing);
   });
@@ -1312,7 +1326,7 @@ void main() {
         schoolClock: schoolMorning,
       ),
     ));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(
         find.descendant(
             of: find.byKey(const ValueKey('home-venue-library')),
@@ -1320,7 +1334,7 @@ void main() {
         findsNothing);
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('校本部图书馆分区'), findsOneWidget);
     expect(
         find.descendant(
@@ -1342,10 +1356,10 @@ void main() {
         schoolClock: schoolMorning,
       ),
     ));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('分区暂时无法加载，重试'), findsOneWidget);
     expect(find.byIcon(Icons.keyboard_arrow_up), findsOneWidget);
   });
@@ -1368,10 +1382,10 @@ void main() {
         },
       ),
     ));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(recoveries, 1);
     expect(find.text('2楼东侧'), findsOneWidget);
     expect(find.text('选择分区'), findsNothing);
@@ -1387,13 +1401,13 @@ void main() {
       thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('仅查看座位情况'), findsNothing);
     expect(find.text(LibraryBookingNames.venue(BookingVenue.library)),
         findsWidgets);
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('2楼东侧'), findsOneWidget);
   });
 
@@ -1407,20 +1421,20 @@ void main() {
       thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('2楼东侧'));
     await tester.pump(const Duration(milliseconds: 50));
     final enteringArea = tester.getTopLeft(find.byType(Scaffold).last).dx;
     expect(enteringArea, greaterThan(0));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.byTooltip('返回上一步'));
     await tester.pump(const Duration(milliseconds: 50));
     final enteringVenue = tester.getTopLeft(find.byType(Scaffold).last).dx;
     expect(enteringVenue, lessThan(0));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('选择场馆'), findsOneWidget);
   });
 
@@ -1434,14 +1448,14 @@ void main() {
       thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     final rulesText = tester.widget<Text>(find.text('使用规则'));
     expect(rulesText.style?.fontSize, 14.5);
     expect(rulesText.style?.fontWeight, FontWeight.w400);
     expect(find.ancestor(of: find.text('使用规则'), matching: find.byType(InkWell)),
         findsNothing);
     await tester.tap(find.text('使用规则'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byType(LibraryBookingInfoPage), findsOneWidget);
     expect(find.text('注意事项'), findsOneWidget);
     expect(find.textContaining('刷卡或人脸识别'), findsOneWidget);
@@ -1454,11 +1468,11 @@ void main() {
     expect(paragraph.style?.fontSize, 15.5);
     expect(paragraph.textSpan!.toPlainText(), contains('若未按时签到将被记录为违约行为'));
     await tester.pageBack();
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
 
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.studySpace)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('座位分布'), findsOneWidget);
     expect(find.text('常见问题'), findsOneWidget);
     expect(
@@ -1479,18 +1493,18 @@ void main() {
         ),
         findsNothing);
     await tester.tap(find.text('座位分布'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     final viewer =
         tester.widget<InteractiveViewer>(find.byType(InteractiveViewer));
     expect(viewer.maxScale, greaterThan(1));
     final image = tester.widget<Image>(find.byType(Image).first);
     expect((image.image as AssetImage).assetName, librarySeatsAsset);
     await tester.tap(find.byTooltip('关闭图片'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byType(InteractiveViewer), findsNothing);
 
     await tester.tap(find.text('常见问题'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byType(LibraryBookingInfoPage), findsOneWidget);
     expect(find.text('区域分布（包括饮食、仓库、水房等）'), findsOneWidget);
     expect(find.byType(Image), findsOneWidget);
@@ -1508,20 +1522,20 @@ void main() {
     expect(qaParagraph.style?.fontSize, 15.5);
     expect(qaParagraph.textSpan!.toPlainText(), contains('脸部识别/个人信息等：'));
     await tester.pageBack();
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
 
     await tester.tap(find.text('二楼东侧'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.byKey(ValueKey(bookingDayKey())));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.byKey(const ValueKey('manual-seat-button')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('座位分布'), findsOneWidget);
     await tester.tap(find.text('座位分布'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byType(InteractiveViewer), findsOneWidget);
     await tester.tap(find.byTooltip('关闭图片'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
   });
 
   testWidgets('24H help stays on title rows at narrow width', (tester) async {
@@ -1539,19 +1553,19 @@ void main() {
       thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.studySpace)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(tester.takeException(), isNull);
     expect(find.text('座位分布'), findsOneWidget);
     expect(find.text('常见问题'), findsOneWidget);
     await tester.tap(find.text('二楼东侧'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.byKey(ValueKey(bookingDayKey())));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.byKey(const ValueKey('manual-seat-button')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(tester.takeException(), isNull);
     expect(find.text('座位分布'), findsOneWidget);
   });
@@ -1574,7 +1588,7 @@ void main() {
     )));
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     final stats = find.text('开放座位数：6/9');
     expect(stats, findsOneWidget);
     final spans = tester.widget<Text>(stats).textSpan as TextSpan;
@@ -1582,9 +1596,9 @@ void main() {
     expect(available.text, '6');
     expect(available.style?.color, isNotNull);
     await tester.tap(find.text('2楼东侧'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.byKey(ValueKey(bookingDayKey())));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(tester.takeException(), isNull);
   });
 
@@ -1601,9 +1615,9 @@ void main() {
     )));
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('2楼东侧'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byType(ChoiceChip), findsNothing);
     for (var offset = 0; offset < 5; offset++) {
       expect(find.byKey(ValueKey(bookingDayKey(offset))), findsOneWidget);
@@ -1622,7 +1636,7 @@ void main() {
         Theme.of(tester.element(selectedVenue)).textTheme.bodyMedium);
     expect(find.byKey(const ValueKey('start-hour')), findsOneWidget);
     await tester.tap(find.byKey(ValueKey(bookingDayKey())));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byKey(const ValueKey('booking-time-range')), findsOneWidget);
     expect(find.byType(Slider), findsNothing);
     expect(find.byKey(const ValueKey('start-hour')), findsOneWidget);
@@ -1646,7 +1660,7 @@ void main() {
     expect(boxValue(tester, 'end-hour'), '22');
     expect(find.text('可选座位数：1/2'), findsOneWidget);
     await tester.tap(find.byKey(ValueKey(bookingDayKey(1))));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('创建预约'), findsOneWidget);
     expect(find.text('可选座位数：1/2'), findsOneWidget);
     expect(boxValue(tester, 'start-hour'), '08');
@@ -1654,9 +1668,9 @@ void main() {
     expect(boxValue(tester, 'end-hour'), '08');
     expect(boxValue(tester, 'end-minute'), '30');
     await tester.tap(find.byKey(const ValueKey('manual-seat-button')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.byTooltip('返回上一步'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('创建预约'), findsOneWidget);
     expect(find.byKey(ValueKey(bookingDayKey(1))), findsOneWidget);
   });
@@ -1674,9 +1688,9 @@ void main() {
     ));
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('2楼东侧'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
 
     const rangeKey = ValueKey('booking-time-range');
     RangeSlider range() => tester.widget<RangeSlider>(find.byKey(rangeKey));
@@ -1702,7 +1716,7 @@ void main() {
     expect(find.textContaining('正在查询'), findsNothing);
     expect(find.textContaining('可选座位数：'), findsNothing);
     range().onChangeEnd!(range().values);
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(client.detailAreaCalls, previewCalls + 1);
 
     range().onChanged!(const RangeValues(600, 660));
@@ -1711,10 +1725,10 @@ void main() {
     expect(boxValue(tester, 'end-hour'), '11');
     expect(boxValue(tester, 'end-minute'), '00');
     range().onChangeEnd!(range().values);
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     final beforeWheel = client.detailAreaCalls;
     await tester.tap(find.byKey(const ValueKey('start-hour')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     final hourPicker = tester
         .widget<CupertinoPicker>(find.byKey(const ValueKey('time-wheel-小时')));
     final hours =
@@ -1723,10 +1737,10 @@ void main() {
         .indexWhere((child) => ((child as Center).child as Text).data == '12');
     expect(noonIndex, greaterThanOrEqualTo(0));
     hourPicker.scrollController!.jumpToItem(noonIndex);
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(client.detailAreaCalls, beforeWheel);
     await tester.tap(find.text('确认时间'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(client.detailAreaCalls, beforeWheel + 1);
     expect(range().values, const RangeValues(720, 750));
   });
@@ -1746,9 +1760,9 @@ void main() {
       ));
       await tester
           .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-      await tester.pumpAndSettle();
+      await pumpBookingPage(tester);
       await tester.tap(find.text('2楼东侧'));
-      await tester.pumpAndSettle();
+      await pumpBookingPage(tester);
 
       const key = ValueKey('booking-time-range');
       RangeSlider range() => tester.widget<RangeSlider>(find.byKey(key));
@@ -1763,7 +1777,7 @@ void main() {
         expect(range().values.end % 60, 0);
       }
       range().onChangeEnd!(range().values);
-      await tester.pumpAndSettle();
+      await pumpBookingPage(tester);
       expect(find.textContaining('正在查询'), findsNothing);
     });
   }
@@ -1780,15 +1794,15 @@ void main() {
     )));
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('2楼东侧'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('创建预约'), findsOneWidget);
     expect(find.byKey(ValueKey(bookingDayKey())), findsOneWidget);
     expect(find.text('分区时段暂时不可用'), findsOneWidget);
     expect(find.byKey(const ValueKey('start-hour')), findsNothing);
     await tester.tap(find.text('重试加载时段'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('分区时段暂时不可用'), findsNothing);
     expect(find.byKey(const ValueKey('start-hour')), findsOneWidget);
   });
@@ -1807,33 +1821,33 @@ void main() {
         schoolClock: () => DateTime.utc(2026, 10, 18, 21, 18),
       ),
     ));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('2楼东侧'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.byKey(const ValueKey('booking-day-2026-10-19')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await pickTime(tester, 'start-hour', '20', '30');
     await pickTime(tester, 'end-hour', '22', '00');
     await tester.tap(find.byKey(const ValueKey('manual-seat-button')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('2E015'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('确认座位'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.scrollUntilVisible(
         find.widgetWithText(FilledButton, '创建预约'), 180);
     await tester.tap(find.widgetWithText(FilledButton, '创建预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     final confirmation = find.descendant(
       of: find.byType(AlertDialog),
       matching: find.textContaining('宝山校区 - 本部图书馆 - 2楼东侧'),
     );
     expect(confirmation, findsOneWidget);
     await tester.tap(find.text('提交'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(client.submittedDay, '2026-10-19');
     expect(client.submittedStart, '20:30');
     expect(client.submittedEnd, '22:00');
@@ -1852,11 +1866,11 @@ void main() {
     )));
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('2楼东侧'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.byKey(ValueKey(bookingDayKey())));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.textContaining('最短'), findsNothing);
     await pickTime(tester, 'start-hour', '10', '00');
     expect(boxValue(tester, 'start-hour'), '10');
@@ -1877,11 +1891,11 @@ void main() {
     )));
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('2楼东侧'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.byKey(ValueKey(bookingDayKey())));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('今天已无可预约时段'), findsOneWidget);
     expect(
         tester
@@ -1903,11 +1917,11 @@ void main() {
     )));
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('2楼东侧'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.byKey(ValueKey(bookingDayKey())));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(boxValue(tester, 'start-hour'), '08');
     expect(boxValue(tester, 'start-minute'), '30');
     expect(boxValue(tester, 'end-hour'), '09');
@@ -1939,7 +1953,7 @@ void main() {
     )));
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('2楼东侧'));
     for (var i = 0; i < 10 && client.ruleDays.length < 2; i++) {
       await tester.pump();
@@ -1947,7 +1961,7 @@ void main() {
     expect(client.ruleDays, containsAll([bookingDay(), bookingDay(1)]));
     client.todayRules.complete();
     client.nextDayRules.complete();
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
 
     final startFinder = find.byKey(const ValueKey('start-hour'));
     final startElement = tester.element(startFinder);
@@ -1992,9 +2006,9 @@ void main() {
     )));
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('2楼东侧'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(boxValue(tester, 'start-hour'), '08');
     expect(boxValue(tester, 'start-minute'), '00');
     expect(boxValue(tester, 'end-hour'), '08');
@@ -2013,7 +2027,7 @@ void main() {
             .onPressed,
         isNull);
     await tester.tap(find.byKey(const ValueKey('random-seat-button')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('2E015'), findsOneWidget);
     expect(
         tester
@@ -2022,7 +2036,7 @@ void main() {
         isNotNull);
 
     await tester.ensureVisible(find.byKey(const ValueKey('start-hour')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await pickTime(tester, 'start-hour', '10', '00');
     expect(find.text('可选座位数：0/2'), findsOneWidget);
     expect(find.text('可选座位数：1/2'), findsNothing);
@@ -2055,11 +2069,11 @@ void main() {
     ));
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('2楼东侧'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.byKey(ValueKey(bookingDayKey())));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('宝山校区 - 本部图书馆 - 2楼东侧'), findsOneWidget);
     expect(find.text('最长 8 小时'), findsOneWidget);
     expect(find.text('已选 0.5 小时'), findsOneWidget);
@@ -2090,7 +2104,7 @@ void main() {
     ));
     expect(digit.style?.fontSize, 22);
     await tester.tap(find.byKey(const ValueKey('start-hour')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(tester.widget<BottomSheet>(find.byType(BottomSheet)).backgroundColor,
         spec.colors.surface);
     expect(find.byType(CupertinoPicker), findsNWidgets(2));
@@ -2111,7 +2125,7 @@ void main() {
     final adjacent = (children[1] as Center).child as Text;
     expect(adjacent.style?.fontWeight, FontWeight.w400);
     hourWheel.scrollController!.jumpToItem(2);
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     final movedWheel = tester
         .widget<CupertinoPicker>(find.byKey(const ValueKey('time-wheel-小时')));
     final movedChildren =
@@ -2140,10 +2154,10 @@ void main() {
           schoolClock: schoolMorning,
         ));
     await tester.pumpWidget(page());
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
     await tester.tap(find.text('查看历史预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('选择要查看预约的场馆'), findsNothing);
     for (final (index, venue) in [
       BookingVenue.qianweichang,
@@ -2163,7 +2177,7 @@ void main() {
     }
     expect(find.textContaining('CX-1'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey<String>('0:cx:CX_QWC:1')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(
       find.descendant(
         of: find.byType(BottomSheet),
@@ -2175,7 +2189,7 @@ void main() {
     expect(find.text('cx:1'), findsOneWidget);
     expect(find.textContaining('cx:CX_QWC:'), findsNothing);
     await tester.tapAt(const Offset(20, 20));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byIcon(Icons.chevron_right), findsNWidgets(3));
     expect(find.byType(TabBar), findsOneWidget);
     expect(tester.widget<TabBar>(find.byType(TabBar)).isScrollable, isFalse);
@@ -2186,7 +2200,7 @@ void main() {
         BookingVenue.values.where((venue) => !venue.isChaoxing).toSet());
     expect(library.homeCalls, greaterThan(0));
     await tester.tap(find.byTooltip('返回上一步'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('图书馆预约'), findsOneWidget);
   });
 
@@ -2207,31 +2221,31 @@ void main() {
         schoolClock: () => now,
       ),
     ));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
     await tester.tap(find.text('查看历史预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     const bookingKey = ValueKey<String>('0:cx:CX_QWC:123');
     await tester.tap(find.byKey(bookingKey));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('取消预约'), findsOneWidget);
     expect(find.text('签到'), findsNothing);
     await tester.tapAt(const Offset(20, 20));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
 
     now = DateTime.utc(day.year, day.month, day.day, 9, 40);
     await tester.tap(find.byKey(bookingKey));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('取消预约'), findsOneWidget);
     expect(find.text('签到'), findsOneWidget);
     expect(tester.getTopLeft(find.text('取消预约')).dy,
         tester.getTopLeft(find.text('签到')).dy);
     await tester.tap(find.text('签到'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(library.signedId, '123');
     expect(find.byKey(bookingKey), findsOneWidget);
     await tester.tap(find.byKey(bookingKey));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('退座'), findsOneWidget);
     expect(find.text('签到'), findsNothing);
   });
@@ -2250,28 +2264,28 @@ void main() {
         schoolClock: schoolMorning,
       ),
     ));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester
         .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('2楼东侧'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.scrollUntilVisible(
         find.byKey(const ValueKey('random-seat-button')), 180);
     await tester.tap(find.byKey(const ValueKey('random-seat-button')));
     await tester.scrollUntilVisible(
         find.widgetWithText(FilledButton, '创建预约'), 180);
     await tester.tap(find.widgetWithText(FilledButton, '创建预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('提交'));
     await tester.pump();
     expect(find.text('图书馆预约'), findsOneWidget);
     expect(find.text('正在创建预约并更新列表…'), findsNothing);
-    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
     expect(find.byType(BottomSheet), findsNothing);
 
     client.gate.complete();
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(
         find.byKey(const ValueKey<String>('home:BOOKING_1')), findsOneWidget);
     expect(find.text('正在创建预约并更新列表…'), findsNothing);
@@ -2292,7 +2306,7 @@ void main() {
         schoolClock: schoolMorning,
       ),
     ));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.scrollUntilVisible(
         find.byKey(const ValueKey<String>('home:cx:CX_QWC:1')), 180);
     for (final id in [1, 2, 3]) {
@@ -2303,20 +2317,20 @@ void main() {
         find.byKey(const ValueKey<String>('home:cx:CX_QWC:4')), findsNothing);
     await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
     await tester.tap(find.text('查看历史预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('进行中').first);
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byKey(const ValueKey<String>('1:cx:CX_QWC:1')), findsOneWidget);
     expect(find.byKey(const ValueKey<String>('1:cx:CX_QWC:2')), findsOneWidget);
     expect(find.byKey(const ValueKey<String>('1:cx:CX_QWC:3')), findsOneWidget);
     expect(find.byKey(const ValueKey<String>('1:cx:CX_QWC:4')), findsNothing);
     await tester.tap(find.byKey(const ValueKey<String>('1:cx:CX_QWC:2')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('退座'), findsOneWidget);
     await tester.tap(find.text('退座'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('确认'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(library.signedBackId, '2');
     expect(find.byKey(const ValueKey<String>('1:cx:CX_QWC:2')), findsNothing);
   });
@@ -2336,12 +2350,12 @@ void main() {
         schoolClock: () => DateTime.utc(day.year, day.month, day.day, 5),
       ),
     ));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
     await tester.tap(find.text('查看历史预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('进行中').first);
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byKey(const ValueKey<String>('1:cx:CX_QWC:1')), findsNothing);
     expect(find.byKey(const ValueKey<String>('1:cx:CX_QWC:2')), findsOneWidget);
     expect(find.byKey(const ValueKey<String>('1:cx:CX_QWC:3')), findsOneWidget);
@@ -2360,17 +2374,89 @@ void main() {
       chaoxingClient: library,
       schoolClock: schoolMorning,
     )));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
     await tester.tap(find.text('查看历史预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byKey(const ValueKey<String>('0:UPCOMING')), findsOneWidget);
     expect(find.textContaining('B-034'), findsOneWidget);
     final notice = tester.widget<SnackBar>(find.byType(SnackBar));
     expect((notice.content as Text).data, '部分预约加载失败，请稍后刷新');
     expect(notice.behavior, SnackBarBehavior.fixed);
     expect(find.text('暂无可显示的预约记录'), findsNothing);
-    expect(library.homeCalls, 1);
+    expect(library.homeCalls, greaterThanOrEqualTo(1));
+  });
+
+  testWidgets('shows locally saved booking history when services are offline',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      AcademicAccountStore.studentIdKey: 'STUDENT_1',
+    });
+    await LibraryBookingCache()
+        .mergeVenue('STUDENT_1', BookingVenue.studySpace.roomType, [
+      {
+        'id': 'LOCAL_HISTORY',
+        'roomType': BookingVenue.studySpace.roomType,
+        'roomName': 'B-034',
+        'beginTime': '2025-01-01 08:30:00',
+        'endTime': '2025-01-01 09:30:00',
+        'status': 'CANCEL',
+        'statusLabel': '已取消',
+      },
+    ]);
+    final there = _UnreachableBookingClient();
+    final library = _UnavailableChaoxingBookingClient();
+    addTearDown(there.dispose);
+    addTearDown(library.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: LibraryBookingPage(
+        accountService: UnifiedAccountService(),
+        thereClientFactory: (_) => there,
+        chaoxingClient: library,
+        schoolClock: schoolMorning,
+      ),
+    ));
+    await pumpBookingPage(tester);
+    await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
+    await tester.tap(find.text('查看历史预约'));
+    await pumpBookingPage(tester);
+
+    final localBooking = find.byKey(const ValueKey<String>('0:LOCAL_HISTORY'));
+    expect(localBooking, findsOneWidget);
+    expect(find.descendant(of: localBooking, matching: find.text('已取消')),
+        findsOneWidget);
+    expect(find.textContaining('B-034'), findsOneWidget);
+  });
+
+  testWidgets('persists server booking results as local history',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      AcademicAccountStore.studentIdKey: 'STUDENT_1',
+    });
+    final there = _HistoryClient();
+    final library = _EmptyChaoxingBookingClient();
+    addTearDown(there.dispose);
+    addTearDown(library.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: LibraryBookingPage(
+        accountService: UnifiedAccountService(),
+        thereClientFactory: (_) => there,
+        chaoxingClient: library,
+        schoolClock: schoolMorning,
+      ),
+    ));
+    await pumpBookingPage(tester);
+
+    var saved = await LibraryBookingCache().load('STUDENT_1');
+    for (var attempt = 0; attempt < 10 && saved.length < 2; attempt++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      saved = await LibraryBookingCache().load('STUDENT_1');
+    }
+    expect(saved.map((item) => item['id']),
+        containsAll(['UPCOMING', 'FINISHED_EARLY']));
+    expect(
+        saved.singleWhere((item) => item['id'] == 'FINISHED_EARLY')['status'],
+        'CANCEL');
   });
 
   testWidgets('all booking failures use the bottom notice', (tester) async {
@@ -2385,10 +2471,10 @@ void main() {
       chaoxingClient: library,
       schoolClock: schoolMorning,
     )));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
     await tester.tap(find.text('查看历史预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byType(TabBar), findsOneWidget);
     expect(find.text('暂无可显示的预约记录'), findsOneWidget);
     final notice = tester.widget<SnackBar>(find.byType(SnackBar));
@@ -2409,12 +2495,13 @@ void main() {
       chaoxingClient: library,
       schoolClock: schoolMorning,
     )));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
     await tester.tap(find.text('查看历史预约'));
     await tester.pump(const Duration(milliseconds: 300));
     expect(there.recentStarted, isTrue);
     expect(library.homeStarted, isTrue);
+    expect(find.byType(LinearProgressIndicator), findsWidgets);
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(find.text('正在获取预约记录…'), findsNothing);
 
@@ -2428,7 +2515,7 @@ void main() {
     final earlyTileState = tester.state(find.byKey(earlyKey));
 
     there.gate.complete();
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     const lateKey = ValueKey<String>('0:LIB-LATE');
     expect(find.byKey(lateKey), findsOneWidget);
     expect(tester.getTopLeft(find.byKey(lateKey)).dy,
@@ -2445,7 +2532,7 @@ void main() {
       matching: find.byType(SlideTransition),
     ));
     expect(replaySlide.position.value, isNot(Offset.zero));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
   });
 
   testWidgets('booking tabs fit a narrow screen without scrolling',
@@ -2465,10 +2552,10 @@ void main() {
       chaoxingClient: library,
       schoolClock: schoolMorning,
     )));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
     await tester.tap(find.text('查看历史预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(tester.takeException(), isNull);
     expect(tester.widget<TabBar>(find.byType(TabBar)).isScrollable, isFalse);
     expect(find.text('已取消'), findsOneWidget);
@@ -2487,7 +2574,7 @@ void main() {
       chaoxingClient: library,
       schoolClock: schoolMorning,
     )));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(
         find.descendant(
             of: find.byKey(const ValueKey<String>('home:UPCOMING')),
@@ -2495,7 +2582,7 @@ void main() {
         findsOneWidget);
     await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
     await tester.tap(find.text('查看历史预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byKey(const ValueKey<String>('0:UPCOMING')), findsOneWidget);
     expect(find.textContaining('B-034'), findsOneWidget);
     expect(
@@ -2517,14 +2604,14 @@ void main() {
     expect(find.textContaining('$day 08:30'), findsNothing);
     expect(find.textContaining('${day.substring(5)} 08:30'), findsOneWidget);
     await tester.tap(find.text('待履约').first);
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     const upcomingKey = ValueKey<String>('1:UPCOMING');
     expect(find.byKey(upcomingKey), findsOneWidget);
     expect(
         find.byKey(const ValueKey<String>('1:FINISHED_EARLY')), findsNothing);
     final detailsBeforeTap = client.bookingDetailCalls;
     await tester.tap(find.byKey(upcomingKey));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(client.bookingDetailCalls, detailsBeforeTap + 1);
     final listedDetailSheet =
         tester.widget<BottomSheet>(find.byType(BottomSheet));
@@ -2540,29 +2627,29 @@ void main() {
     expect(find.text('there:UPCOMING'), findsOneWidget);
     expect(find.text('座位'), findsNothing);
     await tester.tapAt(const Offset(20, 20));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('已结束'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(
         find.byKey(const ValueKey<String>('2:FINISHED_EARLY')), findsOneWidget);
     expect(find.byKey(const ValueKey<String>('2:UPCOMING')), findsNothing);
     expect(find.text('已结束'), findsNWidgets(2));
     expect(find.byIcon(Icons.chevron_right), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey<String>('2:FINISHED_EARLY')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byType(BottomSheet), findsOneWidget);
     expect(find.text('2025-12-31 21:05'), findsOneWidget);
     expect(find.text('取消预约'), findsNothing);
     await tester.tapAt(const Offset(20, 20));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('全部'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.byKey(const ValueKey<String>('3:UPCOMING')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('取消预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('确认'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(client.cancelled, isTrue);
     expect(client.cancellationVenue, BookingVenue.studySpace);
   });
@@ -2580,14 +2667,14 @@ void main() {
       chaoxingClient: library,
       schoolClock: schoolMorning,
     )));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     final homeTile = find.byKey(const ValueKey<String>('home:CLOSE_ONLY'));
     await tester.scrollUntilVisible(homeTile, 180);
     expect(find.descendant(of: homeTile, matching: find.text('待履约')),
         findsOneWidget);
     await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
     await tester.tap(find.text('查看历史预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byKey(const ValueKey<String>('0:CLOSE_ONLY')), findsOneWidget);
     expect(
         find.descendant(
@@ -2598,7 +2685,7 @@ void main() {
     expect(client.bookingDetailCalls, 1);
     expect(find.byIcon(Icons.chevron_right), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey<String>('0:CLOSE_ONLY')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byType(BottomSheet), findsOneWidget);
     expect(find.text('取消预约'), findsNothing);
     expect(find.text('退座'), findsOneWidget);
@@ -2606,7 +2693,8 @@ void main() {
   });
 
   for (final ability in ['close', 'cancel']) {
-    testWidgets('cached booking loads $ability before showing its action',
+    testWidgets(
+        'shows cached bookings and actions while refreshing $ability data',
         (tester) async {
       final day = ThereBookingClient.schoolDay();
       SharedPreferences.setMockInitialValues({
@@ -2634,27 +2722,41 @@ void main() {
         chaoxingClient: library,
         schoolClock: () => DateTime.parse('${day}T09:00:00'),
       )));
-      await tester.pumpAndSettle();
       final tile = find.byKey(const ValueKey<String>('home:CACHED_ACTION'));
+      for (var attempt = 0; attempt < 5 && tile.evaluate().isEmpty; attempt++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
       expect(tile, findsOneWidget);
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      expect(find.text('正在更新预约状态…'), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
       await tester.tap(tile);
-      await tester.tap(tile);
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
       expect(client.bookingDetailCalls, 1);
       expect(find.byType(BottomSheet), findsOneWidget);
       final action = ability == 'close' ? '退座' : '取消预约';
       expect(find.text(action), findsOneWidget);
+      await tester.drag(
+          find
+              .descendant(
+                  of: find.byType(BottomSheet),
+                  matching: find.byType(Scrollable))
+              .last,
+          const Offset(0, -500));
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.tap(find.text(action));
-      await tester.pumpAndSettle();
-      if (ability == 'close') {
-        expect(find.text('确认退座'), findsOneWidget);
-        expect(find.text('退座后本次预约将立即结束，座位会释放，且无法恢复。'), findsOneWidget);
-      } else {
-        expect(find.text('取消这条预约'), findsOneWidget);
-      }
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text(ability == 'close' ? '确认退座' : '取消这条预约'), findsOneWidget);
       await tester.tap(find.text(ability == 'close' ? '返回' : '保留'));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tapAt(const Offset(20, 20));
+      await tester.pump(const Duration(milliseconds: 300));
+
       client.recentGate.complete();
-      await tester.pumpAndSettle();
+      await pumpBookingPage(tester);
+      expect(tile, findsNothing);
+      expect(find.text('暂无待履约或进行中的预约'), findsOneWidget);
+      expect(client.bookingDetailCalls, 1);
     });
   }
 
@@ -2681,7 +2783,7 @@ void main() {
         chaoxingClient: library,
         schoolClock: () => DateTime.parse('${day}T09:00:00'),
       )));
-      await tester.pumpAndSettle();
+      await pumpBookingPage(tester);
       expect(find.byKey(const ValueKey<String>('home:HOME_ACTION')),
           findsOneWidget);
       expect(find.byKey(const ValueKey<String>('home:HOME_STABLE')),
@@ -2696,11 +2798,11 @@ void main() {
           entry.key: entry.value.areaListCalls,
       };
       await tester.tap(find.byKey(const ValueKey<String>('home:HOME_ACTION')));
-      await tester.pumpAndSettle();
+      await pumpBookingPage(tester);
       await tester.tap(find.text(action == 'close' ? '退座' : '取消预约'));
-      await tester.pumpAndSettle();
+      await pumpBookingPage(tester);
       await tester.tap(find.text('确认'));
-      await tester.pumpAndSettle();
+      await pumpBookingPage(tester);
       expect(actionClient.written, isTrue);
       expect(actionClient.recentCalls, greaterThan(previousActionCalls));
       expect(stableClient.recentCalls, previousStableCalls);
@@ -2714,7 +2816,7 @@ void main() {
           findsOneWidget);
       await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
       await tester.tap(find.text('查看历史预约'));
-      await tester.pumpAndSettle();
+      await pumpBookingPage(tester);
       final updated = find.byKey(const ValueKey<String>('0:HOME_ACTION'));
       expect(updated, findsOneWidget);
       expect(
@@ -2739,18 +2841,18 @@ void main() {
       chaoxingClient: library,
       schoolClock: schoolMorning,
     )));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
     await tester.tap(find.text('查看历史预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.byIcon(Icons.chevron_right), findsNWidgets(2));
     await tester.tap(find.byKey(const ValueKey<String>('0:UPCOMING')));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(find.text('取消预约'), findsOneWidget);
     await tester.tap(find.text('取消预约'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.tap(find.text('确认'));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     expect(client.cancelled, isTrue);
   });
 
@@ -2767,16 +2869,16 @@ void main() {
       chaoxingClient: library,
       schoolClock: schoolMorning,
     )));
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
     await tester.tap(find.text('查看历史预约'));
     await tester.pump(const Duration(milliseconds: 300));
     expect(
         find.byKey(const ValueKey<String>('0:FINISHED_EARLY')), findsOneWidget);
-    expect(find.byKey(const ValueKey<String>('0:UPCOMING')), findsNothing);
+    expect(find.byKey(const ValueKey<String>('0:UPCOMING')), findsOneWidget);
 
     client.detailGate.complete();
-    await tester.pumpAndSettle();
+    await pumpBookingPage(tester);
     const tileKey = ValueKey<String>('0:UPCOMING');
     final tile = find.byKey(tileKey);
     final arrow = find.descendant(

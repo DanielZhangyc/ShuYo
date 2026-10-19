@@ -267,6 +267,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   final Set<BookingVenue> _expandedVenues = {};
   final Map<BookingVenue, List<Map<String, dynamic>>> _homeAreasByVenue = {};
   final Set<BookingVenue> _loadingHomeAreas = {};
+  final Set<BookingVenue> _refreshingHomeSeatCounts = {};
   final Map<BookingVenue, String> _homeAreaErrors = {};
   final Map<BookingVenue, int> _homeAreaGenerations = {};
   late String _day;
@@ -282,13 +283,18 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   Map<String, dynamic>? _areaData;
   List<Map<String, dynamic>> _rooms = [];
   List<Map<String, dynamic>> _recent = [];
-  final Map<String, Map<String, dynamic>> _prefetchedDetails = {};
-  final Set<String> _openingDetails = {};
   final LibraryBookingCache _bookingCache = LibraryBookingCache();
   List<Map<String, dynamic>> _homeRecent = [];
-  bool _homeCacheLoaded = false;
+  List<Map<String, dynamic>> _cachedHistory = [];
+  final Set<String> _homeRefreshedRoomTypes = {};
   String? _cacheStudentId;
-  int _cacheGeneration = 0;
+  bool _homeCacheLoaded = false;
+  bool _homeCacheLoading = false;
+  int _homeRecordsRevision = 0;
+  int _historyRecordsRevision = 0;
+  Future<void> _bookingCacheWriteQueue = Future<void>.value();
+  final Map<String, Map<String, dynamic>> _prefetchedDetails = {};
+  final Set<String> _openingDetails = {};
   final Map<String, bool> _awaitingWriteStatus = {};
   String _start = '08:00';
   String _end = '08:30';
@@ -323,6 +329,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   bool _loading = false;
   bool _loadingSeats = false;
   bool _busy = false;
+  bool _bookingWriteRefreshing = false;
   int _generation = 0;
   Future<void> _authenticationQueue = Future<void>.value();
   String _bookingFilter = '全部';
@@ -330,18 +337,13 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   bool _bookingsIncomplete = false;
   bool _bookingsLoading = false;
   bool _showBookingLoadFailures = true;
-  bool _bookingsLoadedAtLeastOnce = false;
   Future<void> _bookingsLoadFinished = Future<void>.value();
 
   @override
   void initState() {
     super.initState();
     _day = _clockDay;
-    unawaited(_loadHomeCache());
-    unawaited(_loadBookings(showFailures: false));
-    for (final venue in BookingVenue.values) {
-      unawaited(_loadHomeVenueAreas(venue));
-    }
+    _refreshHomeData(refreshVenues: true);
   }
 
   @override
@@ -359,6 +361,8 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   }
 
   void _setStep(_BookingStep step, {bool forward = false}) {
+    final enteringHome =
+        _step != _BookingStep.venue && step == _BookingStep.venue;
     ++_generation;
     setState(() {
       _slideForward = forward;
@@ -369,6 +373,196 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       _loadingAllAreas = false;
       _error = null;
     });
+    if (enteringHome) _refreshHomeData();
+  }
+
+  void _refreshHomeData({bool refreshVenues = false}) {
+    if (!_homeCacheLoaded) unawaited(_loadHomeCache());
+    unawaited(_loadBookings(showFailures: false));
+    if (refreshVenues) {
+      for (final venue in BookingVenue.values) {
+        unawaited(_loadHomeVenueAreas(venue));
+      }
+    } else {
+      unawaited(_refreshHomeSeatCounts());
+    }
+  }
+
+  Future<void> _refreshHomeSeatCounts() async {
+    Future<void> refreshVenue(BookingVenue venue) async {
+      if (_homeAreasByVenue[venue] == null ||
+          _loadingHomeAreas.contains(venue) ||
+          !_refreshingHomeSeatCounts.add(venue)) {
+        return;
+      }
+      final generation = _homeAreaGenerations[venue] ?? 0;
+      try {
+        final client = _clientForVenue(venue);
+        final request = () async {
+          final profile = await _read(() async {
+            await _ensureVenueSelected(venue, client);
+            return client.profile();
+          }, venue: venue, client: client, interactiveAuth: false);
+          await _checkAccount(profile, client: client);
+          return _read(() => client.areas(_clockDay),
+              venue: venue, client: client, interactiveAuth: false);
+        }();
+        final latest = _areasForVenue(
+            await request.timeout(const Duration(seconds: 15)), venue);
+        if (!mounted ||
+            _homeAreaGenerations[venue] != generation ||
+            _loadingHomeAreas.contains(venue)) {
+          return;
+        }
+        final latestById = <String, Map<String, dynamic>>{};
+        for (final area in latest) {
+          final id = ThereBookingClient.string(area['id']);
+          if (id != null) latestById[id] = area;
+        }
+        final current = _homeAreasByVenue[venue];
+        if (current == null) return;
+        var changed = false;
+        final refreshed = <Map<String, dynamic>>[];
+        for (final area in current) {
+          final id = ThereBookingClient.string(area['id']);
+          final update = id == null ? null : latestById[id];
+          if (update == null) {
+            refreshed.add(area);
+            continue;
+          }
+          final merged = Map<String, dynamic>.of(area);
+          for (final key in const [
+            'totalResourceCount',
+            'disabledResourceCount',
+            'freeResourceCount',
+          ]) {
+            if (update.containsKey(key) && merged[key] != update[key]) {
+              merged[key] = update[key];
+              changed = true;
+            }
+          }
+          refreshed.add(merged);
+        }
+        if (changed) {
+          setState(() => _homeAreasByVenue[venue] = refreshed);
+        }
+      } on Object {
+        // A quiet seat-count refresh must not interrupt the home screen.
+      } finally {
+        _refreshingHomeSeatCounts.remove(venue);
+      }
+    }
+
+    await Future.wait(BookingVenue.values.map(refreshVenue));
+  }
+
+  Future<void> _loadHomeCache() async {
+    if (_homeCacheLoading || _homeCacheLoaded) return;
+    _homeCacheLoading = true;
+    final revision = _homeRecordsRevision;
+    final historyRevision = _historyRecordsRevision;
+    String? studentId;
+    var cached = <Map<String, dynamic>>[];
+    try {
+      studentId = await AcademicAccountStore().loadStudentId();
+      if (studentId != null) cached = await _bookingCache.load(studentId);
+    } on Object {
+      // The live refresh remains usable when local storage is unavailable.
+    }
+    _homeCacheLoading = false;
+    if (!mounted) return;
+    _cacheStudentId = studentId ?? _cacheStudentId;
+    setState(() {
+      _homeCacheLoaded = true;
+      if (revision == _homeRecordsRevision) {
+        _homeRecent = _activeHomeRecords(cached);
+      } else {
+        final unrefreshed = _activeHomeRecords(cached).where(
+            (item) => !_homeRefreshedRoomTypes.contains(item['roomType']));
+        _homeRecent = _mergeBookingRecords(unrefreshed, _homeRecent);
+      }
+      _cachedHistory = historyRevision == _historyRecordsRevision
+          ? _mergeBookingRecords(cached, const [])
+          : _mergeBookingRecords(cached, _cachedHistory);
+    });
+  }
+
+  List<Map<String, dynamic>> _activeHomeRecords(
+      Iterable<Map<String, dynamic>> records) {
+    final byId = <String, Map<String, dynamic>>{};
+    for (final item in records) {
+      final id = ThereBookingClient.string(item['id']);
+      final category = LibraryBookingRecord.category(item, _schoolNow);
+      if (id != null && (category == '待履约' || category == '进行中')) {
+        byId[id] = item;
+      }
+    }
+    final result = byId.values.toList()
+      ..sort((a, b) => (ThereBookingClient.string(b['beginTime']) ?? '')
+          .compareTo(ThereBookingClient.string(a['beginTime']) ?? ''));
+    return result;
+  }
+
+  List<Map<String, dynamic>> _mergeBookingRecords(
+      Iterable<Map<String, dynamic>> existing,
+      Iterable<Map<String, dynamic>> updates) {
+    final byId = <String, Map<String, dynamic>>{};
+    for (final item in existing) {
+      final id = ThereBookingClient.string(item['id']);
+      if (id != null) byId[id] = item;
+    }
+    for (final item in updates) {
+      final id = ThereBookingClient.string(item['id']);
+      if (id != null) byId[id] = item;
+    }
+    return byId.values.toList()
+      ..sort((a, b) => (ThereBookingClient.string(b['beginTime']) ?? '')
+          .compareTo(ThereBookingClient.string(a['beginTime']) ?? ''));
+  }
+
+  List<Map<String, dynamic>> _bookingHistory() =>
+      _mergeBookingRecords(_cachedHistory, _recent);
+
+  void _enqueueBookingCacheWrite(
+      Future<void> Function(String studentId) write) {
+    final pending = _bookingCacheWriteQueue.then((_) async {
+      final studentId =
+          _cacheStudentId ?? await AcademicAccountStore().loadStudentId();
+      if (studentId == null) return;
+      _cacheStudentId = studentId;
+      await write(studentId);
+    });
+    _bookingCacheWriteQueue = pending.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+  }
+
+  void _cacheRecentForVenue(
+      BookingVenue venue, List<Map<String, dynamic>> recent) {
+    final confirmed = recent.where((item) {
+      if (item['roomType'] != venue.roomType) return false;
+      final id = ThereBookingClient.string(item['id']);
+      final expectsFinish = id == null ? null : _awaitingWriteStatus[id];
+      return expectsFinish == null ||
+          _writeStatusConfirmed(item, expectsFinish);
+    }).toList();
+    final active = _activeHomeRecords(confirmed);
+    _homeRecordsRevision++;
+    _historyRecordsRevision++;
+    _homeRefreshedRoomTypes.add(venue.roomType);
+    if (mounted) {
+      setState(() {
+        _homeRecent.removeWhere((item) => item['roomType'] == venue.roomType);
+        _homeRecent.addAll(active);
+        _homeRecent.sort((a, b) =>
+            (ThereBookingClient.string(b['beginTime']) ?? '')
+                .compareTo(ThereBookingClient.string(a['beginTime']) ?? ''));
+        _cachedHistory = _mergeBookingRecords(_cachedHistory, confirmed);
+      });
+    }
+    _enqueueBookingCacheWrite((studentId) =>
+        _bookingCache.mergeVenue(studentId, venue.roomType, confirmed));
   }
 
   void _goBack() {
@@ -435,6 +629,12 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                       icon: const Icon(Icons.arrow_back),
                     ),
               title: Text(_pageTitle),
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(3),
+                child: _showBookingProgress
+                    ? const LinearProgressIndicator(minHeight: 3)
+                    : const SizedBox(height: 3),
+              ),
             ),
             body: _loading
                 ? _loadingBody()
@@ -469,6 +669,16 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         _BookingStep.time => '创建预约',
         _BookingStep.seat => _viewOnly ? '查看座位情况' : '选择座位',
         _BookingStep.bookings => '我的预约',
+      };
+
+  bool get _showBookingProgress => switch (_step) {
+        _BookingStep.venue => _bookingsLoading ||
+            !_homeCacheLoaded ||
+            _busy ||
+            _bookingWriteRefreshing,
+        _BookingStep.bookings =>
+          _bookingsLoading || _busy || _bookingWriteRefreshing,
+        _ => false,
       };
 
   Widget _loadingBody() => Center(
@@ -680,10 +890,16 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         padding: const EdgeInsets.fromLTRB(0, 8, 16, 8),
         child: Text('我的预约', style: Theme.of(context).textTheme.titleLarge),
       ),
-      if (records.isEmpty && _homeCacheLoaded && !_bookingsLoading)
+      if (!_bookingsLoading && _homeCacheLoaded && records.isEmpty)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Text('暂无待履约或进行中的预约',
+          child: Text(_bookingsIncomplete ? '预约列表暂时无法完整加载' : '暂无待履约或进行中的预约',
+              style: TextStyle(color: colors.textTertiary)),
+        ),
+      if (!_bookingsLoading && records.isNotEmpty && _bookingsIncomplete)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Text('部分预约状态暂时无法更新',
               style: TextStyle(color: colors.textTertiary)),
         ),
       for (final (index, item) in records.indexed) ...[
@@ -740,7 +956,11 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
 
   List<Map<String, dynamic>> _homeActiveBookings() {
     final byId = <String, Map<String, dynamic>>{};
-    for (final item in [..._homeRecent, ..._recent]) {
+    for (final item in _homeRecent) {
+      final id = ThereBookingClient.string(item['id']);
+      if (id != null) byId[id] = item;
+    }
+    for (final item in _recent) {
       final id = ThereBookingClient.string(item['id']);
       if (id != null) byId[id] = item;
     }
@@ -825,55 +1045,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     }
   }
 
-  Future<void> _loadHomeCache() async {
-    final generation = ++_cacheGeneration;
-    try {
-      final studentId = await AcademicAccountStore().loadStudentId();
-      final records = studentId == null
-          ? <Map<String, dynamic>>[]
-          : await _bookingCache.load(studentId);
-      if (!mounted || generation != _cacheGeneration) return;
-      setState(() {
-        _cacheStudentId = studentId;
-        _homeRecent = records;
-        _homeCacheLoaded = true;
-      });
-    } on Object {
-      if (mounted && generation == _cacheGeneration) {
-        setState(() => _homeCacheLoaded = true);
-      }
-    }
-  }
-
-  Future<void> _cacheRecentForVenue(
-      BookingVenue venue, List<Map<String, dynamic>> recent) async {
-    final generation = ++_cacheGeneration;
-    try {
-      final studentId = await AcademicAccountStore().loadStudentId();
-      if (studentId == null) return;
-      final confirmed = <Map<String, dynamic>>[];
-      for (final item in recent) {
-        final id = ThereBookingClient.string(item['id']);
-        final expectsFinish = id == null ? null : _awaitingWriteStatus[id];
-        if (expectsFinish != null) {
-          if (!_writeStatusConfirmed(item, expectsFinish)) continue;
-        }
-        confirmed.add(item);
-      }
-      await _bookingCache.replaceVenue(studentId, venue.roomType, confirmed);
-      if (!mounted) return;
-      final records = await _bookingCache.load(studentId);
-      if (!mounted || generation != _cacheGeneration) return;
-      setState(() {
-        _cacheStudentId = studentId;
-        _homeRecent = records;
-        _homeCacheLoaded = true;
-      });
-    } on Object {
-      // Cache failures must not affect an otherwise successful server read.
-    }
-  }
-
   bool _writeStatusConfirmed(Map<String, dynamic> item, bool expectsFinish) {
     final status =
         (ThereBookingClient.string(item['status']) ?? '').toUpperCase();
@@ -887,24 +1058,21 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         (ThereBookingClient.string(item['statusLabel']) ?? '').contains('取消');
   }
 
-  Future<void> _removeBookingFromCache(String bookingId) async {
-    final generation = ++_cacheGeneration;
-    try {
-      final studentId =
-          _cacheStudentId ?? await AcademicAccountStore().loadStudentId();
-      if (studentId == null) return;
-      await _bookingCache.removeBooking(studentId, bookingId);
-      if (!mounted) return;
-      final records = await _bookingCache.load(studentId);
-      if (mounted && generation == _cacheGeneration) {
-        setState(() => _homeRecent = records);
-      }
-    } on Object {
-      if (mounted) {
-        setState(
-            () => _homeRecent.removeWhere((item) => item['id'] == bookingId));
-      }
-    }
+  void _removeBookingFromRecent(String bookingId) {
+    if (!mounted) return;
+    final removed = [..._homeRecent, ..._recent, ..._cachedHistory]
+        .where((item) => ThereBookingClient.string(item['id']) == bookingId)
+        .firstOrNull;
+    final roomType = ThereBookingClient.string(removed?['roomType']);
+    if (roomType != null) _homeRefreshedRoomTypes.add(roomType);
+    setState(() {
+      _recent.removeWhere(
+          (item) => ThereBookingClient.string(item['id']) == bookingId);
+      _homeRecent.removeWhere(
+          (item) => ThereBookingClient.string(item['id']) == bookingId);
+      _prefetchedDetails.remove(bookingId);
+    });
+    _homeRecordsRevision++;
   }
 
   Widget _viewVenueSelectionPage() {
@@ -2162,7 +2330,8 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
 
   Widget _bookingsPage() {
     const filters = ['全部', '待履约', '进行中', '已结束', '已取消'];
-    final visible = _recent
+    final history = _bookingHistory();
+    final visible = history
         .where((item) =>
             _bookingFilter == '全部' ||
             LibraryBookingRecord.category(item, _schoolNow) == _bookingFilter)
@@ -2194,7 +2363,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                 : ListView(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                     children: [
-                      Text(_recent.isEmpty
+                      Text(history.isEmpty
                           ? (_bookingsIncomplete ? '暂无可显示的预约记录' : '暂无预约记录')
                           : '没有符合条件的预约'),
                     ],
@@ -2241,19 +2410,18 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   void _openBookings() {
     if (_busy) return;
     _showBookingLoadFailures = true;
-    final shouldLoad = !_bookingsLoading && !_bookingsLoadedAtLeastOnce;
-    final showPreviousFailure =
-        !_bookingsLoading && _bookingsLoadedAtLeastOnce && _bookingsIncomplete;
+    if (!_homeCacheLoaded) unawaited(_loadHomeCache());
     setState(() {
       _slideForward = true;
       _step = _BookingStep.bookings;
       _bookingFilter = '全部';
     });
-    if (shouldLoad) {
-      unawaited(_loadBookings());
-    } else if (showPreviousFailure) {
-      _showMessage(_recent.isEmpty ? '预约加载失败，请稍后刷新' : '部分预约加载失败，请稍后刷新');
-    }
+    unawaited(_refreshBookingsOnOpen());
+  }
+
+  Future<void> _refreshBookingsOnOpen() async {
+    if (_bookingsLoading) return;
+    if (mounted && _step == _BookingStep.bookings) await _loadBookings();
   }
 
   Future<void> _loadVenue() async {
@@ -2554,101 +2722,138 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     });
     var hadFailure = false;
     var successfulVenues = 0;
-    var cacheWrite = Future<void>.value();
 
-    Future<void> loadSystem(bool isChaoxing) async {
-      var verified = false;
-      for (final venue in BookingVenue.values
-          .where((venue) => venue.isChaoxing == isChaoxing)) {
-        if (!mounted || generation != _generation) return;
-        final client = _clientForVenue(venue);
-        try {
+    Future<bool?> loadVenue(BookingVenue venue,
+        {required bool verifyAccount, required bool prefetchDetails}) async {
+      if (!mounted || generation != _generation) return false;
+      final client = _clientForVenue(venue);
+      var accountVerified = !verifyAccount;
+      try {
+        late final List<Map<String, dynamic>> recent;
+        if (prefetchDetails) {
           await _read(() async {
             await _ensureVenueSelected(venue, client);
-            if (!verified) {
+            if (verifyAccount) {
               await _checkAccount(await client.profile(), client: client);
-              verified = true;
+              accountVerified = true;
             }
             return true;
           }, venue: venue, client: client, interactiveAuth: showFailures);
-          final recent = await _read(client.recent,
+          recent = await _read(client.recent,
               venue: venue, client: client, interactiveAuth: showFailures);
-          if (!mounted || generation != _generation) return;
-          successfulVenues++;
-          cacheWrite =
-              cacheWrite.then((_) => _cacheRecentForVenue(venue, recent));
-          for (final item in recent) {
-            final id = ThereBookingClient.string(item['id']);
-            if (id == null || item['roomType'] != venue.roomType) {
-              continue;
-            }
-            final expectsFinish = _awaitingWriteStatus[id];
-            if (expectsFinish != null) {
-              if (!_writeStatusConfirmed(item, expectsFinish)) continue;
-              _awaitingWriteStatus.remove(id);
-            }
-            Map<String, dynamic>? prefetchedDetail;
-            final recentAllowsCancellation =
-                ThereBookingClient.strings(item['abilities'])
-                    .contains('cancel');
-            if (isChaoxing ||
-                (LibraryBookingRecord.category(item, _schoolNow) != '已取消' &&
-                    !LibraryBookingRecord.finishedEarly(item) &&
-                    (LibraryBookingRecord.category(item, _schoolNow) != '已结束' ||
-                        ThereBookingClient.string(item['endTime']) == null))) {
-              try {
-                final detail = isChaoxing
-                    ? item
-                    : await _read(() => client.detail(id),
-                        venue: venue,
-                        client: client,
-                        interactiveAuth: showFailures);
-                if (!mounted || generation != _generation) return;
-                prefetchedDetail = detail;
-              } on Object {
-                // Recent carries the same cancel ability as the detail API.
-                // Keep the action available when only detail loading fails.
-                if (recentAllowsCancellation) prefetchedDetail = item;
-              }
-            }
-            if (!mounted || generation != _generation) return;
-            setState(() {
-              final resolvedItem = {
-                ...item,
-                if (prefetchedDetail?['abilities'] != null)
-                  'abilities': prefetchedDetail!['abilities'],
-              };
-              if (prefetchedDetail == null) {
-                _prefetchedDetails.remove(id);
-              } else {
-                _prefetchedDetails[id] = prefetchedDetail;
-              }
-              _recent.removeWhere((existing) =>
-                  ThereBookingClient.string(existing['id']) == id);
-              final begin = ThereBookingClient.string(item['beginTime']) ?? '';
-              final index = _recent.indexWhere((existing) =>
-                  (ThereBookingClient.string(existing['beginTime']) ?? '')
-                      .compareTo(begin) <
-                  0);
-              _recent.insert(index < 0 ? _recent.length : index, resolvedItem);
-            });
+        } else {
+          await _read(() async {
+            await _ensureVenueSelected(venue, client);
+            return true;
+          }, venue: venue, client: client, interactiveAuth: showFailures);
+          final recentFuture = _read(client.recent,
+              venue: venue, client: client, interactiveAuth: showFailures);
+          if (verifyAccount) {
+            final profileFuture = _read(() async {
+              await _checkAccount(await client.profile(), client: client);
+            }, venue: venue, client: client, interactiveAuth: showFailures);
+            await Future.wait<Object?>([
+              profileFuture.then<Object?>((_) => null),
+              recentFuture.then<Object?>((records) => records),
+            ]);
+            accountVerified = true;
           }
-        } on Object catch (error) {
-          if (!mounted || generation != _generation) return;
-          hadFailure = true;
-          if (error is ThereBookingException &&
-              (error.kind == ThereFailureKind.loginRequired ||
-                  error.kind == ThereFailureKind.webVpnLoginRequired ||
-                  error.kind == ThereFailureKind.unreachable)) {
-            return;
-          }
+          recent = await recentFuture;
         }
+        if (!mounted || generation != _generation) return accountVerified;
+        successfulVenues++;
+        _cacheRecentForVenue(venue, recent);
+        for (final item in recent) {
+          final id = ThereBookingClient.string(item['id']);
+          if (id == null || item['roomType'] != venue.roomType) continue;
+          final expectsFinish = _awaitingWriteStatus[id];
+          if (expectsFinish != null) {
+            if (!_writeStatusConfirmed(item, expectsFinish)) continue;
+            _awaitingWriteStatus.remove(id);
+          }
+          Map<String, dynamic>? prefetchedDetail;
+          final recentAllowsCancellation =
+              ThereBookingClient.strings(item['abilities']).contains('cancel');
+          final needsDetail = prefetchDetails &&
+              (venue.isChaoxing ||
+                  (LibraryBookingRecord.category(item, _schoolNow) != '已取消' &&
+                      !LibraryBookingRecord.finishedEarly(item) &&
+                      (LibraryBookingRecord.category(item, _schoolNow) !=
+                              '已结束' ||
+                          ThereBookingClient.string(item['endTime']) == null)));
+          if (needsDetail) {
+            try {
+              final detail = venue.isChaoxing
+                  ? item
+                  : await _read(() => client.detail(id),
+                      venue: venue,
+                      client: client,
+                      interactiveAuth: showFailures);
+              if (!mounted || generation != _generation) return accountVerified;
+              prefetchedDetail = detail;
+            } on Object {
+              // Recent carries the same cancel ability as the detail API.
+              // Keep the action available when only detail loading fails.
+              if (recentAllowsCancellation) prefetchedDetail = item;
+            }
+          }
+          if (!mounted || generation != _generation) return accountVerified;
+          setState(() {
+            final resolvedItem = {
+              ...item,
+              if (prefetchedDetail?['abilities'] != null)
+                'abilities': prefetchedDetail!['abilities'],
+            };
+            if (prefetchedDetail == null) {
+              _prefetchedDetails.remove(id);
+            } else {
+              _prefetchedDetails[id] = prefetchedDetail;
+            }
+            _recent.removeWhere(
+                (existing) => ThereBookingClient.string(existing['id']) == id);
+            final begin = ThereBookingClient.string(item['beginTime']) ?? '';
+            final index = _recent.indexWhere((existing) =>
+                (ThereBookingClient.string(existing['beginTime']) ?? '')
+                    .compareTo(begin) <
+                0);
+            _recent.insert(index < 0 ? _recent.length : index, resolvedItem);
+          });
+        }
+      } on Object catch (error) {
+        if (!mounted || generation != _generation) return accountVerified;
+        hadFailure = true;
+        if (error is ThereBookingException &&
+            (error.kind == ThereFailureKind.loginRequired ||
+                error.kind == ThereFailureKind.webVpnLoginRequired ||
+                error.kind == ThereFailureKind.unreachable)) {
+          return null;
+        }
+      }
+      return accountVerified;
+    }
+
+    Future<void> loadSystem(bool isChaoxing) async {
+      final venues = BookingVenue.values
+          .where((venue) => venue.isChaoxing == isChaoxing)
+          .toList();
+      if (_step == _BookingStep.venue) {
+        await Future.wait<void>(venues.map((venue) async {
+          await loadVenue(venue, verifyAccount: true, prefetchDetails: false);
+        }));
+        return;
+      }
+      var verified = false;
+      for (final venue in venues) {
+        if (!mounted || generation != _generation) return;
+        final result = await loadVenue(venue,
+            verifyAccount: !verified, prefetchDetails: true);
+        if (result == null) return;
+        verified = result || verified;
       }
     }
 
     try {
       await Future.wait<void>([loadSystem(false), loadSystem(true)]);
-      await cacheWrite;
     } finally {
       loadFinished.complete();
     }
@@ -2657,9 +2862,12 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       _bookingsLoading = false;
       _bookingsIncomplete = hadFailure;
     });
-    _bookingsLoadedAtLeastOnce = successfulVenues > 0 || !hadFailure;
     if (hadFailure && _showBookingLoadFailures) {
-      _showMessage(successfulVenues == 0 ? '预约加载失败，请稍后刷新' : '部分预约加载失败，请稍后刷新');
+      _showMessage(successfulVenues == 0 && _bookingHistory().isEmpty
+          ? '预约加载失败，请稍后刷新'
+          : successfulVenues == 0
+              ? '未能更新预约状态，已显示本地保存的预约记录'
+              : '部分预约加载失败，请稍后刷新');
     }
   }
 
@@ -2860,11 +3068,11 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           final recent =
               await _read(client.recent, venue: venue, client: client);
           if (mounted) {
+            _cacheRecentForVenue(venue, recent);
             setState(() {
               _recent.removeWhere((item) => item['roomType'] == venue.roomType);
               _recent.addAll(recent);
             });
-            await _cacheRecentForVenue(venue, recent);
           }
         } on Object {
           // Keep the uncertain result; a new create request is not automatic.
@@ -2904,7 +3112,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
               (ThereBookingClient.string(b['beginTime']) ?? '')
                   .compareTo(ThereBookingClient.string(a['beginTime']) ?? ''));
         });
-        await _cacheRecentForVenue(venue, recent);
+        _cacheRecentForVenue(venue, recent);
         if (createdBooking != null) break;
         if (attempt < 2) {
           await Future<void>.delayed(const Duration(milliseconds: 400));
@@ -3159,7 +3367,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         _recent.sort((a, b) => (ThereBookingClient.string(b['beginTime']) ?? '')
             .compareTo(ThereBookingClient.string(a['beginTime']) ?? ''));
       });
-      await _cacheRecentForVenue(venue, recent);
+      _cacheRecentForVenue(venue, updated);
       return;
     }
     if (_step == _BookingStep.bookings) {
@@ -3170,7 +3378,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     final recent = await _read(client.recent, venue: venue, client: client);
     if (!mounted) return;
     setState(() => _recent = recent);
-    await _cacheRecentForVenue(venue, recent);
     await _refreshSeats();
   }
 
@@ -3196,7 +3403,10 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     if (!confirmed || !mounted) return;
     if (_bookingsLoading) await _bookingsLoadFinished;
     if (!mounted) return;
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _bookingWriteRefreshing = true;
+    });
     var cancelled = false;
     var uncertain = false;
     final client = _clientForVenue(venue);
@@ -3220,11 +3430,14 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-    if ((!cancelled && !uncertain) || !mounted) return;
+    if ((!cancelled && !uncertain) || !mounted) {
+      if (mounted) setState(() => _bookingWriteRefreshing = false);
+      return;
+    }
     if (cancelled) {
       _showMessage('已取消预约');
       _awaitingWriteStatus[id] = false;
-      await _removeBookingFromCache(id);
+      _removeBookingFromRecent(id);
     }
     try {
       await _refreshAfterBookingWrite(venue);
@@ -3233,6 +3446,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         _showMessage(cancelled ? '已取消预约，列表暂时无法刷新' : '取消结果暂未确认，请稍后刷新我的预约');
       }
     }
+    if (mounted) setState(() => _bookingWriteRefreshing = false);
   }
 
   Future<void> _finishBooking(String id, {required BookingVenue venue}) async {
@@ -3257,7 +3471,10 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     if (!confirmed || !mounted) return;
     if (_bookingsLoading) await _bookingsLoadFinished;
     if (!mounted) return;
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _bookingWriteRefreshing = true;
+    });
     var finished = false;
     final client = _clientForVenue(venue);
     try {
@@ -3279,22 +3496,29 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-    if (!finished || !mounted) return;
+    if (!finished || !mounted) {
+      if (mounted) setState(() => _bookingWriteRefreshing = false);
+      return;
+    }
     _showMessage('已提交退座，正在读取最终状态');
     _awaitingWriteStatus[id] = true;
-    await _removeBookingFromCache(id);
+    _removeBookingFromRecent(id);
     try {
       await _refreshAfterBookingWrite(venue);
     } on Object {
       if (mounted) _showMessage('操作已提交，列表暂时无法刷新');
     }
+    if (mounted) setState(() => _bookingWriteRefreshing = false);
   }
 
   Future<void> _signBooking(String id, {required BookingVenue venue}) async {
     if (!venue.isChaoxing) return;
     if (_bookingsLoading) await _bookingsLoadFinished;
     if (!mounted || _busy) return;
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _bookingWriteRefreshing = true;
+    });
     var signed = false;
     var uncertain = false;
     final client = _clientForVenue(venue) as ChaoxingBookingAdapter;
@@ -3318,7 +3542,10 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-    if ((!signed && !uncertain) || !mounted) return;
+    if ((!signed && !uncertain) || !mounted) {
+      if (mounted) setState(() => _bookingWriteRefreshing = false);
+      return;
+    }
     if (signed) _showMessage('签到已提交，正在读取最新状态');
     try {
       await _refreshAfterBookingWrite(venue);
@@ -3327,6 +3554,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         _showMessage(signed ? '签到已提交，列表暂时无法刷新' : '签到结果暂未确认，请稍后刷新我的预约');
       }
     }
+    if (mounted) setState(() => _bookingWriteRefreshing = false);
   }
 
   Future<void> _recoverAfterWrite({bool webVpn = false}) async {
