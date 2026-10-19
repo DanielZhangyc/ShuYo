@@ -19,7 +19,10 @@ final class LibraryBookingRecord {
     if (finishedEarly(item)) return '已结束';
     if (status == 'CANCEL' || label.contains('取消')) return '已取消';
     if (status == 'CX_7') return '已结束';
-    if (status.startsWith('CX_') && status != 'CX_0') {
+    if (status.startsWith('CX_') &&
+        status != 'CX_0' &&
+        status != 'CX_1' &&
+        status != 'CX_3') {
       return label.isEmpty ? '状态待确认' : label;
     }
     final now = DateTime.utc(
@@ -42,6 +45,10 @@ final class LibraryBookingRecord {
     final begin = parse(item['beginTime']);
     final end = parse(item['endTime']);
     if (begin != null && now.isBefore(begin)) return '待履约';
+    if ((status == 'CX_0' || status == 'CX_1' || status == 'CX_3') &&
+        item['cxCurrent'] == true) {
+      return '进行中';
+    }
     if (end != null && now.isBefore(end)) return '进行中';
     return '已结束';
   }

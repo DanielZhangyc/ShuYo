@@ -526,6 +526,30 @@ class _BookedChaoxingBookingClient extends _EmptyChaoxingBookingClient {
   }
 }
 
+class _InUseChaoxingBookingClient extends _EmptyChaoxingBookingClient {
+  @override
+  Future<Map<String, dynamic>> home() async {
+    homeCalls++;
+    final day = DateTime.parse(ThereBookingClient.schoolDay());
+    int schoolTime(int hour) => DateTime.utc(day.year, day.month, day.day, hour)
+        .subtract(const Duration(hours: 8))
+        .millisecondsSinceEpoch;
+    Map<String, dynamic> reserve(int id, int status) => {
+          'id': id,
+          'secondLevelName': '钱伟长图书馆',
+          'thirdLevelName': '阅览室',
+          'seatNum': '00$id',
+          'startTime': schoolTime(6),
+          'endTime': schoolTime(7),
+          'status': status,
+        };
+    return {
+      'curReserves': [reserve(1, 0), reserve(2, 1), reserve(3, 3)],
+      'nearReserves': [reserve(4, 7)],
+    };
+  }
+}
+
 class _UnavailableChaoxingBookingClient extends _EmptyChaoxingBookingClient {
   @override
   Future<Map<String, dynamic>> home() async {
@@ -1883,6 +1907,40 @@ void main() {
     await tester.tap(find.byTooltip('返回上一步'));
     await tester.pumpAndSettle();
     expect(find.text('图书馆预约'), findsOneWidget);
+  });
+
+  testWidgets('current Chaoxing bookings stay active after their end time',
+      (tester) async {
+    final there = _BookingClient();
+    final library = _InUseChaoxingBookingClient();
+    addTearDown(there.dispose);
+    addTearDown(library.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: LibraryBookingPage(
+        accountService: UnifiedAccountService(),
+        thereClientFactory: (_) => there,
+        chaoxingClient: library,
+        schoolClock: schoolMorning,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+        find.byKey(const ValueKey<String>('home:cx:CX_QWC:1')), 180);
+    for (final id in [1, 2, 3]) {
+      expect(
+          find.byKey(ValueKey<String>('home:cx:CX_QWC:$id')), findsOneWidget);
+    }
+    expect(
+        find.byKey(const ValueKey<String>('home:cx:CX_QWC:4')), findsNothing);
+    await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
+    await tester.tap(find.text('查看历史预约'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('进行中').first);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey<String>('1:cx:CX_QWC:1')), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('1:cx:CX_QWC:2')), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('1:cx:CX_QWC:3')), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('1:cx:CX_QWC:4')), findsNothing);
   });
 
   testWidgets('available bookings remain visible when one service fails',

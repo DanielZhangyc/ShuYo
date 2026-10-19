@@ -15,6 +15,7 @@ class _FakeChaoxingClient extends ChaoxingBookingClient {
   int submitCalls = 0;
   int cancelCalls = 0;
   String? cancelledId;
+  Map<String, dynamic>? homeFixture;
 
   @override
   Map<String, dynamic>? get user => _user;
@@ -83,6 +84,7 @@ class _FakeChaoxingClient extends ChaoxingBookingClient {
   @override
   Future<Map<String, dynamic>> home() async {
     homeCalls++;
+    if (homeFixture case final Map<String, dynamic> fixture) return fixture;
     return {
       'curReserves': [
         _reserve(101, '钱伟长馆', 0),
@@ -286,6 +288,22 @@ void main() {
       throwsA(isA<ThereBookingException>()),
     );
     expect(client.cancelCalls, 1);
+  });
+
+  test('maps observed Chaoxing reservation states', () async {
+    client.homeFixture = {
+      'curReserves': [
+        client._reserve(1, '钱伟长馆', 0),
+        client._reserve(2, '钱伟长馆', 1),
+        client._reserve(3, '钱伟长馆', 3),
+      ],
+      'nearReserves': [client._reserve(4, '钱伟长馆', 7)],
+    };
+    await adapter.selectVenue(BookingVenue.qianweichang);
+    final records = await adapter.recent();
+    expect(
+        records.map((item) => item['statusLabel']), ['待签到', '在座', '暂离', '已结束']);
+    expect(records.map((item) => item['cxCurrent']), [true, true, true, false]);
   });
 
   test('one venue sweep shares read snapshots, but revisits and writes refresh',

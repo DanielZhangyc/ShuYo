@@ -435,8 +435,11 @@ class ChaoxingBookingAdapter extends ThereBookingClient {
       if (_schoolTime(item['endTime']) case final String value)
         'endTime': value,
       'status': status == null ? 'CX_UNKNOWN' : 'CX_$status',
+      'cxCurrent': current,
       'statusLabel': switch (status) {
-        '0' => '进行中',
+        '0' => '待签到',
+        '1' => '在座',
+        '3' => '暂离',
         '7' => '已结束',
         null => '状态待确认',
         _ => '状态 $status',

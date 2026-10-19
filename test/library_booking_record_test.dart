@@ -38,6 +38,37 @@ void main() {
   test('Chaoxing-specific states and cross-year times remain recognizable', () {
     expect(
       LibraryBookingRecord.category(
+        {...booking, 'status': 'CX_0', 'cxCurrent': true},
+        afterBooking,
+      ),
+      '进行中',
+    );
+    expect(
+      LibraryBookingRecord.category(
+        {...booking, 'status': 'CX_0', 'cxCurrent': false},
+        afterBooking,
+      ),
+      '已结束',
+    );
+    for (final status in ['CX_1', 'CX_3']) {
+      expect(
+        LibraryBookingRecord.category(
+          {...booking, 'status': status, 'cxCurrent': true},
+          afterBooking,
+        ),
+        '进行中',
+        reason: 'A signed-in or temporarily absent reservation remains active',
+      );
+    }
+    expect(
+      LibraryBookingRecord.category(
+        {...booking, 'status': 'CX_7'},
+        duringBooking,
+      ),
+      '已结束',
+    );
+    expect(
+      LibraryBookingRecord.category(
           {...booking, 'status': 'CX_9', 'statusLabel': '状态 9'}, beforeBooking),
       '状态 9',
     );
