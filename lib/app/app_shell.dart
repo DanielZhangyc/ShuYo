@@ -30,6 +30,7 @@ import '../data/services/academic_schedule_display_settings_service.dart';
 import '../data/services/academic_schedule_notification_service.dart';
 import '../data/services/academic_schedule_widget_service.dart';
 import '../data/services/client_settings_service.dart';
+import '../data/services/campus_card_service.dart';
 import '../data/services/student_identity_service.dart';
 import '../data/services/unified_account_service.dart';
 import '../data/services/there_booking_client.dart';
@@ -38,6 +39,7 @@ import '../features/auth/native_login_page.dart';
 import '../features/home/academic_schedule_page.dart';
 import '../features/home/academic_progress_page.dart';
 import '../features/home/announcements_page.dart';
+import '../features/home/campus_card_page.dart';
 import '../features/home/empty_classroom_page.dart';
 import '../features/home/home_dashboard_page.dart';
 import '../features/home/shuyo_content_page.dart';
@@ -413,6 +415,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         onOpenAnnouncements: () => unawaited(_openAnnouncements()),
         onOpenEmptyClassroom: () => unawaited(_openEmptyClassroom()),
         onOpenLibraryBooking: () => unawaited(_openLibraryBooking()),
+        onOpenCampusCard: () => unawaited(_openCampusCard()),
         todayCourseContent: _scheduleSummaryText,
         announcementContent: _announcementSummaryText,
         isDemo: widget.isDemo,
@@ -821,6 +824,29 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _openCampusCard() async {
+    if (widget.isDemo) {
+      _showSnack('演示模式暂不支持校园卡查询');
+      return;
+    }
+    if (_academicStudentId == null) {
+      await _openAcademicLogin();
+      if (!mounted || _academicStudentId == null) return;
+    }
+    await Navigator.of(context).push<void>(
+      shuyoRoute(
+        builder: (_) => CampusCardPage(
+          onLogin: () async {
+            final result = await Navigator.of(context).push<NativeLoginResult>(
+              shuyoRoute(builder: (_) => const NativeLoginPage.campusCard()),
+            );
+            return result == NativeLoginResult.authenticated;
+          },
+        ),
+      ),
+    );
+  }
+
   Future<void> _openLibraryBooking() async {
     if (_openingLibraryBooking) return;
     if (widget.isDemo) {
@@ -931,6 +957,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // Continue clearing every local credential.
     }
     var failed = false;
+    final campusCard = CampusCardService();
+    try {
+      await campusCard.clearSession();
+    } on Object {
+      failed = true;
+    } finally {
+      campusCard.dispose();
+    }
     try {
       await _studentIdentityService.signOut();
     } on Object {
