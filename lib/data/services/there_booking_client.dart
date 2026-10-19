@@ -362,7 +362,7 @@ class ThereBookingClient {
     if (!strings(current['abilities']).contains('close')) {
       throw const ThereBookingException(
         ThereFailureKind.business,
-        '当前预约不可提前结束',
+        '当前预约不可退座',
       );
     }
     await _api(

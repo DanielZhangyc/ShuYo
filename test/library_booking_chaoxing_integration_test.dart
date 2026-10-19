@@ -6,6 +6,7 @@ import 'package:shuyo/data/services/chaoxing_booking_client.dart';
 import 'package:shuyo/data/services/there_booking_client.dart';
 import 'package:shuyo/data/services/unified_account_service.dart';
 import 'package:shuyo/features/library_booking/library_booking_page.dart';
+import 'package:shuyo/features/library_booking/library_booking_names.dart';
 
 class _FakeChaoxingBookingClient extends ChaoxingBookingClient {
   _FakeChaoxingBookingClient()
@@ -132,7 +133,13 @@ void main() {
       final today = DateTime.parse(ThereBookingClient.schoolDay());
       DateTime schoolMorning() =>
           DateTime.utc(today.year, today.month, today.day, 8);
-      final monthDay = '${today.month}月${today.day}日';
+      final todayKey = '${today.year.toString().padLeft(4, '0')}-'
+          '${today.month.toString().padLeft(2, '0')}-'
+          '${today.day.toString().padLeft(2, '0')}';
+      final tomorrow = today.add(const Duration(days: 1));
+      final tomorrowKey = '${tomorrow.year.toString().padLeft(4, '0')}-'
+          '${tomorrow.month.toString().padLeft(2, '0')}-'
+          '${tomorrow.day.toString().padLeft(2, '0')}';
 
       await tester.pumpWidget(MaterialApp(
         navigatorObservers: [observer],
@@ -155,31 +162,35 @@ void main() {
       await tester.tap(find.text(campus));
       await tester.pumpAndSettle();
 
-      await tester.scrollUntilVisible(find.text(entry.key.label), 160,
+      final venueName = LibraryBookingNames.venue(entry.key);
+      await tester.scrollUntilVisible(find.text(venueName), 160,
           scrollable: find.byType(Scrollable).first);
-      await tester.ensureVisible(find.text(entry.key.label));
+      await tester.ensureVisible(find.text(venueName));
       await tester.pumpAndSettle();
-      await tester.tap(find.text(entry.key.label));
+      await tester.tap(find.text(venueName));
       await tester.pumpAndSettle();
       expect(find.text(entry.value.areaName), findsOneWidget);
-      expect(find.text('开放座位数 3'), findsOneWidget);
+      expect(find.text('开放座位数：3'), findsOneWidget);
       expect(find.textContaining('使用中 —'), findsNothing);
       expect(find.textContaining('超星'), findsNothing);
 
       await tester.tap(find.text(entry.value.areaName));
       await tester.pumpAndSettle();
+      expect(find.text('选择日期与时间'), findsOneWidget);
       expect(find.text('选择日期'), findsOneWidget);
-      expect(find.byType(ListTile), findsOneWidget);
-      expect(find.textContaining('明天'), findsNothing);
-      expect(find.text(monthDay), findsOneWidget);
+      expect(find.text('选择时段'), findsOneWidget);
+      expect(find.byType(ChoiceChip), findsNothing);
+      expect(find.byKey(ValueKey('booking-day-$todayKey')), findsOneWidget);
+      expect(
+          tester
+              .widget<InkWell>(find.byKey(ValueKey('booking-day-$tomorrowKey')))
+              .onTap,
+          isNull);
+      expect(find.text('可选座位数：2'), findsOneWidget);
+      expect(find.byKey(const ValueKey('start-hour')), findsOneWidget);
       expect(find.textContaining('超星'), findsNothing);
 
-      await tester.tap(find.text(monthDay));
-      await tester.pumpAndSettle();
-      expect(find.text('选择时间'), findsOneWidget);
-      expect(find.textContaining('超星'), findsNothing);
-
-      await tester.tap(find.text('下一步'));
+      await tester.tap(find.widgetWithText(FilledButton, '选择座位'));
       await tester.pumpAndSettle();
       expect(find.text('选择座位'), findsOneWidget);
       expect(find.text('001'), findsOneWidget);

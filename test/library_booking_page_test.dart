@@ -6,9 +6,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuyo/data/services/academic_account_store.dart';
 import 'package:shuyo/data/services/chaoxing_booking_client.dart';
+import 'package:shuyo/data/services/library_booking_cache.dart';
 import 'package:shuyo/data/services/there_booking_client.dart';
 import 'package:shuyo/data/services/unified_account_service.dart';
 import 'package:shuyo/features/library_booking/library_booking_page.dart';
+import 'package:shuyo/features/library_booking/library_booking_names.dart';
 import 'package:shuyo/features/library_booking/library_booking_resources.dart';
 import 'package:shuyo/shared/navigation/shuyo_route.dart';
 import 'package:shuyo/shared/theme/custom_background.dart';
@@ -397,12 +399,64 @@ class _TomorrowBookingClient extends _BookingClient {
       };
 }
 
+class _AreaRulesRetryClient extends _BookingClient {
+  bool failRulesOnce = true;
+
+  @override
+  Future<Map<String, dynamic>> area(
+      String areaId, String begin, String end) async {
+    if (begin == end && failRulesOnce) {
+      failRulesOnce = false;
+      throw const ThereBookingException(
+          ThereFailureKind.unreachable, '分区时段暂时不可用');
+    }
+    return super.area(areaId, begin, end);
+  }
+}
+
 class _NoMinimumClient extends _BookingClient {
   @override
   Future<Map<String, dynamic>> area(
       String areaId, String begin, String end) async {
     final data = await super.area(areaId, begin, end);
     (data['bookingTimes'] as Map).remove('minDuration');
+    return data;
+  }
+}
+
+class _DeferredDayRulesClient extends _ManyDaysClient {
+  final todayRules = Completer<void>();
+  final nextDayRules = Completer<void>();
+  final ruleDays = <String>[];
+
+  @override
+  Future<Map<String, dynamic>> area(
+      String areaId, String begin, String end) async {
+    if (begin == end) {
+      ruleDays.add(begin);
+      if (begin == ThereBookingClient.schoolDay()) {
+        await todayRules.future;
+      } else {
+        await nextDayRules.future;
+      }
+      final data = await super.area(areaId, begin, end);
+      if (begin != ThereBookingClient.schoolDay()) {
+        (data['bookingTimes'] as Map)['startHour'] = 12;
+      }
+      return data;
+    }
+    return super.area(areaId, begin, end);
+  }
+}
+
+class _ChangingSeatsClient extends _BookingClient {
+  @override
+  Future<Map<String, dynamic>> area(
+      String areaId, String begin, String end) async {
+    final data = await super.area(areaId, begin, end);
+    if (begin.contains(' 10:00')) {
+      (data['rooms'] as List).first['isBusy'] = true;
+    }
     return data;
   }
 }
@@ -502,6 +556,78 @@ class _GatedBookingClient extends _BookingClient {
   }
 }
 
+class _CachedActionClient extends _BookingClient {
+  _CachedActionClient(this.ability, this.day);
+
+  final String ability;
+  final String day;
+  final recentGate = Completer<void>();
+
+  @override
+  Future<List<Map<String, dynamic>>> recent() async {
+    await recentGate.future;
+    return [];
+  }
+
+  @override
+  Future<Map<String, dynamic>> detail(String bookingId) async {
+    bookingDetailCalls++;
+    return {
+      'id': bookingId,
+      'roomName': 'C-007',
+      'beginTime': '$day 08:30:00',
+      'endTime': '$day 10:30:00',
+      'status': 'OPEN',
+      'abilities': [ability],
+    };
+  }
+}
+
+class _HomeWriteClient extends _BookingClient {
+  _HomeWriteClient(this.venue, this.day, this.action);
+
+  final BookingVenue venue;
+  final String day;
+  final String action;
+  int recentCalls = 0;
+  bool written = false;
+
+  Map<String, dynamic> get record => {
+        'id': venue == BookingVenue.studySpace ? 'HOME_ACTION' : 'HOME_STABLE',
+        'roomType': venue.roomType,
+        'roomName': venue == BookingVenue.studySpace ? 'C-007' : '2E015',
+        'beginTime': '$day 08:30:00',
+        'endTime':
+            written && action == 'close' ? '$day 09:00:00' : '$day 10:30:00',
+        'status': written ? 'CANCEL' : 'OPEN',
+        'statusLabel': written ? '已取消' : '正常',
+        if (written && action == 'close') ...{
+          'origEndAt': '$day 10:30:00',
+          'duration': 0,
+        },
+      };
+
+  @override
+  Future<List<Map<String, dynamic>>> recent() async {
+    recentCalls++;
+    return venue == BookingVenue.studySpace || venue == BookingVenue.library
+        ? [record]
+        : [];
+  }
+
+  @override
+  Future<Map<String, dynamic>> detail(String bookingId) async => {
+        ...record,
+        'abilities': written ? <String>[] : [action],
+      };
+
+  @override
+  Future<void> cancel(String bookingId) async => written = true;
+
+  @override
+  Future<void> finish(String bookingId) async => written = true;
+}
+
 class _GatedChaoxingBookingClient extends _EmptyChaoxingBookingClient {
   final gate = Completer<void>();
   bool homeStarted = false;
@@ -566,9 +692,10 @@ void main() {
     expect(find.byType(ShuYoRouteSurface), findsOneWidget);
     expect(find.text('图书馆预约'), findsOneWidget);
 
-    await tester.tap(find.text(BookingVenue.library.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('校本部图书馆自修区 - 二楼东侧'));
+    await tester.tap(find.text('2楼东侧'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 120));
     expect(find.byType(ShuYoRouteSurface), findsNWidgets(2));
@@ -613,7 +740,8 @@ void main() {
     final previousThereAttempts = there.selectionAttempts;
     final previousLibraryRoomCalls = library.roomsCalls;
     await tester.scrollUntilVisible(
-      find.widgetWithText(ListTile, BookingVenue.qianweichang.label),
+      find.widgetWithText(
+          ListTile, LibraryBookingNames.venue(BookingVenue.qianweichang)),
       180,
       scrollable: find
           .descendant(
@@ -621,9 +749,11 @@ void main() {
               matching: find.byType(Scrollable))
           .first,
     );
-    await tester.ensureVisible(find.text(BookingVenue.qianweichang.label).last);
+    await tester.ensureVisible(
+        find.text(LibraryBookingNames.venue(BookingVenue.qianweichang)).last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text(BookingVenue.qianweichang.label).last);
+    await tester.tap(
+        find.text(LibraryBookingNames.venue(BookingVenue.qianweichang)).last);
     await tester.pumpAndSettle();
 
     expect(find.text('四楼阅览室'), findsOneWidget);
@@ -638,10 +768,15 @@ void main() {
     return DateTime.utc(day.year, day.month, day.day, 8);
   }
 
-  String monthDay() {
-    final date = DateTime.parse(ThereBookingClient.schoolDay());
-    return '${date.month}月${date.day}日';
+  String bookingDay([int offset = 0]) {
+    final today = DateTime.parse(ThereBookingClient.schoolDay());
+    final date = today.add(Duration(days: offset));
+    return '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
   }
+
+  String bookingDayKey([int offset = 0]) => 'booking-day-${bookingDay(offset)}';
 
   Future<void> pickTime(
       WidgetTester tester, String box, String hour, String minute) async {
@@ -705,22 +840,24 @@ void main() {
       BookingVenue.studySpace,
       BookingVenue.qianweichang,
     ]) {
-      expect(find.text(venue.label), findsWidgets);
+      expect(find.text(LibraryBookingNames.venue(venue)), findsWidgets);
     }
     await tester.tap(find.text('延长校区'));
     await tester.pumpAndSettle();
-    expect(find.text(BookingVenue.library.label), findsNothing);
+    expect(find.text(LibraryBookingNames.venue(BookingVenue.library)),
+        findsNothing);
     for (final venue in [
       BookingVenue.scienceArt,
       BookingVenue.yanchang,
       BookingVenue.wenhui,
     ]) {
-      expect(find.text(venue.label), findsOneWidget);
+      expect(find.text(LibraryBookingNames.venue(venue)), findsOneWidget);
     }
     await tester.tap(find.text('嘉定校区'));
     await tester.pumpAndSettle();
     expect(find.byType(ListTile), findsOneWidget);
-    expect(find.text(BookingVenue.jiading.label), findsOneWidget);
+    expect(find.text(LibraryBookingNames.venue(BookingVenue.jiading)),
+        findsOneWidget);
     await tester.tap(find.text('宝山校区'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('我的预约'), 180);
@@ -736,39 +873,37 @@ void main() {
     await tester.tap(find.byTooltip('返回上一步'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
-        find.text(BookingVenue.library.label), -180);
-    await tester.tap(find.text(BookingVenue.library.label));
+        find.text(LibraryBookingNames.venue(BookingVenue.library)), -180);
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
     expect(find.byTooltip('我的预约'), findsNothing);
     expect(find.text('以下为当前座位情况'), findsNothing);
-    expect(find.text('校本部图书馆自修区 - 二楼东侧'), findsOneWidget);
-    expect(find.textContaining('开放座位数 9'), findsOneWidget);
-    await tester.tap(find.text('校本部图书馆自修区 - 二楼东侧'));
+    expect(find.text('2楼东侧'), findsOneWidget);
+    expect(find.textContaining('开放座位数：6/9'), findsOneWidget);
+    await tester.tap(find.text('2楼东侧'));
     await tester.pumpAndSettle();
+    expect(find.text('宝山校区 - 本部图书馆 - 2楼东侧'), findsOneWidget);
     expect(find.textContaining(ThereBookingClient.schoolDay()), findsNothing);
-    await tester.tap(find.text(monthDay()));
+    await tester.tap(find.byKey(ValueKey(bookingDayKey())));
     await tester.pumpAndSettle();
     expect(find.textContaining(ThereBookingClient.schoolDay()), findsNothing);
     expect(find.textContaining('最长 8 小时'), findsOneWidget);
-    expect(client.detailAreaCalls, 0);
+    expect(client.detailAreaCalls, 1);
     expect(boxValue(tester, 'start-hour'), '08');
     expect(boxValue(tester, 'start-minute'), '00');
-    expect(boxValue(tester, 'end-hour'), '10');
-    expect(boxValue(tester, 'end-minute'), '00');
+    expect(boxValue(tester, 'end-hour'), '08');
+    expect(boxValue(tester, 'end-minute'), '30');
     await pickTime(tester, 'start-hour', '10', '00');
     await pickTime(tester, 'end-minute', '11', '00');
     expect(boxValue(tester, 'start-hour'), '10');
     expect(boxValue(tester, 'end-hour'), '11');
-    expect(client.detailAreaCalls, 0);
-    final nextPosition = tester.getTopLeft(find.text('下一步'));
-    await tester.tap(find.text('预览可选座位数'));
+    expect(client.detailAreaCalls, greaterThan(1));
+    expect(find.text('可选座位数：1'), findsOneWidget);
+    final previews = client.detailAreaCalls;
+    await tester.tap(find.widgetWithText(FilledButton, '选择座位'));
     await tester.pumpAndSettle();
-    expect(find.text('可选 1 个'), findsOneWidget);
-    expect(tester.getTopLeft(find.text('下一步')), nextPosition);
-    expect(client.detailAreaCalls, 1);
-    await tester.tap(find.text('下一步'));
-    await tester.pumpAndSettle();
-    expect(client.detailAreaCalls, 2);
+    expect(client.detailAreaCalls, previews + 1);
     expect(find.textContaining(ThereBookingClient.schoolDay()), findsNothing);
     await tester.tap(find.text('2E015'));
     await tester.pumpAndSettle();
@@ -787,14 +922,14 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('确认预约'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('宝山校区 校本部图书馆'), findsOneWidget);
+    expect(find.textContaining('宝山校区 本部图书馆'), findsOneWidget);
     await tester.tap(find.text('提交'));
     await tester.pumpAndSettle();
     expect(client.created, isTrue);
     expect(client.selectedVenues.last, BookingVenue.library);
     expect(find.text('取消预约'), findsOneWidget);
     expect(find.text('预约编号'), findsOneWidget);
-    expect(find.text('宝山校区 校本部图书馆'), findsOneWidget);
+    expect(find.text('宝山校区 本部图书馆'), findsOneWidget);
     expect(find.text('there:BOOKING_1'), findsOneWidget);
     expect(find.text('座位'), findsNothing);
     final createdDetailSheet =
@@ -809,7 +944,7 @@ void main() {
     await tester.tap(find.text('确认'));
     await tester.pumpAndSettle();
     expect(client.cancelled, isTrue);
-    for (var step = 0; step < 3; step++) {
+    for (var step = 0; step < 2; step++) {
       await tester.tap(find.byTooltip('返回上一步'));
       await tester.pumpAndSettle();
     }
@@ -879,9 +1014,9 @@ void main() {
         find.descendant(
             of: venue, matching: find.byIcon(Icons.keyboard_arrow_up)),
         findsOneWidget);
-    expect(find.text('校本部图书馆自修区 - 二楼东侧'), findsOneWidget);
+    expect(find.text('2楼东侧'), findsOneWidget);
     expect(find.text('开放时间：08:00–22:00'), findsOneWidget);
-    expect(find.textContaining('开放座位数 9'), findsOneWidget);
+    expect(find.textContaining('开放座位数：6/9'), findsOneWidget);
     expect(
         find.descendant(
             of: find.byKey(const ValueKey('home-venue-studySpace')),
@@ -893,7 +1028,7 @@ void main() {
         find.descendant(
             of: venue, matching: find.byIcon(Icons.keyboard_arrow_down)),
         findsOneWidget);
-    expect(find.text('校本部图书馆自修区 - 二楼东侧'), findsNothing);
+    expect(find.text('2楼东侧'), findsNothing);
   });
 
   testWidgets('venue subtitle counts its selectable areas', (tester) async {
@@ -980,12 +1115,14 @@ void main() {
       expect(clients[venue]?.areaListCalls, 1);
       expect(clients[venue]?.selectedVenues.toSet(), {venue});
     }
-    await tester.tap(find.text(BookingVenue.library.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
     expect(find.text('校本部图书馆分区'), findsOneWidget);
     await tester.tap(find.text('延长校区'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(BookingVenue.scienceArt.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.scienceArt)));
     await tester.pumpAndSettle();
     expect(find.text('科学与艺术中心分区'), findsOneWidget);
   });
@@ -1010,7 +1147,8 @@ void main() {
             of: find.byKey(const ValueKey('home-venue-library')),
             matching: find.textContaining('分区')),
         findsNothing);
-    await tester.tap(find.text(BookingVenue.library.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
     expect(find.text('分区暂时无法加载，重试'), findsOneWidget);
     expect(find.text('当前场馆没有可选分区'), findsNothing);
@@ -1045,7 +1183,8 @@ void main() {
             of: find.byKey(const ValueKey('home-venue-library')),
             matching: find.textContaining('分区')),
         findsNothing);
-    await tester.tap(find.text(BookingVenue.library.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
     expect(find.text('校本部图书馆分区'), findsOneWidget);
     expect(
@@ -1069,7 +1208,8 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(BookingVenue.library.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
     expect(find.text('分区暂时无法加载，重试'), findsOneWidget);
     expect(find.byIcon(Icons.keyboard_arrow_up), findsOneWidget);
@@ -1094,10 +1234,11 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(BookingVenue.library.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
     expect(recoveries, 1);
-    expect(find.text('校本部图书馆自修区 - 二楼东侧'), findsOneWidget);
+    expect(find.text('2楼东侧'), findsOneWidget);
     expect(find.text('选择分区'), findsNothing);
   });
 
@@ -1113,10 +1254,12 @@ void main() {
     )));
     await tester.pumpAndSettle();
     expect(find.text('仅查看座位情况'), findsNothing);
-    expect(find.text(BookingVenue.library.label), findsWidgets);
-    await tester.tap(find.text(BookingVenue.library.label));
+    expect(find.text(LibraryBookingNames.venue(BookingVenue.library)),
+        findsWidgets);
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
-    expect(find.text('校本部图书馆自修区 - 二楼东侧'), findsOneWidget);
+    expect(find.text('2楼东侧'), findsOneWidget);
   });
 
   testWidgets('forward and back steps slide in opposite directions',
@@ -1130,9 +1273,10 @@ void main() {
       schoolClock: schoolMorning,
     )));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(BookingVenue.library.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('校本部图书馆自修区 - 二楼东侧'));
+    await tester.tap(find.text('2楼东侧'));
     await tester.pump(const Duration(milliseconds: 50));
     final enteringArea = tester.getTopLeft(find.byType(Scaffold).last).dx;
     expect(enteringArea, greaterThan(0));
@@ -1177,14 +1321,17 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text(BookingVenue.studySpace.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.studySpace)));
     await tester.pumpAndSettle();
     expect(find.text('座位分布'), findsOneWidget);
     expect(find.text('常见问题'), findsOneWidget);
     expect(
         tester.getTopLeft(find.text('座位分布')).dy,
-        greaterThan(
-            tester.getTopLeft(find.text(BookingVenue.studySpace.label)).dy));
+        greaterThan(tester
+            .getTopLeft(
+                find.text(LibraryBookingNames.venue(BookingVenue.studySpace)))
+            .dy));
     expect(find.byIcon(Icons.map_outlined), findsOneWidget);
     expect(tester.widget<Text>(find.text('座位分布')).style?.fontSize,
         rulesText.style?.fontSize);
@@ -1230,9 +1377,9 @@ void main() {
 
     await tester.tap(find.text('二楼东侧'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(monthDay()));
+    await tester.tap(find.byKey(ValueKey(bookingDayKey())));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('下一步'));
+    await tester.tap(find.widgetWithText(FilledButton, '选择座位'));
     await tester.pumpAndSettle();
     expect(find.text('座位分布'), findsOneWidget);
     await tester.tap(find.text('座位分布'));
@@ -1258,22 +1405,23 @@ void main() {
       schoolClock: schoolMorning,
     )));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(BookingVenue.studySpace.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.studySpace)));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.text('座位分布'), findsOneWidget);
     expect(find.text('常见问题'), findsOneWidget);
     await tester.tap(find.text('二楼东侧'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(monthDay()));
+    await tester.tap(find.byKey(ValueKey(bookingDayKey())));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('下一步'));
+    await tester.tap(find.widgetWithText(FilledButton, '选择座位'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.text('座位分布'), findsOneWidget);
   });
 
-  testWidgets('area availability wraps as a complete item on narrow screens',
+  testWidgets('area availability is a colored fraction on narrow screens',
       (tester) async {
     tester.view.physicalSize = const Size(260, 700);
     tester.view.devicePixelRatio = 1;
@@ -1289,17 +1437,18 @@ void main() {
       thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
-    await tester.tap(find.text(BookingVenue.library.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
-    final first = find.text('开放座位数 9 / 使用中 3');
-    final available = find.text('可用 6');
-    expect(first, findsOneWidget);
-    expect(available, findsOneWidget);
-    expect(tester.getTopLeft(available).dy,
-        greaterThan(tester.getTopLeft(first).dy));
-    await tester.tap(find.text('校本部图书馆自修区 - 二楼东侧'));
+    final stats = find.text('开放座位数：6/9');
+    expect(stats, findsOneWidget);
+    final spans = tester.widget<Text>(stats).textSpan as TextSpan;
+    final available = spans.children![1] as TextSpan;
+    expect(available.text, '6');
+    expect(available.style?.color, isNotNull);
+    await tester.tap(find.text('2楼东侧'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(monthDay()));
+    await tester.tap(find.byKey(ValueKey(bookingDayKey())));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
@@ -1315,14 +1464,24 @@ void main() {
       thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
-    await tester.tap(find.text(BookingVenue.library.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('校本部图书馆自修区 - 二楼东侧'));
+    await tester.tap(find.text('2楼东侧'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('今天'), findsOneWidget);
-    expect(find.textContaining('明天'), findsOneWidget);
-    expect(find.byType(ListTile), findsNWidgets(2));
-    await tester.tap(find.text(monthDay()));
+    expect(find.byType(ChoiceChip), findsNothing);
+    for (var offset = 0; offset < 5; offset++) {
+      expect(find.byKey(ValueKey(bookingDayKey(offset))), findsOneWidget);
+      expect(
+          tester
+              .widget<InkWell>(find.byKey(ValueKey(bookingDayKey(offset))))
+              .onTap,
+          offset < 2 ? isNotNull : isNull);
+    }
+    expect(find.byKey(ValueKey(bookingDayKey(5))), findsNothing);
+    expect(find.text('选择日期与时间'), findsOneWidget);
+    expect(find.byKey(const ValueKey('start-hour')), findsOneWidget);
+    await tester.tap(find.byKey(ValueKey(bookingDayKey())));
     await tester.pumpAndSettle();
     expect(find.byType(RangeSlider), findsNothing);
     expect(find.byType(Slider), findsNothing);
@@ -1345,14 +1504,46 @@ void main() {
     expect(boxValue(tester, 'start-hour'), '21');
     expect(boxValue(tester, 'start-minute'), '30');
     expect(boxValue(tester, 'end-hour'), '22');
+    expect(find.text('可选座位数：1'), findsOneWidget);
+    await tester.tap(find.byKey(ValueKey(bookingDayKey(1))));
+    await tester.pumpAndSettle();
+    expect(find.text('选择日期与时间'), findsOneWidget);
+    expect(find.text('可选座位数：1'), findsOneWidget);
+    expect(boxValue(tester, 'start-hour'), '08');
+    expect(boxValue(tester, 'start-minute'), '00');
+    expect(boxValue(tester, 'end-hour'), '08');
+    expect(boxValue(tester, 'end-minute'), '30');
+    await tester.tap(find.widgetWithText(FilledButton, '选择座位'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('返回上一步'));
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('明天'));
+    expect(find.text('选择日期与时间'), findsOneWidget);
+    expect(find.byKey(ValueKey(bookingDayKey(1))), findsOneWidget);
+  });
+
+  testWidgets('date remains selectable when its time rules need a retry',
+      (tester) async {
+    final client = _AreaRulesRetryClient();
+    addTearDown(client.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: LibraryBookingPage(
+      accountService: UnifiedAccountService(),
+      thereClientFactory: (_) => client,
+      schoolClock: schoolMorning,
+    )));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
-    expect(boxValue(tester, 'start-hour'), '12');
-    expect(boxValue(tester, 'start-minute'), '30');
-    expect(boxValue(tester, 'end-hour'), '15');
-    expect(boxValue(tester, 'end-minute'), '30');
+    await tester.tap(find.text('2楼东侧'));
+    await tester.pumpAndSettle();
+    expect(find.text('选择日期与时间'), findsOneWidget);
+    expect(find.byKey(ValueKey(bookingDayKey())), findsOneWidget);
+    expect(find.text('分区时段暂时不可用'), findsOneWidget);
+    expect(find.byKey(const ValueKey('start-hour')), findsNothing);
+    await tester.tap(find.text('重试加载时段'));
+    await tester.pumpAndSettle();
+    expect(find.text('分区时段暂时不可用'), findsNothing);
+    expect(find.byKey(const ValueKey('start-hour')), findsOneWidget);
   });
 
   testWidgets('October 18 selection submits October 19 library booking',
@@ -1370,15 +1561,16 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(BookingVenue.library.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('校本部图书馆自修区 - 二楼东侧'));
+    await tester.tap(find.text('2楼东侧'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('10月19日'));
+    await tester.tap(find.byKey(const ValueKey('booking-day-2026-10-19')));
     await tester.pumpAndSettle();
     await pickTime(tester, 'start-hour', '20', '30');
     await pickTime(tester, 'end-hour', '22', '00');
-    await tester.tap(find.text('下一步'));
+    await tester.tap(find.widgetWithText(FilledButton, '选择座位'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('2E015'));
     await tester.pumpAndSettle();
@@ -1402,11 +1594,12 @@ void main() {
       thereClientFactory: (_) => client,
       schoolClock: schoolMorning,
     )));
-    await tester.tap(find.text(BookingVenue.library.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('校本部图书馆自修区 - 二楼东侧'));
+    await tester.tap(find.text('2楼东侧'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(monthDay()));
+    await tester.tap(find.byKey(ValueKey(bookingDayKey())));
     await tester.pumpAndSettle();
     expect(find.textContaining('最短'), findsNothing);
     await pickTime(tester, 'start-hour', '10', '00');
@@ -1426,16 +1619,17 @@ void main() {
       thereClientFactory: (_) => client,
       schoolClock: () => DateTime.utc(day.year, day.month, day.day, 21, 46),
     )));
-    await tester.tap(find.text(BookingVenue.library.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('校本部图书馆自修区 - 二楼东侧'));
+    await tester.tap(find.text('2楼东侧'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(monthDay()));
+    await tester.tap(find.byKey(ValueKey(bookingDayKey())));
     await tester.pumpAndSettle();
     expect(find.text('今天已无可预约时段'), findsOneWidget);
     expect(
         tester
-            .widget<FilledButton>(find.widgetWithText(FilledButton, '下一步'))
+            .widget<FilledButton>(find.widgetWithText(FilledButton, '选择座位'))
             .onPressed,
         isNull);
   });
@@ -1450,16 +1644,95 @@ void main() {
       thereClientFactory: (_) => client,
       schoolClock: () => DateTime.utc(day.year, day.month, day.day, 8, 7),
     )));
-    await tester.tap(find.text(BookingVenue.library.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('校本部图书馆自修区 - 二楼东侧'));
+    await tester.tap(find.text('2楼东侧'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(monthDay()));
+    await tester.tap(find.byKey(ValueKey(bookingDayKey())));
     await tester.pumpAndSettle();
     expect(boxValue(tester, 'start-hour'), '08');
     expect(boxValue(tester, 'start-minute'), '30');
-    expect(boxValue(tester, 'end-hour'), '10');
+    expect(boxValue(tester, 'end-hour'), '09');
+    expect(boxValue(tester, 'end-minute'), '00');
+  });
+
+  testWidgets('open days prefetch concurrently and switching uses cached data',
+      (tester) async {
+    final client = _DeferredDayRulesClient();
+    addTearDown(client.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: LibraryBookingPage(
+      accountService: UnifiedAccountService(),
+      thereClientFactory: (_) => client,
+      schoolClock: schoolMorning,
+    )));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('2楼东侧'));
+    for (var i = 0; i < 10 && client.ruleDays.length < 2; i++) {
+      await tester.pump();
+    }
+    expect(client.ruleDays, containsAll([bookingDay(), bookingDay(1)]));
+    client.todayRules.complete();
+    client.nextDayRules.complete();
+    await tester.pumpAndSettle();
+
+    final startFinder = find.byKey(const ValueKey('start-hour'));
+    final startElement = tester.element(startFinder);
+    final startPosition = tester.getTopLeft(startFinder);
+    expect(find.text('可选座位数：1'), findsOneWidget);
+    final ruleCalls = client.ruleDays.length;
+    final previewCalls = client.detailAreaCalls;
+    expect(ruleCalls, 2);
+    expect(previewCalls, 2);
+
+    await tester.tap(find.byKey(ValueKey(bookingDayKey(1))));
+    await tester.pump();
+    expect(tester.element(startFinder), same(startElement));
+    expect(tester.getTopLeft(startFinder), startPosition);
+    expect(find.text('正在更新时段和可选座位数…'), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(tester.widget<InkWell>(startFinder).onTap, isNotNull);
+    expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, '选择座位'))
+            .onPressed,
+        isNotNull);
+    expect(tester.element(startFinder), same(startElement));
+    expect(boxValue(tester, 'start-hour'), '12');
+    expect(boxValue(tester, 'end-hour'), '12');
+    expect(find.text('可选座位数：1'), findsOneWidget);
+    expect(client.ruleDays.length, ruleCalls);
+    expect(client.detailAreaCalls, previewCalls);
+  });
+
+  testWidgets('early morning uses 08:00 and seat count follows the time',
+      (tester) async {
+    final day = DateTime.parse(ThereBookingClient.schoolDay());
+    final client = _ChangingSeatsClient();
+    addTearDown(client.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: LibraryBookingPage(
+      accountService: UnifiedAccountService(),
+      thereClientFactory: (_) => client,
+      schoolClock: () => DateTime.utc(day.year, day.month, day.day, 2, 7),
+    )));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('2楼东侧'));
+    await tester.pumpAndSettle();
+    expect(boxValue(tester, 'start-hour'), '08');
+    expect(boxValue(tester, 'start-minute'), '00');
+    expect(boxValue(tester, 'end-hour'), '08');
     expect(boxValue(tester, 'end-minute'), '30');
+    expect(find.text('可选座位数：1'), findsOneWidget);
+
+    await pickTime(tester, 'start-hour', '10', '00');
+    expect(find.text('可选座位数：0'), findsOneWidget);
+    expect(find.text('可选座位数：1'), findsNothing);
   });
 
   testWidgets('time fields and wheels use the active dark theme',
@@ -1475,16 +1748,20 @@ void main() {
         schoolClock: schoolMorning,
       ),
     ));
-    await tester.tap(find.text(BookingVenue.library.label));
+    await tester
+        .tap(find.text(LibraryBookingNames.venue(BookingVenue.library)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('校本部图书馆自修区 - 二楼东侧'));
+    await tester.tap(find.text('2楼东侧'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(monthDay()));
+    await tester.tap(find.byKey(ValueKey(bookingDayKey())));
     await tester.pumpAndSettle();
-    expect(find.text('校本部图书馆自修区 - 二楼东侧 · 最长 8 小时'), findsOneWidget);
-    expect(find.text('已选 2 小时'), findsOneWidget);
-    expect(tester.widget<Text>(find.text('已选 2 小时')).style?.color,
+    expect(find.text('宝山校区 - 本部图书馆 - 2楼东侧'), findsOneWidget);
+    expect(find.text('最长 8 小时'), findsOneWidget);
+    expect(find.text('已选 0.5 小时'), findsOneWidget);
+    expect(tester.widget<Text>(find.text('已选 0.5 小时')).style?.color,
         spec.colors.textTertiary);
+    expect(tester.getCenter(find.text('最长 8 小时')).dy,
+        tester.getCenter(find.text('已选 0.5 小时')).dy);
     expect(find.text('开始'), findsNothing);
     expect(find.text('结束'), findsNothing);
     final material = tester.widget<Material>(find
@@ -1574,8 +1851,8 @@ void main() {
     }
     for (final name in [
       '宝山校区 钱伟长图书馆',
-      '嘉定校区 嘉定联合馆',
-      '延长校区 延长文荟馆',
+      '嘉定校区 联合图书馆',
+      '延长校区 文荟图书馆',
     ]) {
       expect(find.text(name), findsOneWidget);
     }
@@ -1853,9 +2130,130 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(BottomSheet), findsOneWidget);
     expect(find.text('取消预约'), findsNothing);
-    expect(find.text('提前结束'), findsOneWidget);
+    expect(find.text('退座'), findsOneWidget);
     expect(client.bookingDetailCalls, 1);
   });
+
+  for (final ability in ['close', 'cancel']) {
+    testWidgets('cached booking loads $ability before showing its action',
+        (tester) async {
+      final day = ThereBookingClient.schoolDay();
+      SharedPreferences.setMockInitialValues({
+        AcademicAccountStore.studentIdKey: 'STUDENT_1',
+      });
+      await LibraryBookingCache()
+          .replaceVenue('STUDENT_1', BookingVenue.studySpace.roomType, [
+        {
+          'id': 'CACHED_ACTION',
+          'roomType': BookingVenue.studySpace.roomType,
+          'roomName': 'C-007',
+          'beginTime': '$day 08:30:00',
+          'endTime': '$day 10:30:00',
+          'status': 'OPEN',
+        },
+      ]);
+      final client = _CachedActionClient(ability, day);
+      final library = _EmptyChaoxingBookingClient();
+      addTearDown(client.dispose);
+      addTearDown(library.dispose);
+      await tester.pumpWidget(MaterialApp(
+          home: LibraryBookingPage(
+        accountService: UnifiedAccountService(),
+        thereClientFactory: (_) => client,
+        chaoxingClient: library,
+        schoolClock: () => DateTime.parse('${day}T09:00:00'),
+      )));
+      await tester.pumpAndSettle();
+      final tile = find.byKey(const ValueKey<String>('home:CACHED_ACTION'));
+      expect(tile, findsOneWidget);
+      await tester.tap(tile);
+      await tester.tap(tile);
+      await tester.pumpAndSettle();
+      expect(client.bookingDetailCalls, 1);
+      expect(find.byType(BottomSheet), findsOneWidget);
+      final action = ability == 'close' ? '退座' : '取消预约';
+      expect(find.text(action), findsOneWidget);
+      await tester.tap(find.text(action));
+      await tester.pumpAndSettle();
+      if (ability == 'close') {
+        expect(find.text('确认退座'), findsOneWidget);
+        expect(find.text('退座后本次预约将立即结束，座位会释放，且无法恢复。'), findsOneWidget);
+      } else {
+        expect(find.text('取消这条预约'), findsOneWidget);
+      }
+      await tester.tap(find.text(ability == 'close' ? '返回' : '保留'));
+      client.recentGate.complete();
+      await tester.pumpAndSettle();
+    });
+  }
+
+  for (final action in ['close', 'cancel']) {
+    testWidgets('home $action refreshes only its booking list after the write',
+        (tester) async {
+      final day = ThereBookingClient.schoolDay();
+      final clients = {
+        for (final venue
+            in BookingVenue.values.where((venue) => !venue.isChaoxing))
+          venue: _HomeWriteClient(venue, day, action),
+      };
+      final library = _EmptyChaoxingBookingClient();
+      addTearDown(() {
+        for (final client in clients.values) {
+          client.dispose();
+        }
+        library.dispose();
+      });
+      await tester.pumpWidget(MaterialApp(
+          home: LibraryBookingPage(
+        accountService: UnifiedAccountService(),
+        thereClientFactory: (venue) => clients[venue]!,
+        chaoxingClient: library,
+        schoolClock: () => DateTime.parse('${day}T09:00:00'),
+      )));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey<String>('home:HOME_ACTION')),
+          findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('home:HOME_STABLE')),
+          findsOneWidget);
+      final actionClient = clients[BookingVenue.studySpace]!;
+      final stableClient = clients[BookingVenue.library]!;
+      final previousActionCalls = actionClient.recentCalls;
+      final previousStableCalls = stableClient.recentCalls;
+      final previousRoomCalls = library.roomsCalls;
+      final previousAreaCalls = {
+        for (final entry in clients.entries)
+          entry.key: entry.value.areaListCalls,
+      };
+      await tester.tap(find.byKey(const ValueKey<String>('home:HOME_ACTION')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(action == 'close' ? '退座' : '取消预约'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('确认'));
+      await tester.pumpAndSettle();
+      expect(actionClient.written, isTrue);
+      expect(actionClient.recentCalls, greaterThan(previousActionCalls));
+      expect(stableClient.recentCalls, previousStableCalls);
+      expect(library.roomsCalls, previousRoomCalls);
+      for (final entry in clients.entries) {
+        expect(entry.value.areaListCalls, previousAreaCalls[entry.key]);
+      }
+      expect(
+          find.byKey(const ValueKey<String>('home:HOME_ACTION')), findsNothing);
+      expect(find.byKey(const ValueKey<String>('home:HOME_STABLE')),
+          findsOneWidget);
+      await tester.scrollUntilVisible(find.text('查看历史预约'), 180);
+      await tester.tap(find.text('查看历史预约'));
+      await tester.pumpAndSettle();
+      final updated = find.byKey(const ValueKey<String>('0:HOME_ACTION'));
+      expect(updated, findsOneWidget);
+      expect(
+        find.descendant(
+            of: updated,
+            matching: find.text(action == 'close' ? '已结束' : '已取消')),
+        findsOneWidget,
+      );
+    });
+  }
 
   testWidgets('recent cancel ability survives a failed detail prefetch',
       (tester) async {

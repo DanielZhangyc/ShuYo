@@ -11,8 +11,7 @@ class LibraryBookingListTile extends StatefulWidget {
     required this.title,
     required this.venueName,
     required this.status,
-    required this.beginTime,
-    required this.endTime,
+    required this.timeRange,
     required this.onTap,
   });
 
@@ -20,8 +19,7 @@ class LibraryBookingListTile extends StatefulWidget {
   final String title;
   final String venueName;
   final String status;
-  final String beginTime;
-  final String endTime;
+  final String timeRange;
   final VoidCallback? onTap;
 
   @override
@@ -91,7 +89,7 @@ class _LibraryBookingListTileState extends State<LibraryBookingListTile>
                               .bodySmall
                               ?.copyWith(color: colors.textTertiary)),
                       const SizedBox(height: 8),
-                      Text('${widget.beginTime} — ${widget.endTime}',
+                      Text(widget.timeRange,
                           style: Theme.of(context)
                               .textTheme
                               .bodySmall

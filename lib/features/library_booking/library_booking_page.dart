@@ -15,6 +15,7 @@ import '../../shared/theme/shuyo_theme.dart';
 import '../../shared/widgets/empty_state.dart';
 import '../auth/native_login_page.dart';
 import 'library_booking_list_tile.dart';
+import 'library_booking_names.dart';
 import 'library_booking_record.dart';
 import 'library_booking_resources.dart';
 
@@ -23,10 +24,27 @@ enum _BookingStep {
   area,
   viewVenues,
   allAreas,
-  date,
   time,
   seat,
   bookings,
+}
+
+class _PrefetchedBookingDay {
+  const _PrefetchedBookingDay({
+    required this.areaData,
+    required this.minMinutes,
+    required this.start,
+    required this.end,
+    this.available,
+    this.previewError,
+  });
+
+  final Map<String, dynamic> areaData;
+  final int minMinutes;
+  final String start;
+  final String end;
+  final int? available;
+  final String? previewError;
 }
 
 enum _BookingCampus {
@@ -50,7 +68,8 @@ enum _BookingCampus {
   static String venueLabel(BookingVenue venue) {
     final campus =
         values.where((item) => item.venues.contains(venue)).firstOrNull;
-    return campus == null ? venue.label : '${campus.label} ${venue.label}';
+    final venueName = LibraryBookingNames.venue(venue);
+    return campus == null ? venueName : '${campus.label} $venueName';
   }
 }
 
@@ -177,14 +196,12 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     } else {
       await _ensureVenueSelected(venue, client);
     }
-    _sessionVenue = venue;
   }
 
   _BookingStep _step = _BookingStep.venue;
   _BookingCampus _campus = _BookingCampus.baoshan;
   bool _slideForward = true;
   BookingVenue _venue = BookingVenue.library;
-  BookingVenue? _sessionVenue;
   bool _viewOnly = false;
   bool _areaSelectionFromHome = false;
   final Set<BookingVenue> _viewVenueSelection = {};
@@ -195,6 +212,8 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   final Map<BookingVenue, int> _homeAreaGenerations = {};
   late String _day;
   List<String> _days = [];
+  final Map<String, _PrefetchedBookingDay> _prefetchedDays = {};
+  final Map<String, String> _dayRuleErrors = {};
   List<Map<String, dynamic>> _areas = [];
   final Map<BookingVenue, List<Map<String, dynamic>>> _allAreasByVenue = {};
   bool _loadingAllAreas = false;
@@ -205,15 +224,18 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   List<Map<String, dynamic>> _rooms = [];
   List<Map<String, dynamic>> _recent = [];
   final Map<String, Map<String, dynamic>> _prefetchedDetails = {};
+  final Set<String> _openingDetails = {};
   final LibraryBookingCache _bookingCache = LibraryBookingCache();
   List<Map<String, dynamic>> _homeRecent = [];
   bool _homeCacheLoaded = false;
   String? _cacheStudentId;
   int _cacheGeneration = 0;
   final Map<String, bool> _awaitingWriteStatus = {};
-  String _start = '08:30';
-  String _end = '09:30';
+  String _start = '08:00';
+  String _end = '08:30';
   int _effectiveMinMinutes = 1;
+  bool _loadingAreaRules = false;
+  String? _areaRulesError;
 
   DateTime get _schoolNow =>
       widget.schoolClock?.call() ??
@@ -230,6 +252,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   bool _previewLoading = false;
   String? _previewError;
   String? _previewKey;
+  int _previewGeneration = 0;
   String _seatFilter = '';
   bool _onlyAvailable = false;
   String? _selectedRoomId;
@@ -298,16 +321,16 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         _setStep(_BookingStep.venue);
       case _BookingStep.allAreas:
         _setStep(_BookingStep.viewVenues);
-      case _BookingStep.date:
+      case _BookingStep.time:
         _setStep(_viewOnly
             ? _BookingStep.allAreas
             : _areaSelectionFromHome
                 ? _BookingStep.venue
                 : _BookingStep.area);
-      case _BookingStep.time:
-        _setStep(_BookingStep.date);
       case _BookingStep.seat:
         _setStep(_BookingStep.time);
+        _clearPreview();
+        unawaited(_previewSeats());
       case _BookingStep.bookings:
         _setStep(_BookingStep.venue);
     }
@@ -394,11 +417,10 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
 
   String get _pageTitle => switch (_step) {
         _BookingStep.venue => '图书馆预约',
-        _BookingStep.area => _venue.label,
+        _BookingStep.area => LibraryBookingNames.venue(_venue),
         _BookingStep.viewVenues => '选择场馆',
         _BookingStep.allAreas => '查看座位情况',
-        _BookingStep.date => '选择日期',
-        _BookingStep.time => '选择时间',
+        _BookingStep.time => '选择日期与时间',
         _BookingStep.seat => _viewOnly ? '查看座位情况' : '选择座位',
         _BookingStep.bookings => '我的预约',
       };
@@ -419,7 +441,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         _BookingStep.area => _areaPage(),
         _BookingStep.viewVenues => _viewVenueSelectionPage(),
         _BookingStep.allAreas => _allAreasPage(),
-        _BookingStep.date => _datePage(),
         _BookingStep.time => _timePage(),
         _BookingStep.seat => _seatPage(),
         _BookingStep.bookings => _bookingsPage(),
@@ -529,8 +550,10 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
             contentPadding: const EdgeInsets.symmetric(horizontal: 4),
             title: Row(children: [
               Flexible(
-                child: Text(venue.label,
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                child: Text(LibraryBookingNames.venue(venue),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium),
               ),
               if (!_loadingHomeAreas.contains(venue))
                 if (_homeAreasByVenue[venue]
@@ -652,15 +675,19 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     final venue = BookingVenue.values
         .where((itemVenue) => itemVenue.roomType == item['roomType'])
         .firstOrNull;
+    final areaName = LibraryBookingNames.area(
+      venue,
+      ThereBookingClient.string(item['officeAreaName']) ?? venueName,
+    );
     return LibraryBookingListTile(
       key: key,
       index: index,
       title: '${ThereBookingClient.string(item['roomName']) ?? '座位'} · '
-          '${ThereBookingClient.string(item['officeAreaName']) ?? venueName}',
+          '$areaName',
       venueName: venue == null ? venueName : _BookingCampus.venueLabel(venue),
       status: LibraryBookingRecord.category(item, schoolNow),
-      beginTime: LibraryBookingRecord.displayTime(item['beginTime'], schoolNow),
-      endTime: LibraryBookingRecord.displayTime(item['endTime'], schoolNow),
+      timeRange: LibraryBookingRecord.displayTimeRange(
+          item['beginTime'], item['endTime'], schoolNow),
       onTap: id == null ? null : () => _openDetail(item),
     );
   }
@@ -783,13 +810,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         final id = ThereBookingClient.string(item['id']);
         final expectsFinish = id == null ? null : _awaitingWriteStatus[id];
         if (expectsFinish != null) {
-          final accepted = expectsFinish
-              ? LibraryBookingRecord.finishedEarly(item)
-              : (ThereBookingClient.string(item['status']) == 'CANCEL' ||
-                  (ThereBookingClient.string(item['statusLabel']) ?? '')
-                      .contains('取消'));
-          if (!accepted) continue;
-          _awaitingWriteStatus.remove(id);
+          if (!_writeStatusConfirmed(item, expectsFinish)) continue;
         }
         confirmed.add(item);
       }
@@ -806,6 +827,13 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       // Cache failures must not affect an otherwise successful server read.
     }
   }
+
+  bool _writeStatusConfirmed(Map<String, dynamic> item, bool expectsFinish) =>
+      expectsFinish
+          ? LibraryBookingRecord.finishedEarly(item)
+          : (ThereBookingClient.string(item['status']) == 'CANCEL' ||
+              (ThereBookingClient.string(item['statusLabel']) ?? '')
+                  .contains('取消'));
 
   Future<void> _removeBookingFromCache(String bookingId) async {
     final generation = ++_cacheGeneration;
@@ -839,7 +867,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           padding: EdgeInsets.zero,
           child: CheckboxListTile(
             key: ValueKey('view-${venue.name}'),
-            title: Text(venue.label),
+            title: Text(LibraryBookingNames.venue(venue)),
             value: selected.contains(venue),
             controlAffinity: ListTileControlAffinity.trailing,
             onChanged: (value) => setState(() {
@@ -901,7 +929,8 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           if (_viewVenueSelection.contains(venue))
             if (_allAreasByVenue[venue]
                 case final List<Map<String, dynamic>> areas) ...[
-              Text(venue.label, style: Theme.of(context).textTheme.titleMedium),
+              Text(LibraryBookingNames.venue(venue),
+                  style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 10),
               for (final area in _selectableAreas(areas)) ...[
                 _areaCard(venue, area, areas),
@@ -948,7 +977,14 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                 _selectedArea = area;
                 _rooms = [];
                 _selectedRoomId = null;
-                _step = _BookingStep.date;
+                _step = _BookingStep.time;
+                _day = _clockDay;
+                _days = [];
+                _prefetchedDays.clear();
+                _dayRuleErrors.clear();
+                _areaData = null;
+                _areaRulesError = null;
+                _loadingAreaRules = false;
                 _loadingAllAreas = false;
                 _clearPreview();
               });
@@ -958,19 +994,23 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         padding: embedded
             ? const EdgeInsets.fromLTRB(4, 12, 8, 14)
             : const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Row(children: [
-              Expanded(
-                  child: Text(_areaName(area, areas: areas),
-                      style: Theme.of(context).textTheme.titleMedium)),
-              const Icon(Icons.chevron_right),
-            ]),
-            const SizedBox(height: 12),
-            Text('开放时间：${_openingHours(area)}'),
-            const SizedBox(height: 12),
-            _areaStats(area),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_areaName(venue, area, areas: areas),
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 12),
+                  Text('开放时间：${_openingHours(area)}'),
+                  const SizedBox(height: 12),
+                  _areaStats(area),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right),
           ],
         ),
       ),
@@ -983,53 +1023,31 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   Widget _areaStats(Map<String, dynamic> area) {
     final open =
         _areaCount(area, 'totalResourceCount', 'disabledResourceCount');
-    final busy = _count(area['busyResourceCount']);
-    final free = _count(area['freeResourceCount']);
     final base = Theme.of(context).textTheme.bodyMedium;
     final accent = context.shuyoColors.accent;
-    if (area['busyResourceCount'] is! num &&
-        area['freeResourceCount'] is! num) {
-      return Text('开放座位数 $open', style: base);
+    final free = area['freeResourceCount'];
+    if (free is num) {
+      return Text.rich(TextSpan(style: base, children: [
+        const TextSpan(text: '开放座位数：'),
+        TextSpan(
+            text: free.toInt().toString(),
+            style: base?.copyWith(color: accent)),
+        TextSpan(text: '/$open'),
+      ]));
     }
-    final firstLine = '开放座位数 $open / 使用中 $busy';
-    final available = TextSpan(style: base, children: [
-      const TextSpan(text: '可用 '),
-      TextSpan(text: free, style: base?.copyWith(color: accent)),
-    ]);
-    final fullLine = TextSpan(style: base, children: [
-      TextSpan(text: '$firstLine / '),
-      available,
-    ]);
-    return LayoutBuilder(builder: (context, constraints) {
-      final painter = TextPainter(
-        text: fullLine,
-        textDirection: TextDirection.ltr,
-        textScaler: MediaQuery.textScalerOf(context),
-        maxLines: 1,
-      )..layout();
-      final fits = painter.width <= constraints.maxWidth;
-      if (fits) {
-        return Text.rich(fullLine);
-      }
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(firstLine, style: base),
-        const SizedBox(height: 4),
-        Text.rich(available),
-      ]);
-    });
+    return Text('开放座位数：$open', style: base);
   }
 
-  String _areaName(Map<String, dynamic> area,
+  String _areaName(BookingVenue venue, Map<String, dynamic> area,
       {List<Map<String, dynamic>>? areas}) {
     final parentId = ThereBookingClient.string(area['parentId']);
     final parent =
         (areas ?? _areas).where((item) => item['id'] == parentId).firstOrNull;
     final name = ThereBookingClient.string(area['name']) ?? '未命名分区';
     final parentName = ThereBookingClient.string(parent?['name']);
-    return parentName == null ? name : '$parentName - $name';
+    final systemName = parentName == null ? name : '$parentName - $name';
+    return LibraryBookingNames.area(venue, systemName);
   }
-
-  String _count(Object? value) => value is num ? value.toInt().toString() : '—';
 
   String _areaCount(
       Map<String, dynamic> area, String totalKey, String disabledKey) {
@@ -1047,50 +1065,33 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     return '${start.toInt().toString().padLeft(2, '0')}:00–${end.toInt().toString().padLeft(2, '0')}:00';
   }
 
-  Widget _datePage() => _pageList([
-        Text(_areaName(_selectedArea ?? const {}),
-            style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 16),
-        if (_days.isEmpty) const Text('暂无可选日期，请稍后刷新'),
-        for (final day in _days) ...[
-          _surface(
-            padding: EdgeInsets.zero,
-            child: ListTile(
-              title: Text(_dateLabel(day)),
-              subtitle: Text(_monthDay(day)),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () {
-                setState(() {
-                  _slideForward = true;
-                  _day = day;
-                  _step = _BookingStep.time;
-                  _rooms = [];
-                  _selectedRoomId = null;
-                  _clearPreview();
-                });
-                unawaited(_loadAreaRules());
-              },
-            ),
-          ),
-          const SizedBox(height: 10),
-        ],
-      ]);
+  void _selectDay(String day) {
+    if (day == _day) return;
+    setState(() => _showPrefetchedDay(day));
+  }
 
-  String _dateLabel(String day) {
-    final today = _clockDay;
-    final todayDate = DateTime.parse(today);
-    final tomorrow =
-        DateTime.utc(todayDate.year, todayDate.month, todayDate.day + 1);
-    final tomorrowText =
-        '${tomorrow.year}-${tomorrow.month.toString().padLeft(2, '0')}-${tomorrow.day.toString().padLeft(2, '0')}';
-    final date = DateTime.tryParse(day);
-    const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-    final prefix = day == today
-        ? '今天'
-        : day == tomorrowText
-            ? '明天'
-            : '';
-    return '${prefix.isEmpty ? '' : '$prefix · '}${date == null ? day : weekdays[date.weekday - 1]}';
+  void _showPrefetchedDay(String day) {
+    _day = day;
+    _rooms = [];
+    _selectedRoomId = null;
+    _loadingAreaRules = false;
+    _clearPreview();
+    final cached = _prefetchedDays[day];
+    if (cached == null) {
+      _areaData = null;
+      _start = '';
+      _end = '';
+      _areaRulesError = _dayRuleErrors[day] ?? '该日期的预约时段暂时不可用';
+      return;
+    }
+    _areaRulesError = null;
+    _areaData = cached.areaData;
+    _effectiveMinMinutes = cached.minMinutes;
+    _start = cached.start;
+    _end = cached.end;
+    _previewAvailable = cached.available;
+    _previewError = cached.previewError;
+    if (cached.available != null) _previewKey = _currentPreviewKey;
   }
 
   String _monthDay(String day) {
@@ -1105,86 +1106,199 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     final hasInterval = _isValidInterval(_start, _end, rules);
     final colors = context.shuyoColors;
     final max = rules['maxDuration'];
+    final campus = _BookingCampus.values
+        .where((item) => item.venues.contains(_venue))
+        .firstOrNull;
+    final areaPath = [
+      if (campus != null) campus.label,
+      LibraryBookingNames.venue(_venue),
+      _areaName(_venue, _selectedArea ?? const {}),
+    ].join(' - ');
+    final firstDate = DateTime.parse(_clockDay);
+    final calendarDays = [
+      for (var offset = 0; offset < 5; offset++)
+        DateTime.utc(firstDate.year, firstDate.month, firstDate.day + offset),
+    ];
+    String dayKey(DateTime date) => '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
+    const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
     return _pageList([
-      Text('${_dateLabel(_day)} · ${_monthDay(_day)}',
-          style: Theme.of(context).textTheme.titleMedium),
-      const SizedBox(height: 6),
-      Text('${_areaName(_selectedArea ?? const {})}'
-          '${max is num ? ' · 最长 ${_durationText(max.toInt())}' : ''}'),
+      Text(areaPath, style: Theme.of(context).textTheme.titleMedium),
       const SizedBox(height: 18),
-      _surface(
-          child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            Expanded(
-                child: Text('预约时段',
-                    style: Theme.of(context).textTheme.titleMedium)),
-            if (hasInterval)
-              Text('已选 ${_durationText(_minutes(_end) - _minutes(_start))}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.textTertiary,
-                      )),
-          ]),
-          const SizedBox(height: 18),
-          Row(children: [
-            Expanded(
-                child: _timePair('开始', _start, choices, rules, start: true)),
-            const SizedBox(width: 8),
-            const Text('–', style: TextStyle(fontSize: 22)),
-            const SizedBox(width: 8),
-            Expanded(
-                child: _timePair('结束', _end, choices, rules, start: false)),
-          ]),
-          if (!hasInterval) ...[
-            const SizedBox(height: 18),
-            Text(_day == _clockDay
-                ? _days.any((day) => day.compareTo(_day) > 0)
-                    ? '今天已无可预约时段，请选择明天'
-                    : '今天已无可预约时段'
-                : '当前没有可选时段'),
-          ],
-          const SizedBox(height: 18),
-          SizedBox(
-            height: 46,
-            child: Row(children: [
-              OutlinedButton.icon(
-                onPressed:
-                    !hasInterval || _previewLoading ? null : _previewSeats,
-                icon: const Icon(Icons.search, size: 18),
-                label: Text(_previewLoading ? '查询中…' : '预览可选座位数'),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                  child: Text(
-                _previewError ??
-                    (_previewAvailable != null &&
-                            _previewKey == _currentPreviewKey
-                        ? '可选 ${_previewAvailable!} 个'
-                        : ''),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    color:
-                        _previewError == null ? colors.accent : colors.danger),
-              )),
-            ]),
+      Text('选择日期', style: Theme.of(context).textTheme.titleMedium),
+      const SizedBox(height: 8),
+      Row(children: [
+        for (final date in calendarDays) ...[
+          if (date != calendarDays.first) const SizedBox(width: 4),
+          Expanded(
+            child: Builder(builder: (context) {
+              final day = dayKey(date);
+              final enabled = _days.contains(day);
+              final selected = enabled && day == _day;
+              return Semantics(
+                label: '${_monthDay(day)}，周${weekdays[date.weekday - 1]}'
+                    '${enabled ? '' : '，不可预约'}',
+                button: true,
+                selected: selected,
+                enabled: enabled,
+                child: Material(
+                  color: selected
+                      ? colors.accentSoft
+                      : enabled
+                          ? colors.surface
+                          : colors.disabledFill,
+                  borderRadius: BorderRadius.circular(10),
+                  child: InkWell(
+                    key: ValueKey('booking-day-$day'),
+                    onTap: enabled ? () => _selectDay(day) : null,
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      height: 76,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: selected ? colors.accent : colors.border),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text('周${weekdays[date.weekday - 1]}',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: enabled
+                                      ? colors.textSecondary
+                                      : colors.textMuted)),
+                          const SizedBox(height: 3),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text('${date.month}/${date.day}',
+                                style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: selected
+                                        ? FontWeight.w600
+                                        : FontWeight.w500,
+                                    color: enabled
+                                        ? selected
+                                            ? colors.accent
+                                            : colors.textPrimary
+                                        : colors.textMuted)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
           ),
         ],
-      )),
-      const SizedBox(height: 18),
-      FilledButton(
-        onPressed: !hasInterval || _previewLoading
-            ? null
-            : () {
-                setState(() {
-                  _slideForward = true;
-                  _step = _BookingStep.seat;
-                });
-                unawaited(_refreshSeats());
-              },
-        child: Text(_viewOnly ? '查看座位' : '下一步'),
-      ),
+      ]),
+      if (_days.isEmpty) ...[
+        const SizedBox(height: 8),
+        const Text('暂无可选日期，请稍后刷新'),
+      ],
+      const SizedBox(height: 22),
+      Text('选择时段', style: Theme.of(context).textTheme.titleMedium),
+      if (_loadingAreaRules && _areaData == null) ...[
+        const SizedBox(height: 22),
+        const Center(child: CircularProgressIndicator()),
+      ] else if (_areaRulesError != null && _areaData == null) ...[
+        const SizedBox(height: 18),
+        Text(_areaRulesError!),
+        const SizedBox(height: 8),
+        TextButton.icon(
+          onPressed: () => unawaited(_loadAreaRules()),
+          icon: const Icon(Icons.refresh),
+          label: const Text('重试加载时段'),
+        ),
+      ] else if (_days.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        Center(
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 18,
+            runSpacing: 4,
+            children: [
+              if (max is num)
+                Text('最长 ${_durationText(max.toInt())}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textTertiary,
+                        )),
+              if (hasInterval)
+                Text('已选 ${_durationText(_minutes(_end) - _minutes(_start))}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.textTertiary,
+                        )),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        Row(children: [
+          Expanded(child: _timePair('开始', _start, choices, rules, start: true)),
+          const SizedBox(width: 8),
+          const Text('–', style: TextStyle(fontSize: 22)),
+          const SizedBox(width: 8),
+          Expanded(child: _timePair('结束', _end, choices, rules, start: false)),
+        ]),
+        if (!hasInterval && !_loadingAreaRules && _areaRulesError == null) ...[
+          const SizedBox(height: 18),
+          Text(_day == _clockDay
+              ? _days.any((day) => day.compareTo(_day) > 0)
+                  ? '今天已无可预约时段，请选择明天'
+                  : '今天已无可预约时段'
+              : '当前没有可选时段'),
+        ],
+        const SizedBox(height: 22),
+        Text(_viewOnly ? '查看座位' : '选择座位',
+            style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 10),
+        Text(
+          _loadingAreaRules
+              ? '正在更新时段和可选座位数…'
+              : _areaRulesError ??
+                  _previewError ??
+                  (!hasInterval
+                      ? '请选择可预约时段'
+                      : _previewLoading
+                          ? '正在查询可选座位数…'
+                          : _previewAvailable != null &&
+                                  _previewKey == _currentPreviewKey
+                              ? '可选座位数：${_previewAvailable!}'
+                              : '正在查询可选座位数…'),
+          style: TextStyle(
+              color: _areaRulesError == null && _previewError == null
+                  ? colors.accent
+                  : colors.danger),
+        ),
+        if (_areaRulesError != null) ...[
+          const SizedBox(height: 8),
+          TextButton.icon(
+            onPressed: () => unawaited(_loadAreaRules()),
+            icon: const Icon(Icons.refresh),
+            label: const Text('重试加载时段'),
+          ),
+        ],
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            onPressed: !hasInterval ||
+                    _loadingAreaRules ||
+                    _areaRulesError != null ||
+                    _previewLoading
+                ? null
+                : () {
+                    setState(() {
+                      _slideForward = true;
+                      _step = _BookingStep.seat;
+                    });
+                    unawaited(_refreshSeats());
+                  },
+            child: Text(_viewOnly ? '查看座位' : '选择座位'),
+          ),
+        ),
+      ],
     ]);
   }
 
@@ -1194,7 +1308,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     final parts = value.split(':');
     final hour = parts.length == 2 ? parts[0] : '—';
     final minute = parts.length == 2 ? parts[1] : '—';
-    final enabled = _eligibleTimes(choices, rules, start: start).isNotEmpty;
+    final enabled = !_loadingAreaRules &&
+        _areaRulesError == null &&
+        _eligibleTimes(choices, rules, start: start).isNotEmpty;
     return Row(children: [
       Expanded(
           child: _timeBox('$label小时', hour, enabled,
@@ -1412,7 +1528,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       Map<String, dynamic> rules) {
     final earliest = _earliestAllowedStart;
     bool valid(String begin, String end) =>
-        _validIntervalAt(begin, end, rules, earliest);
+        _validIntervalAt(begin, end, rules, earliest, _effectiveMinMinutes);
     final candidates = <int>[
       for (var i = 0; i < choices.length; i++)
         if (start
@@ -1442,12 +1558,14 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       }
       _clearPreview();
     });
+    if (_isValidInterval(_start, _end, rules)) unawaited(_previewSeats());
   }
 
   String get _currentPreviewKey =>
       '${_venue.roomType}|${ThereBookingClient.string(_selectedArea?['id'])}|$_day|$_start|$_end';
 
   void _clearPreview() {
+    ++_previewGeneration;
     _previewAvailable = null;
     _previewError = null;
     _previewKey = null;
@@ -1456,12 +1574,20 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
 
   Future<void> _previewSeats() async {
     final id = ThereBookingClient.string(_selectedArea?['id']);
-    if (id == null || _previewLoading) return;
+    final rules =
+        ThereBookingClient.object(_areaData?['bookingTimes']) ?? const {};
+    if (id == null ||
+        _previewLoading ||
+        !_isValidInterval(_start, _end, rules)) {
+      return;
+    }
     final key = _currentPreviewKey;
+    final previewGeneration = _previewGeneration;
     final day = _day;
     final start = _start;
     final end = _end;
     final venue = _venue;
+    final client = _clientForVenue(venue);
     setState(() {
       _previewLoading = true;
       _previewError = null;
@@ -1470,9 +1596,12 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     try {
       final data = await _read(() async {
         await _selectBookingVenue(venue);
-        return _client.area(id, '$day $start', '$day $end');
-      });
-      if (!mounted || _step != _BookingStep.time || key != _currentPreviewKey) {
+        return client.area(id, '$day $start', '$day $end');
+      }, venue: venue, client: client);
+      if (!mounted ||
+          _step != _BookingStep.time ||
+          previewGeneration != _previewGeneration ||
+          key != _currentPreviewKey) {
         return;
       }
       setState(() {
@@ -1482,7 +1611,10 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         _previewLoading = false;
       });
     } on Object catch (error) {
-      if (!mounted || _step != _BookingStep.time || key != _currentPreviewKey) {
+      if (!mounted ||
+          _step != _BookingStep.time ||
+          previewGeneration != _previewGeneration ||
+          key != _currentPreviewKey) {
         return;
       }
       setState(() {
@@ -1499,35 +1631,37 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   }
 
   String _durationText(int minutes) {
-    final hours = minutes ~/ 60;
-    final rest = minutes % 60;
-    if (hours == 0) return '$rest 分钟';
-    return rest == 0 ? '$hours 小时' : '$hours 小时 $rest 分钟';
+    final hours =
+        (minutes / 60).toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
+    return '$hours 小时';
   }
 
   bool _isValidInterval(String start, String end, Map<String, dynamic> rules) {
-    return _validIntervalAt(start, end, rules, _earliestAllowedStart);
+    return _validIntervalAt(
+        start, end, rules, _earliestAllowedStart, _effectiveMinMinutes);
   }
 
-  int get _earliestAllowedStart {
+  int get _earliestAllowedStart => _earliestAllowedStartFor(_day);
+
+  int _earliestAllowedStartFor(String day) {
     final now = _schoolNow;
     final today = '${now.year.toString().padLeft(4, '0')}-'
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
-    if (_day.compareTo(today) < 0) return 24 * 60 + 1;
-    if (_day != today) return 0;
+    if (day.compareTo(today) < 0) return 24 * 60 + 1;
+    if (day != today) return 0;
     return now.hour * 60 +
         now.minute +
         (now.second > 0 || now.millisecond > 0 ? 1 : 0);
   }
 
-  bool _validIntervalAt(
-      String start, String end, Map<String, dynamic> rules, int earliest) {
+  bool _validIntervalAt(String start, String end, Map<String, dynamic> rules,
+      int earliest, int minMinutes) {
     final startMinutes = _minutes(start);
     final duration = _minutes(end) - startMinutes;
     final max = rules['maxDuration'];
     return startMinutes >= earliest &&
-        duration >= _effectiveMinMinutes &&
+        duration >= minMinutes &&
         (max is! num || duration <= max);
   }
 
@@ -1540,24 +1674,19 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     return result ?? 1;
   }
 
-  ({String start, String end}) _defaultTimeRange(
-      List<String> choices, Map<String, dynamic> rules) {
+  ({String start, String end}) _defaultTimeRange(List<String> choices,
+      Map<String, dynamic> rules, String day, int minMinutes) {
+    final earliest = _earliestAllowedStartFor(day);
+    bool valid(String start, String end) =>
+        _validIntervalAt(start, end, rules, earliest, minMinutes);
     final starts = choices
-        .where((start) =>
-            choices.any((end) => _isValidInterval(start, end, rules)))
+        .where((start) => choices.any((end) => valid(start, end)))
         .toList();
     if (starts.isEmpty) return (start: '', end: '');
-    final today = _day == _clockDay;
-    final start =
-        today ? starts.first : starts[((starts.length - 1) / 3).round()];
-    final targetDuration = today ? 120 : 180;
-    final ends =
-        choices.where((end) => _isValidInterval(start, end, rules)).toList();
+    final start = starts.first;
+    final ends = choices.where((end) => valid(start, end)).toList();
     if (ends.isEmpty) return (start: '', end: '');
-    final withinTarget = ends
-        .where((end) => _minutes(end) - _minutes(start) <= targetDuration)
-        .toList();
-    final end = withinTarget.isNotEmpty ? withinTarget.last : ends.first;
+    final end = ends.first;
     return (start: start, end: end);
   }
 
@@ -1620,7 +1749,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           children: [
             Row(children: [
               Expanded(
-                  child: Text(_areaName(_selectedArea ?? const {}),
+                  child: Text(_areaName(_venue, _selectedArea ?? const {}),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleMedium)),
@@ -1823,10 +1952,8 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         break;
       case _BookingStep.allAreas:
         unawaited(_loadAllAreas());
-      case _BookingStep.date:
-        unawaited(_loadDays());
       case _BookingStep.time:
-        unawaited(_loadAreaRules());
+        unawaited(_loadDays());
       case _BookingStep.seat:
         unawaited(_refreshSeats());
       case _BookingStep.bookings:
@@ -1860,7 +1987,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       _step = _BookingStep.area;
       _loading = true;
       _bookingsLoading = false;
-      _loadingLabel = '正在连接至${_venue.label}';
+      _loadingLabel = '正在连接至${LibraryBookingNames.venue(_venue)}';
       _error = null;
       _selectedArea = null;
       _selectedRoomId = null;
@@ -1923,7 +2050,8 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     for (final venue
         in BookingVenue.values.where(_viewVenueSelection.contains)) {
       if (!mounted || generation != _generation) return;
-      setState(() => _loadingLabel = '正在连接至${venue.label}');
+      setState(
+          () => _loadingLabel = '正在连接至${LibraryBookingNames.venue(venue)}');
       try {
         await _read(() async {
           await _selectBookingVenue(venue);
@@ -1940,7 +2068,8 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           _loading = false;
         });
       } on Object catch (error) {
-        failures.add('${venue.label}：${_friendlyError(error)}');
+        failures.add(
+            '${LibraryBookingNames.venue(venue)}：${_friendlyError(error)}');
       }
     }
     if (!mounted || generation != _generation) return;
@@ -1957,19 +2086,54 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
 
   Future<void> _loadDays() async {
     final generation = ++_generation;
+    final venue = _venue;
+    final client = _clientForVenue(venue);
+    final id = ThereBookingClient.string(_selectedArea?['id']);
+    if (id == null) return;
     setState(() {
       _loading = true;
       _loadingLabel = '正在加载可预约日期';
       _error = null;
+      _loadingAreaRules = false;
+      _areaRulesError = null;
+      _areaData = null;
+      _prefetchedDays.clear();
+      _dayRuleErrors.clear();
+      _clearPreview();
     });
     try {
       final overview = await _read(() async {
-        await _selectBookingVenue(_venue);
-        return _client.overview(_clockDay);
-      });
+        await _selectBookingVenue(venue);
+        await _checkAccount(await client.profile(), client: client);
+        return client.overview(_clockDay);
+      }, venue: venue, client: client);
+      if (!mounted || generation != _generation) return;
+      final days = _bookingDays(overview);
+      setState(() => _loadingLabel = '正在准备可预约时段和座位数');
+      Future<({String day, _PrefetchedBookingDay? data, String? error})>
+          loadDay(String day) async {
+        try {
+          final data = await _prefetchBookingDay(day, id, venue, client);
+          return (day: day, data: data, error: null);
+        } on Object catch (error) {
+          return (day: day, data: null, error: _friendlyError(error));
+        }
+      }
+
+      final results = await Future.wait(days.map(loadDay));
       if (!mounted || generation != _generation) return;
       setState(() {
-        _days = _bookingDays(overview);
+        _days = days;
+        for (final result in results) {
+          if (result.data case final _PrefetchedBookingDay data) {
+            _prefetchedDays[result.day] = data;
+          } else if (result.error case final String error) {
+            _dayRuleErrors[result.day] = error;
+          }
+        }
+        if (days.isNotEmpty) {
+          _showPrefetchedDay(days.contains(_day) ? _day : days.first);
+        }
         _loading = false;
       });
     } on Object catch (error) {
@@ -1981,40 +2145,74 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     }
   }
 
+  Future<_PrefetchedBookingDay> _prefetchBookingDay(String day, String id,
+      BookingVenue venue, ThereBookingClient client) async {
+    final data = await _read(() => client.area(id, day, day),
+        venue: venue, client: client);
+    final rules = ThereBookingClient.object(data['bookingTimes']) ?? const {};
+    final choices = _timeChoices(rules);
+    final explicitMin = rules['minDuration'];
+    final minMinutes = explicitMin is num && explicitMin > 0
+        ? explicitMin.toInt()
+        : _minimumStep(choices);
+    final defaults = _defaultTimeRange(choices, rules, day, minMinutes);
+    int? available;
+    String? previewError;
+    if (_validIntervalAt(defaults.start, defaults.end, rules,
+        _earliestAllowedStartFor(day), minMinutes)) {
+      try {
+        final preview = await _read(
+            () => client.area(
+                id, '$day ${defaults.start}', '$day ${defaults.end}'),
+            venue: venue,
+            client: client);
+        available = ThereBookingClient.objects(preview['rooms'])
+            .where(_isBookable)
+            .length;
+      } on Object catch (error) {
+        previewError = _friendlyError(error);
+      }
+    }
+    return _PrefetchedBookingDay(
+      areaData: data,
+      minMinutes: minMinutes,
+      start: defaults.start,
+      end: defaults.end,
+      available: available,
+      previewError: previewError,
+    );
+  }
+
   Future<void> _loadAreaRules() async {
     final id = ThereBookingClient.string(_selectedArea?['id']);
     if (id == null) return;
     final generation = ++_generation;
+    final day = _day;
+    final venue = _venue;
+    final client = _clientForVenue(venue);
     setState(() {
-      _loading = true;
-      _loadingLabel = '正在加载分区开放时间';
-      _error = null;
+      _loadingAreaRules = true;
+      _areaRulesError = null;
+      if (_areaData == null) {
+        _start = '';
+        _end = '';
+      }
       _clearPreview();
     });
     try {
-      final data = await _read(() async {
-        await _selectBookingVenue(_venue);
-        return _client.area(id, _day, _day);
-      });
+      final data = await _prefetchBookingDay(day, id, venue, client);
       if (!mounted || generation != _generation) return;
-      final rules = ThereBookingClient.object(data['bookingTimes']) ?? const {};
-      final choices = _timeChoices(rules);
-      final explicitMin = rules['minDuration'];
-      _effectiveMinMinutes = explicitMin is num && explicitMin > 0
-          ? explicitMin.toInt()
-          : _minimumStep(choices);
-      final defaults = _defaultTimeRange(choices, rules);
       setState(() {
-        _areaData = data;
-        _start = defaults.start;
-        _end = defaults.end;
-        _loading = false;
+        _prefetchedDays[day] = data;
+        _dayRuleErrors.remove(day);
+        _showPrefetchedDay(day);
       });
     } on Object catch (error) {
       if (!mounted || generation != _generation) return;
       setState(() {
-        _loading = false;
-        _error = _friendlyError(error);
+        _loadingAreaRules = false;
+        _areaRulesError = _friendlyError(error);
+        _dayRuleErrors[day] = _areaRulesError!;
       });
     }
   }
@@ -2023,6 +2221,11 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     final id = ThereBookingClient.string(_selectedArea?['id']);
     if (id == null || !mounted || _step != _BookingStep.seat) return;
     final generation = ++_generation;
+    final day = _day;
+    final start = _start;
+    final end = _end;
+    final venue = _venue;
+    final client = _clientForVenue(venue);
     setState(() {
       _loadingSeats = true;
       _loadingLabel = '正在加载分区座位情况';
@@ -2030,9 +2233,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     });
     try {
       final result = await _read(() async {
-        await _selectBookingVenue(_venue);
-        return _client.area(id, '$_day $_start', '$_day $_end');
-      });
+        await _selectBookingVenue(venue);
+        return client.area(id, '$day $start', '$day $end');
+      }, venue: venue, client: client);
       if (!mounted || generation != _generation) return;
       setState(() {
         _areaData = result;
@@ -2087,10 +2290,13 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
               cacheWrite.then((_) => _cacheRecentForVenue(venue, recent));
           for (final item in recent) {
             final id = ThereBookingClient.string(item['id']);
-            if (id == null ||
-                item['roomType'] != venue.roomType ||
-                _awaitingWriteStatus.containsKey(id)) {
+            if (id == null || item['roomType'] != venue.roomType) {
               continue;
+            }
+            final expectsFinish = _awaitingWriteStatus[id];
+            if (expectsFinish != null) {
+              if (!_writeStatusConfirmed(item, expectsFinish)) continue;
+              _awaitingWriteStatus.remove(id);
             }
             Map<String, dynamic>? prefetchedDetail;
             final recentAllowsCancellation =
@@ -2383,7 +2589,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
 
   Future<void> _openDetail(Map<String, dynamic> booking) async {
     final id = ThereBookingClient.string(booking['id']);
-    if (id == null) return;
+    if (id == null || !_openingDetails.add(id)) return;
     try {
       final venue = BookingVenue.values
               .where((item) => item.roomType == booking['roomType'])
@@ -2393,16 +2599,33 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       final displayId = venue.isChaoxing
           ? 'cx:${id.startsWith(prefix) ? id.substring(prefix.length) : id}'
           : 'there:$id';
+      final prefetched = _prefetchedDetails[id];
+      final category = LibraryBookingRecord.category(booking, _schoolNow);
+      final needsDetail = prefetched == null &&
+          (ThereBookingClient.string(booking['beginTime']) == null ||
+              (booking['abilities'] == null &&
+                  (category == '待履约' || category == '进行中')));
+      final client = _clientForVenue(venue);
+      final fetched = needsDetail
+          ? await _read<Map<String, dynamic>>(() async {
+              await _selectBookingVenue(venue);
+              return client.detail(id);
+            }, venue: venue, client: client)
+          : null;
+      if (fetched != null) _prefetchedDetails[id] = fetched;
       final Map<String, dynamic> detail = {
         ...booking,
-        ...(_prefetchedDetails[id] ??
-            (ThereBookingClient.string(booking['beginTime']) != null
-                ? booking
-                : await _read<Map<String, dynamic>>(() async {
-                    await _selectBookingVenue(venue);
-                    return _client.detail(id);
-                  }))),
+        ...?prefetched,
+        ...?fetched,
       };
+      final areaName = LibraryBookingNames.area(
+        venue,
+        ThereBookingClient.string(detail['officeAreaName']) ??
+            ThereBookingClient.string(booking['officeAreaName']) ??
+            ThereBookingClient.string(detail['allOfficeAreaName']) ??
+            ThereBookingClient.string(booking['allOfficeAreaName']) ??
+            '',
+      );
       if (!mounted) return;
       await showModalBottomSheet<void>(
         context: context,
@@ -2459,16 +2682,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                     const SizedBox(height: 12),
                     _bookingDetailField(
                         sheetContext, '场馆', _BookingCampus.venueLabel(venue)),
-                    _bookingDetailField(
-                        sheetContext,
-                        '分区',
-                        ThereBookingClient.string(
-                                detail['allOfficeAreaName']) ??
-                            ThereBookingClient.string(
-                                booking['allOfficeAreaName']) ??
-                            ThereBookingClient.string(
-                                booking['officeAreaName']) ??
-                            ''),
+                    _bookingDetailField(sheetContext, '分区', areaName),
                     _bookingDetailField(
                         sheetContext,
                         '开始时间',
@@ -2513,8 +2727,8 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                               Navigator.pop(sheetContext);
                               unawaited(_finishBooking(id, venue: venue));
                             },
-                            icon: const Icon(Icons.stop_circle_outlined),
-                            label: const Text('提前结束'),
+                            icon: const Icon(Icons.chair_alt_outlined),
+                            label: const Text('退座'),
                           )),
                     ],
                   ],
@@ -2526,6 +2740,8 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       );
     } on Object catch (error) {
       if (mounted) _showMessage(_friendlyError(error));
+    } finally {
+      _openingDetails.remove(id);
     }
   }
 
@@ -2545,6 +2761,49 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         Expanded(child: selectable ? SelectableText(value) : Text(value)),
       ]),
     );
+  }
+
+  Future<void> _refreshAfterBookingWrite(BookingVenue venue) async {
+    if (_step == _BookingStep.venue) {
+      final client = _clientForVenue(venue);
+      final recent = await _read(client.recent, venue: venue, client: client);
+      if (!mounted) return;
+      final updated = <Map<String, dynamic>>[];
+      for (final item in recent) {
+        if (item['roomType'] != venue.roomType) continue;
+        final id = ThereBookingClient.string(item['id']);
+        if (id == null) continue;
+        final expectsFinish = _awaitingWriteStatus[id];
+        if (expectsFinish != null) {
+          if (!_writeStatusConfirmed(item, expectsFinish)) continue;
+          _awaitingWriteStatus.remove(id);
+        }
+        updated.add(item);
+      }
+      setState(() {
+        for (final item
+            in _recent.where((item) => item['roomType'] == venue.roomType)) {
+          final id = ThereBookingClient.string(item['id']);
+          if (id != null) _prefetchedDetails.remove(id);
+        }
+        _recent.removeWhere((item) => item['roomType'] == venue.roomType);
+        _recent.addAll(updated);
+        _recent.sort((a, b) => (ThereBookingClient.string(b['beginTime']) ?? '')
+            .compareTo(ThereBookingClient.string(a['beginTime']) ?? ''));
+      });
+      await _cacheRecentForVenue(venue, recent);
+      return;
+    }
+    if (_step == _BookingStep.bookings) {
+      await _loadBookings();
+      return;
+    }
+    final client = _clientForVenue(venue);
+    final recent = await _read(client.recent, venue: venue, client: client);
+    if (!mounted) return;
+    setState(() => _recent = recent);
+    await _cacheRecentForVenue(venue, recent);
+    await _refreshSeats();
   }
 
   Future<void> _cancelBooking(String id, {required BookingVenue venue}) async {
@@ -2599,15 +2858,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       await _removeBookingFromCache(id);
     }
     try {
-      if (_step == _BookingStep.bookings) {
-        await _loadBookings();
-      } else {
-        final recent = await _read(_client.recent);
-        if (!mounted) return;
-        setState(() => _recent = recent);
-        await _cacheRecentForVenue(_sessionVenue ?? _venue, recent);
-        await _refreshSeats();
-      }
+      await _refreshAfterBookingWrite(venue);
     } on Object {
       if (mounted) {
         _showMessage(cancelled ? '已取消预约，列表暂时无法刷新' : '取消结果暂未确认，请稍后刷新我的预约');
@@ -2619,8 +2870,8 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('提前结束'),
-            content: const Text('结束后将无法取消'),
+            title: const Text('确认退座'),
+            content: const Text('退座后本次预约将立即结束，座位会释放，且无法恢复。'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
@@ -2659,19 +2910,11 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       if (mounted) setState(() => _busy = false);
     }
     if (!finished || !mounted) return;
-    _showMessage('已提交提前结束，正在读取最终状态');
+    _showMessage('已提交退座，正在读取最终状态');
     _awaitingWriteStatus[id] = true;
     await _removeBookingFromCache(id);
     try {
-      if (_step == _BookingStep.bookings) {
-        await _loadBookings();
-      } else {
-        final recent = await _read(_client.recent);
-        if (!mounted) return;
-        setState(() => _recent = recent);
-        await _cacheRecentForVenue(_sessionVenue ?? _venue, recent);
-        await _refreshSeats();
-      }
+      await _refreshAfterBookingWrite(venue);
     } on Object {
       if (mounted) _showMessage('操作已提交，列表暂时无法刷新');
     }

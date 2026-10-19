@@ -1,15 +1,16 @@
 import '../../data/services/there_booking_client.dart';
+import 'library_booking_names.dart';
 
 /// Presentation rules shared by the home and history booking lists.
 final class LibraryBookingRecord {
   const LibraryBookingRecord._();
 
-  static String venueName(Map<String, dynamic> item) =>
-      BookingVenue.values
-          .where((venue) => venue.roomType == item['roomType'])
-          .firstOrNull
-          ?.label ??
-      '图书馆预约';
+  static String venueName(Map<String, dynamic> item) {
+    final venue = BookingVenue.values
+        .where((venue) => venue.roomType == item['roomType'])
+        .firstOrNull;
+    return venue == null ? '图书馆预约' : LibraryBookingNames.venue(venue);
+  }
 
   static String category(Map<String, dynamic> item, DateTime schoolNow) {
     final status =
@@ -61,5 +62,22 @@ final class LibraryBookingRecord {
     return year == schoolNow.year
         ? text.substring(5, 16)
         : text.substring(0, 16);
+  }
+
+  static String displayTimeRange(
+      Object? begin, Object? end, DateTime schoolNow) {
+    final beginText = ThereBookingClient.string(begin);
+    final endText = ThereBookingClient.string(end);
+    final formattedBegin = displayTime(begin, schoolNow);
+    final formattedEnd = displayTime(end, schoolNow);
+    final sameDay = beginText != null &&
+        endText != null &&
+        beginText.length >= 16 &&
+        endText.length >= 16 &&
+        beginText.substring(0, 10) == endText.substring(0, 10);
+    if (!sameDay) return '$formattedBegin — $formattedEnd';
+
+    final endTime = formattedEnd.substring(formattedEnd.lastIndexOf(' ') + 1);
+    return '$formattedBegin — $endTime';
   }
 }
