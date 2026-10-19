@@ -18,7 +18,11 @@ final class LibraryBookingRecord {
     final label = ThereBookingClient.string(item['statusLabel']) ?? '';
     if (finishedEarly(item)) return '已结束';
     if (status == 'CANCEL' || label.contains('取消')) return '已取消';
-    if (status == 'CX_7') return '已结束';
+    if (status == 'CX_2' || status == 'CX_7') return '已结束';
+    final abilities = ThereBookingClient.strings(item['abilities']);
+    if ((status == 'CX_1' || status == 'CX_3') && item['cxCurrent'] == true) {
+      return '进行中';
+    }
     if (status.startsWith('CX_') &&
         status != 'CX_0' &&
         status != 'CX_1' &&
@@ -44,7 +48,21 @@ final class LibraryBookingRecord {
 
     final begin = parse(item['beginTime']);
     final end = parse(item['endTime']);
-    if (begin != null && now.isBefore(begin)) return '待履约';
+    if (!status.startsWith('CX_')) {
+      final inUse = ThereBookingClient.string(item['checkInAt']) != null ||
+          label.contains('进行中') ||
+          label.contains('已签到');
+      if (inUse &&
+          (end == null || now.isBefore(end) || abilities.contains('close'))) {
+        return '进行中';
+      }
+      if (end != null && !now.isBefore(end)) return '已结束';
+      return '待履约';
+    }
+    if (begin != null && now.isBefore(begin)) {
+      return '待履约';
+    }
+    if (abilities.contains('close')) return '进行中';
     if ((status == 'CX_0' || status == 'CX_1' || status == 'CX_3') &&
         item['cxCurrent'] == true) {
       return '进行中';

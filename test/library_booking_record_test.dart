@@ -14,8 +14,65 @@ void main() {
 
   test('normal reservations use the school clock for their visible state', () {
     expect(LibraryBookingRecord.category(booking, beforeBooking), '待履约');
-    expect(LibraryBookingRecord.category(booking, duringBooking), '进行中');
+    expect(LibraryBookingRecord.category(booking, duringBooking), '待履约');
     expect(LibraryBookingRecord.category(booking, afterBooking), '已结束');
+  });
+
+  test('There early use needs check-in evidence, not OPEN or close alone', () {
+    expect(
+      LibraryBookingRecord.category(
+        {
+          ...booking,
+          'status': 'OPEN',
+          'abilities': ['close']
+        },
+        beforeBooking,
+      ),
+      '待履约',
+    );
+    expect(
+      LibraryBookingRecord.category(
+        {
+          ...booking,
+          'status': 'OPEN',
+          'abilities': ['close'],
+          'checkInAt': '2026-10-18 19:55:00',
+        },
+        beforeBooking,
+      ),
+      '进行中',
+    );
+  });
+
+  test('Chaoxing actual seat use takes precedence over the scheduled start',
+      () {
+    for (final status in ['CX_1', 'CX_3']) {
+      expect(
+        LibraryBookingRecord.category(
+          {...booking, 'status': status, 'cxCurrent': true},
+          beforeBooking,
+        ),
+        '进行中',
+      );
+    }
+    expect(
+      LibraryBookingRecord.category(
+        {...booking, 'status': 'CX_0', 'cxCurrent': true},
+        beforeBooking,
+      ),
+      '待履约',
+    );
+    expect(
+      LibraryBookingRecord.category(
+        {
+          ...booking,
+          'status': 'CANCEL',
+          'abilities': ['close']
+        },
+        beforeBooking,
+      ),
+      '已取消',
+    );
   });
 
   test('cancelled and early-finished records take precedence over time', () {
@@ -63,6 +120,13 @@ void main() {
     expect(
       LibraryBookingRecord.category(
         {...booking, 'status': 'CX_7'},
+        duringBooking,
+      ),
+      '已结束',
+    );
+    expect(
+      LibraryBookingRecord.category(
+        {...booking, 'status': 'CX_2', 'cxCurrent': false},
         duringBooking,
       ),
       '已结束',
