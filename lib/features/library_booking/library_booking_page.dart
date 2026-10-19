@@ -1611,18 +1611,30 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                       ),
                 ),
               ),
-              IconButton.outlined(
-                key: const ValueKey('manual-seat-button'),
-                onPressed: _canSelectSeat ? _openSeatPage : null,
-                tooltip: '手动选座',
-                icon: const Icon(Icons.grid_view_rounded),
+              Tooltip(
+                message: '手动选座',
+                child: OutlinedButton.icon(
+                  key: const ValueKey('manual-seat-button'),
+                  onPressed: _canSelectSeat ? _openSeatPage : null,
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  icon: const Icon(Icons.grid_view_outlined),
+                  label: const Text('自选'),
+                ),
               ),
-              const SizedBox(width: 4),
-              IconButton.outlined(
-                key: const ValueKey('random-seat-button'),
-                onPressed: _canSelectSeat ? _selectRandomSeat : null,
-                tooltip: '随机选座',
-                icon: const Icon(Icons.shuffle_rounded),
+              const SizedBox(width: 8),
+              Tooltip(
+                message: '随机选座',
+                child: OutlinedButton.icon(
+                  key: const ValueKey('random-seat-button'),
+                  onPressed: _canSelectSeat ? _selectRandomSeat : null,
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  icon: const Icon(Icons.casino_outlined),
+                  label: const Text('随机'),
+                ),
               ),
             ]),
           ),

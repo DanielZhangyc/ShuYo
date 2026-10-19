@@ -1899,7 +1899,7 @@ void main() {
     expect(find.text('今天已无可预约时段'), findsOneWidget);
     expect(
         tester
-            .widget<IconButton>(
+            .widget<OutlinedButton>(
                 find.byKey(const ValueKey('manual-seat-button')))
             .onPressed,
         isNull);
@@ -1981,7 +1981,7 @@ void main() {
     expect(tester.widget<InkWell>(startFinder).onTap, isNotNull);
     expect(
         tester
-            .widget<IconButton>(
+            .widget<OutlinedButton>(
                 find.byKey(const ValueKey('manual-seat-button')))
             .onPressed,
         isNotNull);
@@ -2018,6 +2018,10 @@ void main() {
     final countText = tester.widget<Text>(find.text('可选座位数：1/2'));
     expect((countText.textSpan! as TextSpan).children![1].style?.color,
         ShuYoThemes.byId(ShuYoThemes.defaultId).colors.accent);
+    expect(find.text('自选'), findsOneWidget);
+    expect(find.text('随机'), findsOneWidget);
+    expect(find.byIcon(Icons.grid_view_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.casino_outlined), findsOneWidget);
 
     await tester.scrollUntilVisible(
         find.widgetWithText(FilledButton, '创建预约'), 180);
@@ -2044,7 +2048,7 @@ void main() {
         find.widgetWithText(FilledButton, '创建预约'), 180);
     expect(find.text('未选座位'), findsOneWidget);
     for (final key in ['manual-seat-button', 'random-seat-button']) {
-      expect(tester.widget<IconButton>(find.byKey(ValueKey(key))).onPressed,
+      expect(tester.widget<OutlinedButton>(find.byKey(ValueKey(key))).onPressed,
           isNull);
     }
     expect(
