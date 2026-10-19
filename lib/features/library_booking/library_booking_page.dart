@@ -1375,6 +1375,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
             .clamp(0.0, 1.0)
         : 0.0;
     final colors = context.shuyoColors;
+    final selectedPreviewRoomName =
+        ThereBookingClient.string(_selectedPreviewRoom?['name']) ??
+            ThereBookingClient.string(_selectedPreviewRoom?['id']);
     final max = rules['maxDuration'];
     final firstDate = DateTime.parse(_clockDay);
     final calendarDays = [
@@ -1600,13 +1603,14 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
             child: Row(children: [
               Expanded(
                 child: Text(
-                  ThereBookingClient.string(_selectedPreviewRoom?['name']) ??
-                      ThereBookingClient.string(_selectedPreviewRoom?['id']) ??
-                      '未选座位',
+                  selectedPreviewRoomName ?? '■■■',
                   key: const ValueKey('selected-seat-label'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: selectedPreviewRoomName == null
+                            ? Colors.black
+                            : null,
                         fontWeight: FontWeight.w700,
                       ),
                 ),
@@ -2187,6 +2191,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
 
   Widget _seatPage() {
     if (_loadingSeats) return _loadingBody();
+    final colors = context.shuyoColors;
     final available = _rooms.where(_isBookable).length;
     final visible = _rooms.where((room) {
       final name = ThereBookingClient.string(room['name']) ?? '';
@@ -2205,12 +2210,19 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                   child: Text(_selectedAreaPath,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodyMedium)),
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.w600))),
               if (_venue == BookingVenue.studySpace)
                 _infoLink('座位分布', _showSeatsMap, icon: Icons.map_outlined),
             ]),
             const SizedBox(height: 4),
-            Text('${_monthDay(_day)}  $_start–$_end'),
+            Text('${_monthDay(_day)}  $_start–$_end',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(color: colors.textTertiary)),
             const SizedBox(height: 6),
             _seatStats(available, _rooms.length),
             const SizedBox(height: 14),
@@ -2246,10 +2258,12 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
             itemBuilder: (context, index) {
               final room = visible[index];
               final id = ThereBookingClient.string(room['id']);
-              final name = ThereBookingClient.string(room['name']) ?? id ?? '—';
+              final name =
+                  ThereBookingClient.string(room['name']) ?? id ?? '■■■';
+              final isPlaceholder =
+                  ThereBookingClient.string(room['name']) == null && id == null;
               final enabled = _isBookable(room);
               final selected = id != null && id == _seatSelectionDraftId;
-              final colors = context.shuyoColors;
               return Tooltip(
                 message: '$name${enabled ? '，可选' : '，不可选'}',
                 child: InkWell(
@@ -2276,11 +2290,13 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                         fit: BoxFit.scaleDown,
                         child: Text(name,
                             style: TextStyle(
-                              color: selected
-                                  ? colors.onAccent
-                                  : enabled
-                                      ? colors.textPrimary
-                                      : colors.textMuted,
+                              color: isPlaceholder
+                                  ? Colors.black
+                                  : selected
+                                      ? colors.onAccent
+                                      : enabled
+                                          ? colors.textPrimary
+                                          : colors.textMuted,
                               fontWeight: FontWeight.w500,
                             )),
                       ),
@@ -2299,6 +2315,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     final room =
         _rooms.where((item) => item['id'] == _seatSelectionDraftId).firstOrNull;
     final colors = context.shuyoColors;
+    final selectedRoomName = ThereBookingClient.string(room?['name']);
     return Container(
         decoration: BoxDecoration(
           color: colors.surface,
@@ -2318,14 +2335,38 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                    Text(_viewOnly ? '仅查看座位情况' : '已选座位',
-                        style: Theme.of(context).textTheme.bodySmall),
-                    Text(
-                        _viewOnly
-                            ? '${_monthDay(_day)} · $_start–$_end'
-                            : '${ThereBookingClient.string(room?['name']) ?? '请选择座位'} · $_start–$_end',
+                    if (_viewOnly) ...[
+                      Text('仅查看座位情况',
+                          style: Theme.of(context).textTheme.bodySmall),
+                      Text('${_monthDay(_day)} · $_start–$_end',
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ] else ...[
+                      Text('座位号',
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: colors.textTertiary,
+                                  )),
+                      Text(
+                        selectedRoomName ?? '■■■',
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontSize: 24,
+                              color: selectedRoomName == null
+                                  ? Colors.black
+                                  : null,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(children: [
+                        Text('${_monthDay(_day)} · $_start–$_end',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: colors.textSecondary)),
+                      ]),
+                    ],
                   ])),
               if (!_viewOnly)
                 FilledButton(
