@@ -351,8 +351,13 @@ class ThereBookingClient {
   }
 
   Future<void> cancel(String bookingId) async {
-    // The server checks cancellation eligibility when handling DELETE. A
-    // separate detail read can fail even while the recent list grants cancel.
+    final current = await detail(bookingId);
+    if (!strings(current['abilities']).contains('cancel')) {
+      throw const ThereBookingException(
+        ThereFailureKind.business,
+        '当前预约不可取消',
+      );
+    }
     await _api(
         'DELETE', '/api/v3/bookings/${Uri.encodeComponent(bookingId)}/cancel');
   }

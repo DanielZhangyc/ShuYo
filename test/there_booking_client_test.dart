@@ -14,6 +14,7 @@ void main() {
   final seen = <String>[];
   final requestCookies = <String, String?>{};
   final mobileModes = <String>[];
+  final detailAbilities = <String, List<String>>{};
   Map<String, dynamic>? createdBody;
   var rejected = false;
   var requireLogin = false;
@@ -27,6 +28,7 @@ void main() {
     seen.clear();
     requestCookies.clear();
     mobileModes.clear();
+    detailAbilities.clear();
     createdBody = null;
     rejected = false;
     requireLogin = false;
@@ -135,9 +137,11 @@ void main() {
           'code': 0,
           'data': {
             'id': 'BOOKING_1',
-            'abilities': request.headers.value('x-room-type') == 'STATION'
-                ? ['close']
-                : ['cancel'],
+            'abilities':
+                detailAbilities[request.headers.value('x-room-type')] ??
+                    (request.headers.value('x-room-type') == 'STATION'
+                        ? ['close']
+                        : ['cancel']),
           },
         };
       } else if (path == '/api/v3/bookings/BOOKING_1/cancel') {
@@ -217,7 +221,39 @@ void main() {
     expect(
         seen.where(
             (entry) => entry.startsWith('GET /api/v3/bookings/BOOKING_1 ')),
-        isEmpty);
+        hasLength(1));
+  });
+
+  test('cancel and finish follow fresh detail abilities across room types',
+      () async {
+    detailAbilities[BookingVenue.library.roomType] = ['close'];
+    await client.selectVenue(BookingVenue.library);
+    await expectLater(
+      client.cancel('BOOKING_1'),
+      throwsA(isA<ThereBookingException>()
+          .having((error) => error.message, 'message', '当前预约不可取消')),
+    );
+    expect(seen.where((entry) => entry.contains('/BOOKING_1/cancel')), isEmpty);
+    await client.finish('BOOKING_1');
+    expect(seen,
+        contains('PUT /api/v3/bookings/BOOKING_1/finish LIB_SEAT SESSION_LIB'));
+
+    detailAbilities[BookingVenue.studySpace.roomType] = ['cancel'];
+    await client.selectVenue(BookingVenue.studySpace);
+    await expectLater(
+      client.finish('BOOKING_1'),
+      throwsA(isA<ThereBookingException>()
+          .having((error) => error.message, 'message', '当前预约不可退座')),
+    );
+    expect(
+        seen.where((entry) =>
+            entry.startsWith('PUT /api/v3/bookings/BOOKING_1/finish')),
+        hasLength(1));
+    await client.cancel('BOOKING_1');
+    expect(
+        seen,
+        contains('DELETE /api/v3/bookings/BOOKING_1/cancel '
+            'STATION SESSION_24H'));
   });
 
   test('next-day library booking sends the selected date and time', () async {
