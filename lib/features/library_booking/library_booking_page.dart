@@ -2810,7 +2810,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     if (!_canSelectSeat ||
         _selectedPreviewRoom == null ||
         areaId == null ||
-        roomId == null) return;
+        roomId == null) {
+      return;
+    }
     final room =
         _previewRooms.where((item) => item['id'] == roomId).firstOrNull;
     final confirmed = await showDialog<bool>(
@@ -2880,10 +2882,11 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       if (mounted) _showMessage(_friendlyError(error));
     }
     if (createdId == null || !mounted) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _busy = false;
         });
+      }
       return;
     }
     Map<String, dynamic>? createdBooking;
@@ -2903,8 +2906,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         });
         await _cacheRecentForVenue(venue, recent);
         if (createdBooking != null) break;
-        if (attempt < 2)
+        if (attempt < 2) {
           await Future<void>.delayed(const Duration(milliseconds: 400));
+        }
       }
       if (createdBooking == null && mounted) {
         _showMessage('预约已创建，列表尚未同步，请稍后查看我的预约');
@@ -2912,10 +2916,11 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     } on Object {
       if (mounted) _showMessage('预约已创建，但最新记录暂时无法加载，请稍后刷新');
     } finally {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _busy = false;
         });
+      }
     }
     if (createdBooking != null && mounted) await _openDetail(createdBooking);
   }
@@ -2953,7 +2958,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           if (venue.isChaoxing ||
               (prefetched == null &&
                   booking['abilities'] == null &&
-                  booking['beginTime'] == null)) rethrow;
+                  booking['beginTime'] == null)) {
+            rethrow;
+          }
         }
       }
       if (fetched != null) _prefetchedDetails[id] = fetched;

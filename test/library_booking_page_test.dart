@@ -698,6 +698,7 @@ class _CachedActionClient extends _BookingClient {
 class _HomeWriteClient extends _BookingClient {
   _HomeWriteClient(this.venue, this.day, this.action);
 
+  @override
   final BookingVenue venue;
   final String day;
   final String action;
