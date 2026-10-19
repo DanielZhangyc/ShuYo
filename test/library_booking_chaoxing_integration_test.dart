@@ -38,6 +38,17 @@ class _FakeChaoxingBookingClient extends ChaoxingBookingClient {
 
   ({String roomId, String start, String end, String seatNum})? submission;
 
+  int _epoch(String time) {
+    final day = DateTime.parse(ThereBookingClient.schoolDay());
+    return DateTime.utc(
+            day.year,
+            day.month,
+            day.day,
+            int.parse(time.substring(0, 2)) - 8,
+            int.parse(time.substring(3, 5)))
+        .millisecondsSinceEpoch;
+  }
+
   @override
   Map<String, dynamic>? get user => const {
         'uid': 'USER_1',
@@ -78,7 +89,21 @@ class _FakeChaoxingBookingClient extends ChaoxingBookingClient {
 
   @override
   Future<Map<String, dynamic>> home() async => {
-        'curReserves': <Map<String, dynamic>>[],
+        'curReserves': [
+          if (submission case final value?)
+            {
+              'id': 12345,
+              'roomId': value.roomId,
+              'seatNum': value.seatNum,
+              'secondLevelName': _rooms.firstWhere(
+                  (room) => room['id'] == value.roomId)['secondLevelName'],
+              'thirdLevelName': _rooms.firstWhere(
+                  (room) => room['id'] == value.roomId)['thirdLevelName'],
+              'startTime': _epoch(value.start),
+              'endTime': _epoch(value.end),
+              'status': 0,
+            },
+        ],
         'nearReserves': <Map<String, dynamic>>[],
       };
 }
@@ -176,7 +201,7 @@ void main() {
 
       await tester.tap(find.text(entry.value.areaName));
       await tester.pumpAndSettle();
-      expect(find.text('选择日期与时间'), findsOneWidget);
+      expect(find.text('创建预约'), findsOneWidget);
       expect(find.text('选择日期'), findsOneWidget);
       expect(find.text('选择时段'), findsOneWidget);
       expect(find.byType(ChoiceChip), findsNothing);
@@ -186,11 +211,20 @@ void main() {
               .widget<InkWell>(find.byKey(ValueKey('booking-day-$tomorrowKey')))
               .onTap,
           isNull);
-      expect(find.text('可选座位数：2'), findsOneWidget);
+      expect(find.text('可选座位数：2/3'), findsOneWidget);
       expect(find.byKey(const ValueKey('start-hour')), findsOneWidget);
+      const rangeKey = ValueKey('booking-time-range');
+      RangeSlider range() => tester.widget<RangeSlider>(find.byKey(rangeKey));
+      expect(range().divisions, 28);
+      range().onChanged!(const RangeValues(600, 630));
+      await tester.pump();
+      expect(range().values, const RangeValues(600, 660),
+          reason: 'The one-hour Chaoxing minimum must remain valid');
+      range().onChangeEnd!(range().values);
+      await tester.pumpAndSettle();
       expect(find.textContaining('超星'), findsNothing);
 
-      await tester.tap(find.widgetWithText(FilledButton, '选择座位'));
+      await tester.tap(find.byKey(const ValueKey('manual-seat-button')));
       await tester.pumpAndSettle();
       expect(find.text('选择座位'), findsOneWidget);
       expect(find.text('001'), findsOneWidget);
@@ -202,7 +236,14 @@ void main() {
 
       await tester.tap(find.text('001'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('确认预约'));
+      await tester.tap(find.text('确认座位'));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+          find.byKey(const ValueKey('selected-seat-label')), 180);
+      expect(find.text('001'), findsOneWidget);
+      await tester.scrollUntilVisible(
+          find.widgetWithText(FilledButton, '创建预约'), 180);
+      await tester.tap(find.widgetWithText(FilledButton, '创建预约'));
       await tester.pumpAndSettle();
       expect(find.text('提交'), findsOneWidget);
       await tester.tap(find.text('提交'));
@@ -213,7 +254,14 @@ void main() {
       expect(client.submission!.seatNum, '001');
       expect(client.submission!.start, isNotEmpty);
       expect(client.submission!.end, isNotEmpty);
-      expect(find.text('进行中'), findsOneWidget);
+      expect(client.submission!.start, '10:00');
+      expect(client.submission!.end, '11:00');
+      expect(find.text('图书馆预约'), findsOneWidget);
+      expect(
+          find.byKey(ValueKey<String>('home:cx:${entry.key.roomType}:12345')),
+          findsOneWidget);
+      expect(find.text('预约编号'), findsOneWidget);
+      expect(find.text('待履约'), findsWidgets);
       expect(find.textContaining('超星'), findsNothing);
     });
   }

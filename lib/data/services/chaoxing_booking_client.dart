@@ -284,6 +284,118 @@ class ChaoxingBookingClient {
         query: {'id': id}, uncertainWriteMessage: '取消结果未确认，请先刷新我的预约，勿直接重试');
   }
 
+  /// Sign a reservation in from the seat operation page. The server decides
+  /// whether the current time and account are eligible.
+  Future<void> sign(String reserveId) async {
+    final id = _requireId(reserveId, '预约');
+    if (!RegExp(r'^\d+$').hasMatch(id)) {
+      throw const ChaoxingBookingException(
+          ChaoxingFailureKind.business, '预约 ID 无效');
+    }
+    await _api('GET', '/data/apps/seat/sign',
+        query: {'id': id},
+        referer: serviceUri.resolve('/front/apps/seat/code'),
+        uncertainWriteMessage: '签到结果未确认，请先刷新我的预约，勿直接重试');
+  }
+
+  /// Reconstructs the seat page from the current reservation, without scanning
+  /// a physical QR code. The observed reads do not obtain a device position or
+  /// satisfy a browser-side location check; the server decides eligibility.
+  Future<void> signWithSeatPage({
+    required String reserveId,
+    required String roomId,
+    required String seatNum,
+    String? deptId,
+  }) async {
+    final id = _requireId(reserveId, '预约');
+    final room = _requireId(roomId, '房间');
+    final seat = _requireId(seatNum, '座位');
+    if (!RegExp(r'^\d+$').hasMatch(id) ||
+        !RegExp(r'^\d+$').hasMatch(room) ||
+        !RegExp(r'^\d+$').hasMatch(seat)) {
+      throw const ChaoxingBookingException(
+          ChaoxingFailureKind.business, '预约的房间、座位或编号无效');
+    }
+    final seatNumber = int.tryParse(seat);
+    if (seatNumber == null || seatNumber <= 0) {
+      throw const ChaoxingBookingException(
+          ChaoxingFailureKind.business, '预约座位号无效');
+    }
+    final paddedSeat = seatNumber.toString().padLeft(3, '0');
+    final querySeat = seatNumber.toString();
+
+    // The QR page checks occupancy with a three-digit seat number first.
+    final check = _object((await _api('GET', '/data/apps/seat/check/exist',
+        query: {'seatNum': paddedSeat, 'roomId': room}))['data']);
+    final occupied = int.tryParse(check?['existCount']?.toString() ?? '');
+    if (occupied == null || occupied < 0) throw _protocolError();
+    if (occupied > 0) {
+      throw const ChaoxingBookingException(
+          ChaoxingFailureKind.business, '该座位已有未退座记录，无法签到');
+    }
+
+    final codeUri = serviceUri
+        .resolve('/front/apps/seat/code')
+        .replace(queryParameters: {'id': room, 'seatNum': querySeat});
+    final page = await _request('GET', codeUri,
+        referer: _indexUri(), followOfficeRedirects: true);
+    _requireHttpSuccess(page);
+    if (page.uri.path != '/front/apps/seat/code' &&
+        page.uri.path != '/front/third/apps/seat/code') {
+      throw const ChaoxingBookingException(
+          ChaoxingFailureKind.business, '未能进入当前座位操作页，请稍后重试');
+    }
+
+    // reserve/info uses roomId and an unpadded seat, while sign uses reserveId.
+    final detail = _object((await _api('GET', '/data/apps/seat/reserve/info',
+        query: {'id': room, 'seatNum': querySeat}, referer: page.uri))['data']);
+    final reserve = _object(detail?['seatReserve']);
+    if (_string(reserve?['id']) != id ||
+        _string(reserve?['roomId']) != room ||
+        _normalizeSeat(_string(reserve?['seatNum']) ?? '') != paddedSeat ||
+        _string(reserve?['status']) != '0') {
+      throw const ChaoxingBookingException(
+          ChaoxingFailureKind.business, '座位操作页与当前预约不一致，请刷新后重试');
+    }
+    final current = _objects((await home())['curReserves']);
+    if (!current.any((item) =>
+        _string(item['id']) == id &&
+        _string(item['roomId']) == room &&
+        _normalizeSeat(_string(item['seatNum']) ?? '') == paddedSeat)) {
+      throw const ChaoxingBookingException(
+          ChaoxingFailureKind.business, '当前账号的预约已变化，请刷新后重试');
+    }
+
+    // This POST only reads locationType. It sends no coordinates or fake proof.
+    await _api('POST', '/api/data/apps/reserve/wx/location', referer: page.uri);
+    final seatConfig = _object(detail?['seatConfig']);
+    final positionMode =
+        int.tryParse(seatConfig?['isPosition']?.toString() ?? '');
+    if (positionMode == 1 || positionMode == 2 || positionMode == 7) {
+      final department =
+          _string(seatConfig?['deptId']) ?? _string(deptId) ?? '35480';
+      // Reading addressArr does not compare it with a real device location.
+      await _api('GET', '/data/apps/seat/address',
+          query: {'deptId': department, 'roomId': room}, referer: page.uri);
+    }
+    await _api('GET', '/data/apps/seat/sign',
+        query: {'id': id},
+        referer: page.uri,
+        uncertainWriteMessage: '签到结果未确认，请先刷新我的预约，勿直接重试');
+  }
+
+  /// The seat page calls signback with the reservation ID to release a seat.
+  /// The response has no documented final state, so callers must refresh home.
+  Future<void> signback(String reserveId) async {
+    final id = _requireId(reserveId, '预约');
+    if (!RegExp(r'^\d+$').hasMatch(id)) {
+      throw const ChaoxingBookingException(
+          ChaoxingFailureKind.business, '预约 ID 无效');
+    }
+    await _api('POST', '/data/apps/seat/signback',
+        form: {'id': id}, uncertainWriteMessage: '退座结果未确认，请先刷新我的预约，勿直接重试');
+  }
+
   /// Removes only Chaoxing business cookies; SHU SSO belongs to account login.
   Future<void> clearSession() async {
     _user = null;

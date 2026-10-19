@@ -15,6 +15,12 @@ class _FakeChaoxingClient extends ChaoxingBookingClient {
   int submitCalls = 0;
   int cancelCalls = 0;
   String? cancelledId;
+  int signbackCalls = 0;
+  String? signedBackId;
+  int signCalls = 0;
+  String? signedId;
+  String? signedRoomId;
+  String? signedSeatNum;
   Map<String, dynamic>? homeFixture;
 
   @override
@@ -101,6 +107,7 @@ class _FakeChaoxingClient extends ChaoxingBookingClient {
   Map<String, dynamic> _reserve(int id, String hall, int status) => {
         'id': id,
         'seatNum': '001',
+        'roomId': 1001,
         'secondLevelName': hall,
         'thirdLevelName': '阅览室',
         'startTime': DateTime.utc(2026, 10, 18, 1).millisecondsSinceEpoch,
@@ -123,6 +130,30 @@ class _FakeChaoxingClient extends ChaoxingBookingClient {
   Future<void> cancel(String reserveId) async {
     cancelCalls++;
     cancelledId = reserveId;
+  }
+
+  @override
+  Future<void> signback(String reserveId) async {
+    signbackCalls++;
+    signedBackId = reserveId;
+  }
+
+  @override
+  Future<void> sign(String reserveId) async {
+    signCalls++;
+    signedId = reserveId;
+  }
+
+  @override
+  Future<void> signWithSeatPage({
+    required String reserveId,
+    required String roomId,
+    required String seatNum,
+    String? deptId,
+  }) async {
+    signedRoomId = roomId;
+    signedSeatNum = seatNum;
+    await sign(reserveId);
   }
 }
 
@@ -304,6 +335,87 @@ void main() {
     expect(
         records.map((item) => item['statusLabel']), ['待签到', '在座', '暂离', '已结束']);
     expect(records.map((item) => item['cxCurrent']), [true, true, true, false]);
+  });
+
+  test(
+      'sign is offered only within the configured window for a pending current reservation',
+      () async {
+    client.homeFixture = {
+      'seatConfig': {'preSignDuration': 20, 'signDuration': 15},
+      'curReserves': [client._reserve(1, '钱伟长馆', 0)],
+      'nearReserves': [client._reserve(2, '钱伟长馆', 0)],
+    };
+    await adapter.selectVenue(BookingVenue.qianweichang);
+    schoolNow = DateTime.utc(2026, 10, 18, 8, 39);
+    expect((await adapter.detail('cx:CX_QWC:1'))['abilities'], ['cancel']);
+    await expectLater(
+        adapter.sign('cx:CX_QWC:1'), throwsA(isA<ThereBookingException>()));
+    expect(client.signCalls, 0);
+
+    schoolNow = DateTime.utc(2026, 10, 18, 8, 40);
+    expect(
+        (await adapter.detail('cx:CX_QWC:1'))['abilities'], ['cancel', 'sign']);
+    expect((await adapter.detail('cx:CX_QWC:2'))['abilities'], isEmpty);
+    await adapter.sign('cx:CX_QWC:1');
+    expect(client.signedId, '1');
+    expect(client.signedRoomId, '1001');
+    expect(client.signedSeatNum, '001');
+    expect(client.signCalls, 1);
+
+    schoolNow = DateTime.utc(2026, 10, 18, 9, 15);
+    expect(
+        (await adapter.detail('cx:CX_QWC:1'))['abilities'], ['cancel', 'sign']);
+    schoolNow = DateTime.utc(2026, 10, 18, 9, 16);
+    expect((await adapter.detail('cx:CX_QWC:1'))['abilities'], ['cancel']);
+    await expectLater(
+        adapter.sign('cx:CX_QWC:1'), throwsA(isA<ThereBookingException>()));
+    expect(client.signCalls, 1);
+
+    client.homeFixture!['seatConfig'] = {'preSignDuration': 20};
+    schoolNow = DateTime.utc(2026, 10, 18, 8, 50);
+    expect(
+        (await adapter.detail('cx:CX_QWC:1'))['abilities'], ['cancel', 'sign']);
+  });
+
+  test('only in-use or temporarily absent seats can be released', () async {
+    client.homeFixture = {
+      'curReserves': [
+        client._reserve(1, '钱伟长馆', 0),
+        client._reserve(2, '钱伟长馆', 1),
+        client._reserve(3, '钱伟长馆', 3),
+      ],
+      'nearReserves': [client._reserve(4, '钱伟长馆', 2)],
+    };
+    await adapter.selectVenue(BookingVenue.qianweichang);
+    final bookings = await adapter.recent();
+    expect(bookings.map((item) => item['abilities']), [
+      ['cancel'],
+      ['close'],
+      ['close'],
+      <String>[],
+    ]);
+    await expectLater(
+        adapter.finish('cx:CX_QWC:1'), throwsA(isA<ThereBookingException>()));
+    await expectLater(
+        adapter.finish('cx:CX_QWC:4'), throwsA(isA<ThereBookingException>()));
+    expect(client.signbackCalls, 0);
+
+    await adapter.finish('cx:CX_QWC:2');
+    expect(client.signedBackId, '2');
+    expect(client.signbackCalls, 1);
+    client.homeFixture = {
+      'curReserves': [client._reserve(3, '钱伟长馆', 3)],
+      'nearReserves': [client._reserve(2, '钱伟长馆', 2)],
+    };
+    final refreshed = await adapter.recent();
+    expect(client.homeCalls, greaterThan(1));
+    expect(
+        refreshed
+            .firstWhere((item) => item['id'] == 'cx:CX_QWC:2')['abilities'],
+        isEmpty);
+    await adapter.finish('cx:CX_QWC:3');
+    expect(client.signedBackId, '3');
+    expect(client.signbackCalls, 2);
   });
 
   test('one venue sweep shares read snapshots, but revisits and writes refresh',

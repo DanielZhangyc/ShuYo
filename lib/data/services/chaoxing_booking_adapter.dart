@@ -413,21 +413,54 @@ class ChaoxingBookingAdapter extends ThereBookingClient {
       item['canCancel'] == true ||
       ThereBookingClient.strings(item['abilities']).contains('cancel');
 
+  bool _canSign(Map<String, dynamic> item, Map<String, dynamic> seatConfig) {
+    final startTime = _count(item['startTime']);
+    final beforeMinutes = _count(item['preSignDuration']) ??
+        _count(seatConfig['preSignDuration']) ??
+        _count(seatConfig['signDuration']);
+    final afterMinutes =
+        _count(item['signDuration']) ?? _count(seatConfig['signDuration']);
+    if (startTime == null) return false;
+    final schoolStart =
+        DateTime.fromMillisecondsSinceEpoch(startTime, isUtc: true)
+            .add(const Duration(hours: 8));
+    final now = _schoolClock();
+    if (now.isBefore(schoolStart)) {
+      return beforeMinutes != null &&
+          beforeMinutes >= 0 &&
+          !now.isBefore(schoolStart.subtract(Duration(minutes: beforeMinutes)));
+    }
+    return afterMinutes != null &&
+        afterMinutes >= 0 &&
+        !now.isAfter(schoolStart.add(Duration(minutes: afterMinutes)));
+  }
+
   Map<String, dynamic>? _booking(Map<String, dynamic> item,
-      {required bool current}) {
+      {required bool current, required Map<String, dynamic> seatConfig}) {
     final rawId = _id(item['id']);
     if (rawId == null || !RegExp(r'^\d+$').hasMatch(rawId)) return null;
     final venue = _venueForRoom(item);
     if (venue == null) return null;
     final status = _id(item['status']);
-    final canCancel =
-        status != '7' && (_explicitCancel(item) || current && status == '0');
+    final canCancel = status != '2' &&
+        status != '7' &&
+        (_explicitCancel(item) || current && status == '0');
+    final canFinish = current && (status == '1' || status == '3');
+    final canSign = current &&
+        status == '0' &&
+        _id(item['roomId']) != null &&
+        _id(item['seatNum']) != null &&
+        _canSign(item, seatConfig);
     final area = _id(item['thirdLevelName']) ?? '';
     final hall = _id(item['secondLevelName']) ?? venue.label;
     return {
       'id': _wrapId(venue, rawId),
       'roomType': venue.roomType,
       'roomName': _id(item['seatNum']) ?? '',
+      if (_id(item['roomId']) case final String roomId) 'cxRoomId': roomId,
+      if (_id(item['seatNum']) case final String seatNum) 'cxSeatNum': seatNum,
+      if (_id(seatConfig['deptId']) case final String deptId)
+        'cxDeptId': deptId,
       'officeAreaName': area,
       'allOfficeAreaName': '$hall · $area',
       if (_schoolTime(item['startTime']) case final String value)
@@ -439,24 +472,30 @@ class ChaoxingBookingAdapter extends ThereBookingClient {
       'statusLabel': switch (status) {
         '0' => '待签到',
         '1' => '在座',
+        '2' => '已退座',
         '3' => '暂离',
         '7' => '已结束',
         null => '状态待确认',
         _ => '状态 $status',
       },
-      'abilities': canCancel ? ['cancel'] : <String>[],
+      'abilities': [
+        if (canCancel) 'cancel',
+        if (canSign) 'sign',
+        if (canFinish) 'close',
+      ],
     };
   }
 
   Future<List<Map<String, dynamic>>> _allBookings() async {
     final home = await _client.home();
+    final seatConfig = ThereBookingClient.object(home['seatConfig']) ?? {};
     final byId = <String, Map<String, dynamic>>{};
     for (final item in ThereBookingClient.objects(home['curReserves'])) {
-      final mapped = _booking(item, current: true);
+      final mapped = _booking(item, current: true, seatConfig: seatConfig);
       if (mapped != null) byId[mapped['id'] as String] = mapped;
     }
     for (final item in ThereBookingClient.objects(home['nearReserves'])) {
-      final mapped = _booking(item, current: false);
+      final mapped = _booking(item, current: false, seatConfig: seatConfig);
       if (mapped != null) {
         byId.putIfAbsent(mapped['id'] as String, () => mapped);
       }
@@ -512,9 +551,43 @@ class ChaoxingBookingAdapter extends ThereBookingClient {
       });
 
   @override
-  Future<void> finish(String bookingId) async {
-    throw const ThereBookingException(ThereFailureKind.business, '当前场馆不支持提前结束');
-  }
+  Future<void> finish(String bookingId) => _translate(() async {
+        final venue = _requireVenue();
+        final rawId = _unwrapId(bookingId, venue);
+        final current = await detail(bookingId);
+        if (!ThereBookingClient.strings(current['abilities'])
+            .contains('close')) {
+          throw const ThereBookingException(
+              ThereFailureKind.business, '当前预约不可退座');
+        }
+        await _client.signback(rawId);
+        _created.remove(bookingId);
+        _clearRecentSnapshot();
+      });
+
+  Future<void> sign(String bookingId) => _translate(() async {
+        final venue = _requireVenue();
+        final rawId = _unwrapId(bookingId, venue);
+        final current = await detail(bookingId);
+        if (!ThereBookingClient.strings(current['abilities'])
+            .contains('sign')) {
+          throw const ThereBookingException(
+              ThereFailureKind.business, '当前不在可签到时间或预约状态不可签到');
+        }
+        final roomId = _id(current['cxRoomId']);
+        final seatNum = _id(current['cxSeatNum']);
+        if (roomId == null || seatNum == null) {
+          throw const ThereBookingException(
+              ThereFailureKind.business, '当前预约缺少房间或座位信息，请刷新后重试');
+        }
+        await _client.signWithSeatPage(
+          reserveId: rawId,
+          roomId: roomId,
+          seatNum: seatNum,
+          deptId: _id(current['cxDeptId']),
+        );
+        _clearRecentSnapshot();
+      });
 
   @override
   Future<void> prepareOAuth() async {

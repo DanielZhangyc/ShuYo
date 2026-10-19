@@ -16,11 +16,26 @@ void main() {
   final days = <String>[];
   final writtenCookies = <SessionCookie>[];
   Map<String, String>? submitForm;
+  Map<String, String>? signbackForm;
+  String? signbackReferer;
+  Map<String, String>? signQuery;
+  String? signReferer;
+  Map<String, String>? seatCheckQuery;
+  Map<String, String>? seatCodeQuery;
+  Map<String, String>? reserveInfoQuery;
+  Map<String, String>? addressQuery;
+  String? locationRequestBody;
+  Map<String, String>? locationQuery;
   Map<String, String>? authorizeQuery;
   String? authorizeCookie;
   String currentSno = 'STUDENT_1';
   bool changeDayOnSelect = false;
   bool cancelDropsConnection = false;
+  bool signbackDropsConnection = false;
+  bool signDropsConnection = false;
+  bool signPreflightFixture = false;
+  int seatExistCount = 0;
+  String detailSeatNum = '003';
   bool truncatedFiveReadRedirect = false;
   bool malformedFiveReadCookie = false;
   bool officeExpired = false;
@@ -31,11 +46,26 @@ void main() {
     days.clear();
     writtenCookies.clear();
     submitForm = null;
+    signbackForm = null;
+    signbackReferer = null;
+    signQuery = null;
+    signReferer = null;
+    seatCheckQuery = null;
+    seatCodeQuery = null;
+    reserveInfoQuery = null;
+    addressQuery = null;
+    locationRequestBody = null;
+    locationQuery = null;
     authorizeQuery = null;
     authorizeCookie = null;
     currentSno = 'STUDENT_1';
     changeDayOnSelect = false;
     cancelDropsConnection = false;
+    signbackDropsConnection = false;
+    signDropsConnection = false;
+    signPreflightFixture = false;
+    seatExistCount = 0;
+    detailSeatNum = '003';
     truncatedFiveReadRedirect = false;
     malformedFiveReadCookie = false;
     officeExpired = false;
@@ -98,7 +128,11 @@ void main() {
           body = {
             'success': true,
             'data': {
-              'curReserves': <Object>[],
+              'curReserves': signPreflightFixture
+                  ? [
+                      {'id': 123, 'roomId': 6508, 'seatNum': '003'}
+                    ]
+                  : <Object>[],
               'nearReserves': [
                 {'id': 123, 'seatNum': '003', 'today': '2026-10-18'}
               ],
@@ -161,6 +195,68 @@ void main() {
           };
         case '/data/apps/seat/cancel':
           if (cancelDropsConnection) {
+            final socket = await request.response.detachSocket();
+            socket.destroy();
+            return;
+          }
+          body = {'success': true};
+        case '/data/apps/seat/check/exist':
+          seatCheckQuery = request.uri.queryParameters;
+          body = {
+            'success': true,
+            'data': {'existCount': seatExistCount}
+          };
+        case '/front/apps/seat/code':
+          seatCodeQuery = request.uri.queryParameters;
+          request.response.statusCode = 302;
+          request.response.headers.set(HttpHeaders.locationHeader,
+              '/front/third/apps/seat/code?id=6508&seatNum=3');
+        case '/front/third/apps/seat/code':
+          body = '<html>座位操作页</html>';
+        case '/data/apps/seat/reserve/info':
+          reserveInfoQuery = request.uri.queryParameters;
+          body = {
+            'success': true,
+            'data': {
+              'seatConfig': {'isPosition': 1, 'deptId': 35480},
+              'seatReserve': {
+                'id': 123,
+                'roomId': 6508,
+                'seatNum': detailSeatNum,
+                'status': 0,
+              },
+            },
+          };
+        case '/api/data/apps/reserve/wx/location':
+          locationQuery = request.uri.queryParameters;
+          locationRequestBody = await utf8.decodeStream(request);
+          body = {
+            'success': true,
+            'data': {'locationType': 1}
+          };
+        case '/data/apps/seat/address':
+          addressQuery = request.uri.queryParameters;
+          body = {
+            'success': true,
+            'data': {
+              'addressArr': [
+                {'location': 'fixture', 'offsetReal': 100}
+              ]
+            }
+          };
+        case '/data/apps/seat/sign':
+          signQuery = request.uri.queryParameters;
+          signReferer = request.headers.value(HttpHeaders.refererHeader);
+          if (signDropsConnection) {
+            final socket = await request.response.detachSocket();
+            socket.destroy();
+            return;
+          }
+          body = {'success': true};
+        case '/data/apps/seat/signback':
+          signbackForm = Uri.splitQueryString(await utf8.decodeStream(request));
+          signbackReferer = request.headers.value(HttpHeaders.refererHeader);
+          if (signbackDropsConnection) {
             final socket = await request.response.detachSocket();
             socket.destroy();
             return;
@@ -292,6 +388,110 @@ void main() {
           .having((error) => error.message, 'message', contains('取消结果未确认'))),
     );
     expect(paths.where((path) => path == 'GET /data/apps/seat/cancel'),
+        hasLength(1));
+  });
+
+  test('sign uses the reservation ID and seat operation page referer',
+      () async {
+    await client.bootstrap();
+    await client.sign('123');
+    expect(paths.where((path) => path == 'GET /data/apps/seat/sign'),
+        hasLength(1));
+    expect(signQuery, {'id': '123'});
+    expect(Uri.parse(signReferer!).path, '/front/apps/seat/code');
+    await expectLater(
+        client.sign('not-an-id'), throwsA(isA<ChaoxingBookingException>()));
+    expect(paths.where((path) => path == 'GET /data/apps/seat/sign'),
+        hasLength(1));
+  });
+
+  test('disconnected sign remains uncertain and is not retried', () async {
+    await client.bootstrap();
+    signDropsConnection = true;
+    await expectLater(
+      client.sign('123'),
+      throwsA(isA<ChaoxingBookingException>().having(
+          (error) => error.kind, 'kind', ChaoxingFailureKind.uncertain)),
+    );
+    expect(paths.where((path) => path == 'GET /data/apps/seat/sign'),
+        hasLength(1));
+  });
+
+  test('seat-page sign reads observed endpoints with no fake location payload',
+      () async {
+    await client.bootstrap();
+    signPreflightFixture = true;
+    await client.signWithSeatPage(
+        reserveId: '123', roomId: '6508', seatNum: '003');
+    expect(seatCheckQuery, {'seatNum': '003', 'roomId': '6508'});
+    expect(seatCodeQuery, {'id': '6508', 'seatNum': '3'});
+    expect(reserveInfoQuery, {'id': '6508', 'seatNum': '3'});
+    expect(locationQuery, isEmpty);
+    expect(locationRequestBody, isEmpty);
+    expect(addressQuery, {'deptId': '35480', 'roomId': '6508'});
+    expect(signQuery, {'id': '123'});
+    expect(Uri.parse(signReferer!).path, '/front/third/apps/seat/code');
+    final readsAndSign = paths
+        .skipWhile((path) => path != 'GET /data/apps/seat/check/exist')
+        .toList();
+    expect(readsAndSign, [
+      'GET /data/apps/seat/check/exist',
+      'GET /front/apps/seat/code',
+      'GET /front/third/apps/seat/code',
+      'GET /data/apps/seat/reserve/info',
+      'GET /data/apps/seat/index',
+      'POST /api/data/apps/reserve/wx/location',
+      'GET /data/apps/seat/address',
+      'GET /data/apps/seat/sign',
+    ]);
+  });
+
+  test('seat-page sign stops before writing if seat is occupied or mismatched',
+      () async {
+    await client.bootstrap();
+    signPreflightFixture = true;
+    seatExistCount = 1;
+    await expectLater(
+      client.signWithSeatPage(reserveId: '123', roomId: '6508', seatNum: '003'),
+      throwsA(isA<ChaoxingBookingException>()),
+    );
+    expect(paths, isNot(contains('GET /data/apps/seat/sign')));
+    expect(seatCodeQuery, isNull);
+
+    seatExistCount = 0;
+    detailSeatNum = '004';
+    await expectLater(
+      client.signWithSeatPage(reserveId: '123', roomId: '6508', seatNum: '003'),
+      throwsA(isA<ChaoxingBookingException>()),
+    );
+    expect(paths, isNot(contains('GET /data/apps/seat/sign')));
+    expect(locationRequestBody, isNull);
+  });
+
+  test('seat release posts the reservation ID from the seat home page',
+      () async {
+    await client.bootstrap();
+    await client.signback('123');
+    expect(paths.where((path) => path == 'POST /data/apps/seat/signback'),
+        hasLength(1));
+    expect(signbackForm, {'id': '123'});
+    expect(Uri.parse(signbackReferer!).path, '/front/third/apps/seat/index');
+    await expectLater(
+        client.signback('not-an-id'), throwsA(isA<ChaoxingBookingException>()));
+    expect(paths.where((path) => path == 'POST /data/apps/seat/signback'),
+        hasLength(1));
+  });
+
+  test('disconnected seat release remains uncertain and is not retried',
+      () async {
+    await client.bootstrap();
+    signbackDropsConnection = true;
+    await expectLater(
+      client.signback('123'),
+      throwsA(isA<ChaoxingBookingException>().having(
+          (error) => error.kind, 'kind', ChaoxingFailureKind.uncertain)),
+    );
+    expect(paths.where((path) => path == 'POST /data/apps/seat/signback'),
         hasLength(1));
   });
 
