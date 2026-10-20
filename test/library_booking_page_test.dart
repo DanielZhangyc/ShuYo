@@ -1037,18 +1037,21 @@ void main() {
     expect(find.textContaining(ThereBookingClient.schoolDay()), findsNothing);
     await tester.tap(find.text('2E015'));
     await pumpBookingPage(tester);
-    final selectedWeight =
-        tester.widget<Text>(find.text('2E015')).style!.fontWeight;
-    await tester.tap(find.text('2E015'));
+    final seatTile = find.byTooltip('2E015，可选');
+    final seatLabel = find.descendant(
+      of: seatTile,
+      matching: find.text('2E015'),
+    );
+    final selectedWeight = tester.widget<Text>(seatLabel).style!.fontWeight;
+    await tester.tap(seatTile);
     await pumpBookingPage(tester);
-    expect(tester.widget<Text>(find.text('2E015')).style!.fontWeight,
-        selectedWeight);
+    expect(tester.widget<Text>(seatLabel).style!.fontWeight, selectedWeight);
     expect(
         tester
             .widget<FilledButton>(find.widgetWithText(FilledButton, '确认座位'))
             .onPressed,
         isNull);
-    await tester.tap(find.text('2E015'));
+    await tester.tap(seatTile);
     await pumpBookingPage(tester);
     await tester.tap(find.text('确认座位'));
     await pumpBookingPage(tester);

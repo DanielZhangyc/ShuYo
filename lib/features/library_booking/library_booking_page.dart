@@ -2396,13 +2396,15 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                             ),
                       ),
                       const SizedBox(height: 2),
-                      Row(children: [
-                        Text('${_monthDay(_day)} · $_start–$_end',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: colors.textSecondary)),
-                      ]),
+                      Text(
+                        '${_monthDay(_day)} · $_start–$_end',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: colors.textSecondary),
+                      ),
                     ],
                   ])),
               if (!_viewOnly)
