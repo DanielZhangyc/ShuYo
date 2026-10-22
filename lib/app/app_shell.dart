@@ -10,6 +10,7 @@ import '../core/classroom_url_resolver.dart';
 import '../core/app_tab.dart';
 import '../core/client_app_info.dart';
 import '../core/client_update_policy.dart';
+import '../core/otp_url_resolver.dart';
 import '../data/demo/demo_data_bundle.dart';
 import '../data/demo/demo_repositories.dart';
 import '../data/models/client_backend.dart';
@@ -21,6 +22,7 @@ import '../data/repositories/announcement_repository.dart';
 import '../data/repositories/shuyo_content_repository.dart';
 import '../data/repositories/classroom_repository.dart';
 import '../data/repositories/client_backend_repository.dart';
+import '../data/repositories/otp_token_repository.dart';
 import '../data/services/academic_account_store.dart';
 import '../data/services/academic_native_auth_service.dart';
 import '../data/services/academic_profile_preferences.dart';
@@ -36,11 +38,13 @@ import '../data/services/unified_account_service.dart';
 import '../data/services/there_booking_client.dart';
 import '../data/services/webvpn_session_store.dart';
 import '../features/auth/native_login_page.dart';
+import '../features/campus_map/campus_map_page.dart';
 import '../features/home/academic_schedule_page.dart';
 import '../features/home/academic_progress_page.dart';
 import '../features/home/announcements_page.dart';
 import '../features/home/empty_classroom_page.dart';
 import '../features/home/home_dashboard_page.dart';
+import '../features/home/otp_token_page.dart';
 import '../features/home/shuyo_content_page.dart';
 import '../features/library_booking/library_booking_page.dart';
 import '../features/onboarding/startup_onboarding.dart';
@@ -172,6 +176,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final AcademicScheduleWidgetService _scheduleWidgetService;
   late final AnnouncementRepository _announcementRepository;
   late ClassroomRepository _classroomRepository;
+  late final OtpTokenRepository _otpTokenRepository;
   final _clientSettingsService = ClientSettingsService();
   final _profilePreferences = AcademicProfilePreferences();
   late final UnifiedAccountService _unifiedAccountService =
@@ -218,6 +223,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             schedule: demo.classroomSchedule,
           )
         : ClassroomRepository();
+    _otpTokenRepository = widget.isDemo
+        ? DemoOtpTokenRepository()
+        : OtpTokenRepository(sessionActive: _hasAcademicSession);
     widget.onboardingController.setAccountLogoutHandlers(
       onAcademicLogout: _logoutAcademicAccount,
     );
@@ -292,6 +300,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _directBookingClient?.dispose();
     _webVpnBookingClient?.dispose();
     _chaoxingBookingClient?.dispose();
+    _otpTokenRepository.dispose();
     if (widget.studentIdentityService == null) {
       _studentIdentityService.dispose();
     }
@@ -416,6 +425,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         onOpenAnnouncements: () => unawaited(_openAnnouncements()),
         onOpenEmptyClassroom: () => unawaited(_openEmptyClassroom()),
         onOpenLibraryBooking: () => unawaited(_openLibraryBooking()),
+        onOpenCampusMap: () => unawaited(_openCampusMap()),
+        onOpenOtp: () => unawaited(_openOtp()),
         todayCourseContent: _scheduleSummaryText,
         announcementContent: _announcementSummaryText,
         isDemo: widget.isDemo,
@@ -478,6 +489,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }) async {
     if (widget.isDemo || _completingAcademicLogin) return;
     _completingAcademicLogin = true;
+    _otpTokenRepository.resetSession();
     try {
       // WebVPN obtains its own business session from the same SSO account.
       // It is independent of the first-use data sync below.
@@ -824,6 +836,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _openOtp() async {
+    if (!widget.isDemo && !_hasAcademicSession) {
+      _showSnack('请先登录校园账户');
+      _openAccountManager();
+      return;
+    }
+    await Navigator.of(context).push<void>(
+      shuyoRoute(
+        builder: (_) => OtpTokenPage(
+          repository: _otpTokenRepository,
+          onWebVpnExpired: widget.isDemo ? null : _handleWebVpnExpired,
+        ),
+      ),
+    );
+  }
+
   Future<void> _openLibraryBooking() async {
     if (_openingLibraryBooking) return;
     if (widget.isDemo) {
@@ -866,6 +894,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     await _finishAcademicLogin(connectWebVpn: false);
     return mounted;
   }
+
+  Future<void> _openCampusMap() => Navigator.of(context).push<void>(
+        shuyoRoute(
+          builder: (_) => CampusMapPage(initialCampus: _preferredCampus),
+        ),
+      );
 
   Future<void> _establishThereInBackground() async {
     final client = ThereBookingClient();
@@ -940,6 +974,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Future<bool> _logoutAcademicAccount() async {
+    _otpTokenRepository.resetSession(sessionActive: false);
     // Let an in-flight recovery finish before deleting credentials, so it
     // cannot install a fresh WebVPN token after the user signs out.
     try {
@@ -1063,6 +1098,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     final changed = ClassroomUrlResolver.usesWebVpn != enabled;
     ClassroomUrlResolver.configure(useWebVpn: enabled);
+    // The token client reads this switch on every request, so a page already
+    // open follows the new transport without being rebuilt.
+    OtpUrlResolver.configure(useWebVpn: enabled);
     if (changed) _classroomRepository = ClassroomRepository();
     if (mounted) {
       setState(() => _webVpnEnabled = enabled);
@@ -1089,6 +1127,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           shuyoRoute(builder: (_) => const NativeLoginPage.webVpn()),
         );
         if (result != NativeLoginResult.authenticated || !mounted) return false;
+        _otpTokenRepository.resetSession();
         await _unifiedAccountService.setWebVpnPendingRecovery(false);
         setState(() {
           _webVpnPendingRecovery = false;
