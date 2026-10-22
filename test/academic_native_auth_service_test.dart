@@ -72,6 +72,18 @@ void main() {
   group('AcademicSessionCookieStore', () {
     const newsso = 'https://newsso.shu.edu.cn';
 
+    test('removes a replaced SSO cookie without dropping business cookies', () {
+      final store = AcademicSessionCookieStore();
+      final uri = Uri.parse(newsso);
+      store.save(uri, [
+        Cookie('SHU_OAUTH2', 'old'),
+        Cookie('ASP.NET_SessionId', 'business'),
+      ]);
+
+      store.removeByName('SHU_OAUTH2');
+      expect(store.headerFor(uri), 'ASP.NET_SessionId=business');
+    });
+
     test('keeps WeCom SSO cookies for the newsso callback request', () {
       final store = AcademicSessionCookieStore();
 

@@ -103,6 +103,7 @@ void main() {
           onOpenAnnouncements: () {},
           onOpenEmptyClassroom: () {},
           onOpenCampusMap: () => opened = true,
+          onOpenOtp: () {},
           todayCourseContent: '今日无课',
           announcementContent: '查看公告',
         ),

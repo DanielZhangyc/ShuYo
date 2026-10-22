@@ -20,6 +20,7 @@ class HomeDashboardPage extends StatelessWidget {
     required this.onOpenEmptyClassroom,
     this.onOpenLibraryBooking,
     this.onOpenCampusMap,
+    required this.onOpenOtp,
     required this.todayCourseContent,
     required this.announcementContent,
     this.isDemo = false,
@@ -35,6 +36,7 @@ class HomeDashboardPage extends StatelessWidget {
   final VoidCallback onOpenEmptyClassroom;
   final VoidCallback? onOpenLibraryBooking;
   final VoidCallback? onOpenCampusMap;
+  final VoidCallback onOpenOtp;
   final String todayCourseContent;
   final String announcementContent;
   final bool isDemo;
@@ -120,6 +122,12 @@ class HomeDashboardPage extends StatelessWidget {
           title: '校园地图',
           content: '查找校园地点',
           onTap: onOpenCampusMap,
+        ),
+        _HomeRow(
+          icon: Icons.password,
+          title: '动态口令',
+          content: '查看并复制 OTP 令牌',
+          onTap: onOpenOtp,
         ),
       ],
     );
