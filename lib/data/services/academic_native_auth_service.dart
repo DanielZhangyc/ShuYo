@@ -930,6 +930,10 @@ class _StoredCookie {
 class AcademicSessionCookieStore {
   final List<_StoredCookie> _cookies = [];
 
+  void removeByName(String name) {
+    _cookies.removeWhere((stored) => stored.cookie.name == name);
+  }
+
   /// 并入一批 Cookie。空值、已过期的 Cookie 会被丢弃；
   /// 同名同域同路径的旧 Cookie 会被覆盖。
   void save(Uri source, Iterable<Cookie> cookies) {

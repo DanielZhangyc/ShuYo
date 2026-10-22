@@ -3,15 +3,63 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuyo/app/app_shell.dart';
 import 'package:shuyo/core/app_tab.dart';
+import 'package:shuyo/data/services/academic_profile_preferences.dart';
 import 'package:shuyo/data/services/client_settings_service.dart';
 import 'package:shuyo/features/home/academic_schedule_page.dart';
 import 'package:shuyo/features/home/academic_progress_page.dart';
 import 'package:shuyo/features/home/shuyo_content_page.dart';
+import 'package:shuyo/features/library_booking/library_booking_page.dart';
 import 'package:shuyo/features/onboarding/startup_onboarding.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('library booking opens with the latest account campus preference',
+      (tester) async {
+    final controller = StartupOnboardingController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: AppShell(
+        initialWebVpnEnabled: false,
+        selectedThemeId: 'default',
+        followSystemTheme: false,
+        onThemeChanged: (_) async {},
+        onFollowSystemThemeChanged: (_) async {},
+        academicLoginSignal: 0,
+        initialHasAcademicSession: false,
+        initialAcademicStudentId: null,
+        initialPreferredCampus: '宝山东区',
+        onboardingController: controller,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(await controller.savePreferredCampus('延长'), isTrue);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('图书馆预约'), 180);
+    await tester.tap(find.text('图书馆预约'));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<LibraryBookingPage>(find.byType(LibraryBookingPage))
+            .initialCampus,
+        '延长');
+    expect(
+        DefaultTabController.of(tester.element(find.byType(TabBar))).index, 1);
+    await tester.ensureVisible(find.text('嘉定校区'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('嘉定校区'));
+    await tester.pumpAndSettle();
+    expect(await AcademicProfilePreferences().loadPreferredCampus(), '延长');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('图书馆预约'));
+    await tester.pumpAndSettle();
+    expect(
+        DefaultTabController.of(tester.element(find.byType(TabBar))).index, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
 
   testWidgets('opens the schedule from the home row and third tab',
       (tester) async {

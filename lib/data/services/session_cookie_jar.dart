@@ -67,6 +67,28 @@ class SessionCookieJar {
     ];
   }
 
+  /// Lists every path scope owned by [domain] or one of its subdomains.
+  ///
+  /// Use this when clearing a service's sessions: [getCookies] filters by the
+  /// request path and would miss cookies scoped to other paths on that host.
+  Future<List<SessionCookie>> getCookiesForDomainTree(
+      {required String domain}) async {
+    await _ensureRestored();
+    final scope = _normalizeDomain(domain).toLowerCase();
+    if (scope.isEmpty) return [];
+    return [
+      for (final cookie in _cookies)
+        if (cookie.domain.toLowerCase() == scope ||
+            cookie.domain.toLowerCase().endsWith('.$scope'))
+          SessionCookie(
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path,
+          ),
+    ];
+  }
+
   /// Writes [cookie] to its own scope. An empty value removes that scope
   /// without touching the other paths and hosts holding the same name.
   Future<void> setCookie(SessionCookie cookie) async {

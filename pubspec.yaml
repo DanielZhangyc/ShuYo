@@ -27,6 +27,8 @@ dependencies:
   url_launcher: ^6.3.2
   flutter_secure_storage: ^11.2.0
   flutter_markdown_plus: ^1.0.12
+  geolocator: ^14.1.1
+  webview_flutter: ^4.14.1
 
 dev_dependencies:
   flutter_test:
@@ -42,3 +44,5 @@ flutter:
     - assets/demo/announcements/
     - assets/demo/classroom/
     - assets/library_booking/
+    - assets/campus_map/
+    - assets/campus_map/maps/

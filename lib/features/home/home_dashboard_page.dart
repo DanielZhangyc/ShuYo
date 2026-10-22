@@ -20,6 +20,8 @@ class HomeDashboardPage extends StatelessWidget {
     required this.onOpenEmptyClassroom,
     this.onOpenLibraryBooking,
     this.onOpenCampusCard,
+    this.onOpenCampusMap,
+    required this.onOpenOtp,
     required this.todayCourseContent,
     required this.announcementContent,
     this.isDemo = false,
@@ -35,6 +37,8 @@ class HomeDashboardPage extends StatelessWidget {
   final VoidCallback onOpenEmptyClassroom;
   final VoidCallback? onOpenLibraryBooking;
   final VoidCallback? onOpenCampusCard;
+  final VoidCallback? onOpenCampusMap;
+  final VoidCallback onOpenOtp;
   final String todayCourseContent;
   final String announcementContent;
   final bool isDemo;
@@ -98,6 +102,12 @@ class HomeDashboardPage extends StatelessWidget {
           onTap: onOpenAcademicSystem,
         ),
         _HomeRow(
+          icon: Icons.account_balance_wallet_outlined,
+          title: '校园卡',
+          content: '查询余额和消费记录',
+          onTap: onOpenCampusCard,
+        ),
+        _HomeRow(
           icon: Icons.developer_board,
           title: '通知公告',
           content: announcementContent,
@@ -110,16 +120,22 @@ class HomeDashboardPage extends StatelessWidget {
           onTap: onOpenEmptyClassroom,
         ),
         _HomeRow(
-          icon: Icons.account_balance_wallet_outlined,
-          title: '校园卡',
-          content: '查询余额和消费记录',
-          onTap: onOpenCampusCard,
-        ),
-        _HomeRow(
           icon: Icons.local_library_outlined,
           title: '图书馆预约',
           content: '预约场馆座位',
           onTap: onOpenLibraryBooking,
+        ),
+        _HomeRow(
+          icon: Icons.map_outlined,
+          title: '校园地图',
+          content: '查找校园地点',
+          onTap: onOpenCampusMap,
+        ),
+        _HomeRow(
+          icon: Icons.password,
+          title: '动态口令',
+          content: '查看并复制 OTP 令牌',
+          onTap: onOpenOtp,
         ),
       ],
     );

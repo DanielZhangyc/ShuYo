@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>校园地图</title>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+    body { background: #eaeadf; overscroll-behavior: none; }
+    #map { width: 100%; height: 100%; touch-action: none; user-select: none; -webkit-user-select: none; }
+    #map > svg { display: block; width: 100%; height: 100%; }
+    [data-place-id] { cursor: pointer; }
+    .shuyo-selected:is(path, polygon, rect, circle, ellipse),
+    .shuyo-selected :is(path, polygon, rect, circle, ellipse) {
+      fill: var(--selected-fill, #b1cff7) !important;
+      stroke: var(--accent, #3478d4) !important;
+      stroke-width: 2px !important;
+      vector-effect: non-scaling-stroke;
+    }
+    .shuyo-pin { fill: var(--accent, #3478d4); stroke: white; stroke-width: 2px; vector-effect: non-scaling-stroke; }
+    .shuyo-location { fill: #2678f2; stroke: white; stroke-width: 3px; vector-effect: non-scaling-stroke; }
+    .shuyo-accuracy { fill: #2678f2; fill-opacity: .12; stroke: #2678f2; stroke-opacity: .3; stroke-width: 1px; vector-effect: non-scaling-stroke; }
+  </style>
+</head>
+<body>
+  <div id="map" role="img" aria-label="校园地图"></div>
+  <script>
+    'use strict';
+    (() => {
+      const host = document.getElementById('map');
+      const ns = 'http://www.w3.org/2000/svg';
+      // Each campus supplies its own initialView from map_data.json.
+      let initialView = null;
+      let campusId = null;
+      let debugView = false;
+      let reportTimer = null;
+      let svg = null;
+      let bounds = {x: 0, y: 0, width: 1, height: 1};
+      let view = {...bounds};
+      let base = {...bounds};
+      let bottomInset = 0;
+      let places = new Map();
+      let featureElements = new Map();
+      let points = [];
+      let selectedId = null;
+      let location = null;
+      let markerLayer = null;
+      let locationLayer = null;
+      let pointers = new Map();
+      let gesture = null;
+      let moved = false;
+      let lastTap = null;
+      let paintFrame = 0;
+      let motionFrame = 0;
+      let autoFocusId = null;
+      let isDefaultView = true;
+
+      const notify = (value) => {
+        if (window.ShuyoMap) window.ShuyoMap.postMessage(JSON.stringify(value));
+      };
+      const size = () => ({width: Math.max(1, host.clientWidth), height: Math.max(1, host.clientHeight)});
+      const fillWidth = () => {
+        const s = size();
+        return Math.min(bounds.width, bounds.height * s.width / s.height);
+      };
+      const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+      const finitePoint = (point) => point && Number.isFinite(point.x) && Number.isFinite(point.y);
+      const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+      const middle = (a, b) => ({x: (a.x + b.x) / 2, y: (a.y + b.y) / 2});
+      const localPoint = (event) => {
+        const rect = host.getBoundingClientRect();
+        return {x: event.clientX - rect.left, y: event.clientY - rect.top};
+      };
+      const worldPoint = (point, box = view) => {
+        const s = size();
+        return {x: box.x + point.x / s.width * box.width, y: box.y + point.y / s.height * box.height};
+      };
+      const circle = (className, point, radius) => {
+        const element = document.createElementNS(ns, 'circle');
+        element.setAttribute('class', className);
+        element.setAttribute('cx', point.x);
+        element.setAttribute('cy', point.y);
+        element.setAttribute('r', radius);
+        return element;
+      };
+
+      function defaultView() {
+        isDefaultView = true;
+        const s = size();
+        const visibleHeight = Math.max(s.height * .25, s.height - bottomInset);
+        const width = Math.max(bounds.width * 1.08, bounds.height * 1.08 * s.width / visibleHeight);
+        const height = width * s.height / s.width;
+        base = {
+          x: bounds.x + bounds.width / 2 - width / 2,
+          y: bounds.y + bounds.height / 2 - height * visibleHeight / s.height / 2,
+          width, height,
+        };
+        // Fill the visible area, with a little extra zoom for readable labels.
+        const initialWidth = fillWidth() / initialView.zoom;
+        const initialHeight = initialWidth * s.height / s.width;
+        view = {
+          x: initialView.center.x - initialWidth / 2,
+          y: initialView.center.y - initialHeight / 2,
+          width: initialWidth, height: initialHeight,
+        };
+        draw();
+      }
+
+      function stopMotion() {
+        if (motionFrame) cancelAnimationFrame(motionFrame);
+        motionFrame = 0;
+      }
+
+      function moveTo(target) {
+        stopMotion();
+        const start = {...view};
+        if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+          view = target;
+          draw();
+          return;
+        }
+        const started = performance.now();
+        const step = (now) => {
+          const progress = clamp((now - started) / 360, 0, 1);
+          const eased = 1 - Math.pow(1 - progress, 3);
+          view = Object.fromEntries(['x', 'y', 'width', 'height'].map(key =>
+            [key, start[key] + (target[key] - start[key]) * eased]));
+          draw();
+          motionFrame = progress < 1 ? requestAnimationFrame(step) : 0;
+        };
+        motionFrame = requestAnimationFrame(step);
+      }
+
+      function constrain() {
+        // Keep some space around the campus while allowing every edge to be reached.
+        const s = size();
+        const minWidth = Math.max(bounds.width, bounds.height * s.width / s.height) / 18;
+        const maxWidth = Math.max(base.width, bounds.width * 1.2);
+        const width = clamp(view.width, minWidth, maxWidth);
+        const center = {x: view.x + view.width / 2, y: view.y + view.height / 2};
+        view.width = width;
+        view.height = width * s.height / s.width;
+        const padX = view.width * .35;
+        const padY = view.height * .35;
+        const x = clamp(center.x, bounds.x - padX, bounds.x + bounds.width + padX);
+        const y = clamp(center.y, bounds.y - padY, bounds.y + bounds.height + padY);
+        view.x = x - view.width / 2;
+        view.y = y - view.height / 2;
+      }
+
+      function draw() {
+        if (paintFrame) return;
+        paintFrame = requestAnimationFrame(() => {
+          paintFrame = 0;
+          if (!svg) return;
+          svg.setAttribute('viewBox', `${view.x} ${view.y} ${view.width} ${view.height}`);
+          const unit = view.width / size().width;
+          markerLayer.replaceChildren();
+          for (const item of points) {
+            const marker = circle('shuyo-pin', item.point, unit * (item.id === selectedId ? 7 : 4));
+            marker.dataset.placeId = item.id;
+            markerLayer.appendChild(marker);
+          }
+          if (selectedId) {
+            const point = pointFor(selectedId);
+            if (point) {
+              const marker = circle('shuyo-pin', point, unit * 7);
+              marker.dataset.placeId = selectedId;
+              markerLayer.appendChild(marker);
+            }
+          }
+          locationLayer.replaceChildren();
+          if (finitePoint(location)) {
+            if (Number.isFinite(location.accuracy) && location.accuracy > 0) {
+              locationLayer.appendChild(circle('shuyo-accuracy', location, Math.min(location.accuracy, bounds.width)));
+            }
+            locationLayer.appendChild(circle('shuyo-location', location, unit * 6));
+          }
+          if (debugView && reportTimer === null) {
+            reportTimer = setTimeout(() => {
+              reportTimer = null;
+              notify({type: 'viewport', campusId, view: {
+                zoom: fillWidth() / view.width,
+                center: {x: view.x + view.width / 2, y: view.y + view.height / 2},
+              }});
+            }, 100);
+          }
+        });
+      }
+
+      function boxFor(id) {
+        const boxes = (featureElements.get(id) || []).flatMap((element) => {
+          try {
+            const box = element.getBBox();
+            // Source footprints use viewBox coordinates without transforms.
+            return box.width > 0 && box.height > 0 ? [box] : [];
+          } catch (_) { return []; }
+        });
+        if (!boxes.length) return null;
+        const left = Math.min(...boxes.map(box => box.x));
+        const top = Math.min(...boxes.map(box => box.y));
+        return {
+          x: left, y: top,
+          width: Math.max(...boxes.map(box => box.x + box.width)) - left,
+          height: Math.max(...boxes.map(box => box.y + box.height)) - top,
+        };
+      }
+
+      function pointFor(id) {
+        const box = boxFor(id);
+        if (box) return {x: box.x + box.width / 2, y: box.y + box.height / 2};
+        const point = places.get(id)?.point;
+        return finitePoint(point) ? point : null;
+      }
+
+      function focus(point, box = null) {
+        if (!finitePoint(point)) return;
+        isDefaultView = false;
+        const s = size();
+        const ratio = s.width / s.height;
+        const visibleHeight = Math.max(s.height * .25, s.height - bottomInset);
+        const width = Math.max(base.width / 5,
+          box ? box.width * 2 : 0,
+          box ? box.height * 2 * s.width / visibleHeight : 0);
+        const height = width / ratio;
+        const previous = {...view};
+        view = {x: point.x - width / 2,
+          y: point.y - height * visibleHeight / s.height / 2,
+          width, height};
+        constrain();
+        const target = {...view};
+        view = previous;
+        moveTo(target);
+      }
+
+      function zoom(factor, point) {
+        isDefaultView = false;
+        stopMotion();
+        const anchor = worldPoint(point);
+        const s = size();
+        const width = clamp(view.width / factor, Math.max(bounds.width, bounds.height * s.width / s.height) / 18, base.width);
+        const height = width * s.height / s.width;
+        view = {x: anchor.x - point.x / s.width * width,
+          y: anchor.y - point.y / s.height * height, width, height};
+        constrain();
+        draw();
+      }
+
+      function startGesture() {
+        const current = [...pointers.values()];
+        gesture = current.length >= 2
+          ? {view: {...view}, midpoint: middle(current[0], current[1]), distance: Math.max(1, distance(current[0], current[1]))}
+          : current.length === 1 ? {view: {...view}, point: current[0]} : null;
+      }
+
+      host.addEventListener('pointerdown', (event) => {
+        if (!svg) return;
+        stopMotion();
+        autoFocusId = null;
+        isDefaultView = false;
+        event.preventDefault();
+        host.setPointerCapture(event.pointerId);
+        if (pointers.size === 0) moved = false;
+        pointers.set(event.pointerId, localPoint(event));
+        if (pointers.size > 1) { moved = true; lastTap = null; }
+        startGesture();
+      });
+
+      host.addEventListener('pointermove', (event) => {
+        if (!pointers.has(event.pointerId) || !gesture) return;
+        event.preventDefault();
+        const point = localPoint(event);
+        pointers.set(event.pointerId, point);
+        const current = [...pointers.values()];
+        const s = size();
+        if (current.length >= 2 && gesture.midpoint) {
+          moved = true;
+          const midpoint = middle(current[0], current[1]);
+          const scale = distance(current[0], current[1]) / gesture.distance;
+          const anchor = worldPoint(gesture.midpoint, gesture.view);
+          const width = clamp(gesture.view.width / Math.max(.1, scale), Math.max(bounds.width, bounds.height * s.width / s.height) / 18, base.width);
+          const height = width * s.height / s.width;
+          view = {x: anchor.x - midpoint.x / s.width * width,
+            y: anchor.y - midpoint.y / s.height * height, width, height};
+        } else if (current.length === 1 && gesture.point) {
+          const dx = point.x - gesture.point.x;
+          const dy = point.y - gesture.point.y;
+          if (Math.hypot(dx, dy) > 6) moved = true;
+          if (!moved) return;
+          view = {...gesture.view,
+            x: gesture.view.x - dx / s.width * gesture.view.width,
+            y: gesture.view.y - dy / s.height * gesture.view.height};
+        }
+        constrain();
+        draw();
+      });
+
+      function endPointer(event, cancelled) {
+        if (!pointers.has(event.pointerId)) return;
+        const single = pointers.size === 1;
+        const point = localPoint(event);
+        pointers.delete(event.pointerId);
+        if (!cancelled && single && !moved) {
+          const now = Date.now();
+          const id = document.elementsFromPoint(event.clientX, event.clientY)
+            .map(target => target.closest('[data-place-id]')?.dataset.placeId)
+            .find(id => places.has(id));
+          if (lastTap && lastTap.id === id && now - lastTap.time < 280 && distance(lastTap.point, point) < 24) {
+            zoom(2, point);
+            lastTap = null;
+          } else {
+            lastTap = {time: now, point, id};
+            // Labels and road strokes can sit above a building footprint.
+            // Look through the SVG stack so tapping its name still selects it.
+            if (id && places.has(id)) notify({type: 'place', id});
+            else notify({type: 'background'});
+          }
+        }
+        startGesture();
+      }
+      host.addEventListener('pointerup', event => endPointer(event, false));
+      host.addEventListener('pointercancel', event => endPointer(event, true));
+      host.addEventListener('lostpointercapture', event => {
+        if (pointers.has(event.pointerId)) {
+          pointers.delete(event.pointerId);
+          moved = true;
+          startGesture();
+        }
+      });
+      host.addEventListener('wheel', (event) => {
+        event.preventDefault();
+        if (svg) zoom(Math.exp(-event.deltaY * .002), localPoint(event));
+      }, {passive: false});
+
+      new ResizeObserver(() => {
+        if (!svg) return;
+        stopMotion();
+        if (isDefaultView) {
+          defaultView();
+          return;
+        }
+        const s = size();
+        const center = {x: view.x + view.width / 2, y: view.y + view.height / 2};
+        view.height = view.width * s.height / s.width;
+        view.y = center.y - view.height / 2;
+        constrain();
+        draw();
+      }).observe(host);
+
+      window.campusMap = {
+        load(data) {
+          try {
+            if (reportTimer !== null) clearTimeout(reportTimer);
+            reportTimer = null;
+            campusId = data.campusId;
+            debugView = data.debug === true;
+            initialView = data.initialView;
+            if (!finitePoint(initialView?.center) || !Number.isFinite(initialView.zoom) || initialView.zoom <= 0) {
+              throw new Error('Invalid initial map view');
+            }
+            document.body.style.background = data.backgroundColor;
+            stopMotion();
+            pointers.clear(); gesture = null; lastTap = null;
+            const documentSvg = new DOMParser().parseFromString(data.svg, 'image/svg+xml');
+            const source = documentSvg.documentElement;
+            if (source.localName !== 'svg' || source.querySelector('parsererror')) throw new Error('Invalid SVG');
+            // Defence in depth for offline assets. The document never loads network resources.
+            source.querySelectorAll('script, foreignObject, image, a').forEach(element => element.remove());
+            source.querySelectorAll('*').forEach(element => {
+              for (const attribute of [...element.attributes]) {
+                if (/^on/i.test(attribute.name) || /^(?:https?:|javascript:|data:text)/i.test(attribute.value.trim())) {
+                  element.removeAttribute(attribute.name);
+                }
+              }
+            });
+            svg = document.importNode(source, true);
+            svg.removeAttribute('width'); svg.removeAttribute('height');
+            svg.setAttribute('preserveAspectRatio', 'none');
+            host.replaceChildren(svg);
+            const [x, y, width, height] = data.viewBox;
+            bounds = {x, y, width, height};
+            bottomInset = Math.max(0, data.bottomInset || 0);
+            places = new Map(data.places.map(place => [place.id, place]));
+            featureElements = new Map();
+            const byId = new Map([...svg.querySelectorAll('[id]')].map(element => [element.id, element]));
+            points = [];
+            for (const place of places.values()) {
+              const elements = place.featureIds.map(id => byId.get(id)).filter(Boolean);
+              featureElements.set(place.id, elements);
+              for (const element of elements) element.dataset.placeId = place.id;
+              if (!elements.length && finitePoint(place.point)) points.push({id: place.id, point: place.point});
+            }
+            markerLayer = document.createElementNS(ns, 'g');
+            locationLayer = document.createElementNS(ns, 'g');
+            locationLayer.setAttribute('pointer-events', 'none');
+            svg.append(markerLayer, locationLayer);
+            selectedId = null; location = null; autoFocusId = null;
+            defaultView();
+          } catch (_) { notify({type: 'error'}); }
+        },
+        update(data) {
+          if (!svg) return;
+          const previousInset = bottomInset;
+          bottomInset = Math.max(0, data.bottomInset || 0);
+          document.documentElement.style.setProperty('--accent', data.accent);
+          document.documentElement.style.setProperty('--selected-fill', data.accent + '70');
+          if (selectedId !== data.selectedId) {
+            autoFocusId = null;
+            for (const element of featureElements.get(selectedId) || []) element.classList.remove('shuyo-selected');
+            selectedId = places.has(data.selectedId) ? data.selectedId : null;
+            for (const element of featureElements.get(selectedId) || []) element.classList.add('shuyo-selected');
+          }
+          location = finitePoint(data.location) ? data.location : null;
+          if (data.focus) {
+            if (finitePoint(data.focusPoint)) focus(data.focusPoint);
+            else if (selectedId) {
+              autoFocusId = selectedId;
+              focus(pointFor(selectedId), boxFor(selectedId));
+            }
+          } else if (autoFocusId && autoFocusId === selectedId && Math.abs(previousInset - bottomInset) > 1) {
+            // Flutter reports the final content-sized panel height after layout.
+            focus(pointFor(selectedId), boxFor(selectedId));
+          }
+          draw();
+        },
+      };
+      notify({type: 'ready'});
+    })();
+  </script>
+</body>
+</html>

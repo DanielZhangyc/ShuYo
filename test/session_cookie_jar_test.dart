@@ -114,4 +114,43 @@ void main() {
       'newsso.shu.edu.cn',
     );
   });
+
+  test('lists every path in one domain tree without leaking sibling domains',
+      () async {
+    final jar = SessionCookieJar();
+    for (final cookie in [
+      const SessionCookie(name: 'root', value: 'a', domain: 'chaoxing.com'),
+      const SessionCookie(
+          name: 'front',
+          value: 'b',
+          domain: 'office.chaoxing.com',
+          path: '/front'),
+      const SessionCookie(
+          name: 'data',
+          value: 'c',
+          domain: 'i.chaoxing.com',
+          path: '/data/apps'),
+      const SessionCookie(
+          name: 'lookalike', value: 'd', domain: 'evilchaoxing.com'),
+      const SessionCookie(
+          name: 'campus', value: 'e', domain: 'newsso.shu.edu.cn'),
+    ]) {
+      await jar.setCookie(cookie);
+    }
+
+    final listed = await jar.getCookiesForDomainTree(domain: 'chaoxing.com');
+    expect(
+        listed.map((cookie) => cookie.name).toSet(), {'root', 'front', 'data'});
+    expect(listed.map((cookie) => cookie.path).toSet(),
+        {'/', '/front', '/data/apps'});
+    expect(await jar.getCookiesForDomainTree(domain: ''), isEmpty);
+
+    final restarted = SessionCookieJar();
+    expect(
+      (await restarted.getCookiesForDomainTree(domain: 'chaoxing.com'))
+          .map((cookie) => cookie.name)
+          .toSet(),
+      {'root', 'front', 'data'},
+    );
+  });
 }
