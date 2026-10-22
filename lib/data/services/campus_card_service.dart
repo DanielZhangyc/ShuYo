@@ -24,10 +24,19 @@ class CampusCardAuthRequiredException extends CampusCardException {
       : super('loginRequired', '校园卡查询需要重新验证校园账户');
 }
 
+class _CampusCardTokenExpiredException extends CampusCardAuthRequiredException {
+  const _CampusCardTokenExpiredException(this.token);
+
+  final String token;
+}
+
 /// 只访问门户的身份与校园卡查询接口，不承载支付或充值会话。
 class CampusCardService {
-  CampusCardService({HttpClient? httpClient})
-      : _http = httpClient ?? HttpClient() {
+  CampusCardService({
+    HttpClient? httpClient,
+    UnifiedAccountService? accountService,
+  })  : _http = httpClient ?? HttpClient(),
+        _accountService = accountService ?? UnifiedAccountService() {
     _http.connectionTimeout = HttpTimeout.connect;
   }
 
@@ -37,6 +46,7 @@ class CampusCardService {
   static const _loginPath = '/api/Identity/User/Login';
   static const _profilePath = '/api/Identity/User/GetUserInfo';
   final HttpClient _http;
+  final UnifiedAccountService _accountService;
   final SecureAppStore _store = SecureAppStore();
   final AcademicAccountStore _accounts = AcademicAccountStore();
   Future<_CardSession>? _pendingSession;
@@ -46,11 +56,8 @@ class CampusCardService {
   Future<void> clearSession() =>
       _store.delete(SecureAppStore.campusCardSessionKey);
 
-  Future<CampusCardInfo> fetchCardInfo() async {
-    final session = await _session();
-    return session.initialCard ??
-        await _readCard(session.token, session.studentId);
-  }
+  Future<CampusCardInfo> fetchCardInfo() => _withSession((session) async =>
+      session.initialCard ?? await _readCard(session.token, session.studentId));
 
   Future<List<CampusCardBill>> fetchBills({
     required DateTime startDate,
@@ -61,23 +68,24 @@ class CampusCardService {
     if (start.isAfter(end)) {
       throw const CampusCardException('invalidDates', '开始日期不能晚于结束日期');
     }
-    final session = await _session();
-    final data = await _request('GET', _billsPath, query: {
-      'access_token': session.token,
-      'StartDate': _day(start),
-      'EndDate': _day(end),
+    return _withSession((session) async {
+      final data = await _request('GET', _billsPath, query: {
+        'access_token': session.token,
+        'StartDate': _day(start),
+        'EndDate': _day(end),
+      });
+      await _requireAccount(session.studentId);
+      final bills = data['bills'];
+      if (bills is! List) throw _invalidResponse;
+      try {
+        return List.unmodifiable(bills.map((bill) {
+          if (bill is! Map<String, dynamic>) throw _invalidResponse;
+          return CampusCardBill.fromJson(bill);
+        }));
+      } on FormatException {
+        throw _invalidResponse;
+      }
     });
-    await _requireAccount(session.studentId);
-    final bills = data['bills'];
-    if (bills is! List) throw _invalidResponse;
-    try {
-      return List.unmodifiable(bills.map((bill) {
-        if (bill is! Map<String, dynamic>) throw _invalidResponse;
-        return CampusCardBill.fromJson(bill);
-      }));
-    } on FormatException {
-      throw _invalidResponse;
-    }
   }
 
   /// 授权码只消费一次，校验门户与校园卡身份后才保存业务凭证。
@@ -129,26 +137,65 @@ class CampusCardService {
     return _CardSession(token, userId, initialCard: card);
   }
 
-  Future<_CardSession> _session() async {
+  Future<T> _withSession<T>(Future<T> Function(_CardSession) operation) async {
+    final studentId = await _accounts.loadStudentId();
+    if (studentId == null) throw const CampusCardAuthRequiredException();
+    Future<T> run(_CardSession session) async {
+      if (session.studentId != studentId) throw _accountMismatch;
+      await _requireAccount(studentId);
+      return operation(session);
+    }
+
+    try {
+      return await run(await _session());
+    } on _CampusCardTokenExpiredException catch (error) {
+      await _requireAccount(studentId);
+      // Retry once; failures of the replacement session reach the caller.
+      return run(await _session(rejectedToken: error.token));
+    }
+  }
+
+  Future<_CardSession> _session({String? rejectedToken}) async {
     final pending = _pendingSession;
-    if (pending != null) return pending;
-    final operation = _loadSession();
+    if (pending != null) {
+      try {
+        final session = await pending;
+        if (session.token != rejectedToken) return session;
+      } on _CampusCardTokenExpiredException {
+        if (rejectedToken == null) rethrow;
+      }
+      if (_pendingSession != null && !identical(_pendingSession, pending)) {
+        return _session(rejectedToken: rejectedToken);
+      }
+    }
+    final operation = _loadSession(rejectedToken: rejectedToken);
     _pendingSession = operation;
     try {
       return await operation;
     } finally {
-      _pendingSession = null;
+      if (identical(_pendingSession, operation)) _pendingSession = null;
     }
   }
 
-  Future<_CardSession> _loadSession() async {
+  Future<_CardSession> _authorizeSession(String studentId) async {
+    await _requireAccount(studentId);
+    final callback = await _accountService.authorizeCampusCard();
+    if (callback == null) throw const CampusCardAuthRequiredException();
+    try {
+      return await _completeOAuth(callback, expectedStudentId: studentId);
+    } on _CampusCardTokenExpiredException {
+      // A newly issued token was already rejected. Leave login to the caller
+      // instead of starting another automatic authorization.
+      throw const CampusCardAuthRequiredException();
+    }
+  }
+
+  Future<_CardSession> _loadSession({String? rejectedToken}) async {
     final studentId = await _accounts.loadStudentId();
     if (studentId == null) throw const CampusCardAuthRequiredException();
     final raw = await _store.read(SecureAppStore.campusCardSessionKey);
     if (raw == null) {
-      final callback = await UnifiedAccountService().authorizeCampusCard();
-      if (callback == null) throw const CampusCardAuthRequiredException();
-      return _completeOAuth(callback, expectedStudentId: studentId);
+      return _authorizeSession(studentId);
     }
     final Object? decoded;
     try {
@@ -165,6 +212,10 @@ class CampusCardService {
       throw const CampusCardAuthRequiredException();
     }
     final token = decoded['access_token'] as String;
+    if (token == rejectedToken) {
+      await clearSession();
+      return _authorizeSession(studentId);
+    }
     final profile = await _request('POST', _profilePath, query: {
       'access_token': token,
     });
@@ -203,6 +254,19 @@ class CampusCardService {
     }
   }
 
+  Future<Never> _rejectAuthentication(String? token) async {
+    if (token == null) throw const CampusCardAuthRequiredException();
+    final raw = await _store.read(SecureAppStore.campusCardSessionKey);
+    if (raw != null) {
+      // A late rejection of an old request must not delete a renewed token.
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic> && decoded['access_token'] == token) {
+        await clearSession();
+      }
+    }
+    throw _CampusCardTokenExpiredException(token);
+  }
+
   Future<Map<String, dynamic>> _request(
     String method,
     String path, {
@@ -226,8 +290,7 @@ class CampusCardService {
       final body =
           await utf8.decodeStream(response).timeout(HttpTimeout.normal);
       if (status == 401 || status == 403) {
-        await clearSession();
-        throw const CampusCardAuthRequiredException();
+        return await _rejectAuthentication(query['access_token']);
       }
       if (status != HttpStatus.ok) {
         throw CampusCardException('httpError', '校园卡服务暂时不可用（HTTP $status）');
@@ -240,8 +303,7 @@ class CampusCardService {
       if (payload['type'] == 3 &&
           payload['errorcode'] == 500 &&
           payload['message'] == '登录失效') {
-        await clearSession();
-        throw const CampusCardAuthRequiredException();
+        return await _rejectAuthentication(query['access_token']);
       }
       if (payload['type'] != 1 || payload['errorcode'] != 0) {
         throw const CampusCardException('businessError', '校方暂未返回校园卡数据，请稍后重试');
