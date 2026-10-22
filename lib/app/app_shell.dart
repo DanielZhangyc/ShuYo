@@ -37,6 +37,7 @@ import '../data/services/unified_account_service.dart';
 import '../data/services/there_booking_client.dart';
 import '../data/services/webvpn_session_store.dart';
 import '../features/auth/native_login_page.dart';
+import '../features/campus_map/campus_map_page.dart';
 import '../features/home/academic_schedule_page.dart';
 import '../features/home/academic_progress_page.dart';
 import '../features/home/announcements_page.dart';
@@ -421,6 +422,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         onOpenAnnouncements: () => unawaited(_openAnnouncements()),
         onOpenEmptyClassroom: () => unawaited(_openEmptyClassroom()),
         onOpenLibraryBooking: () => unawaited(_openLibraryBooking()),
+        onOpenCampusMap: () => unawaited(_openCampusMap()),
         onOpenOtp: () => unawaited(_openOtp()),
         todayCourseContent: _scheduleSummaryText,
         announcementContent: _announcementSummaryText,
@@ -874,6 +876,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _openingLibraryBooking = false;
     }
   }
+
+  Future<void> _openCampusMap() => Navigator.of(context).push<void>(
+        shuyoRoute(
+          builder: (_) => CampusMapPage(initialCampus: _preferredCampus),
+        ),
+      );
 
   Future<void> _establishThereInBackground() async {
     final client = ThereBookingClient();

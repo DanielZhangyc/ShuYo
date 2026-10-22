@@ -1,0 +1,4844 @@
+{
+  "schemaVersion": 1,
+  "version": "v20260927-5",
+  "publishedAt": "2026-09-27T07:42:29.094Z",
+  "source": {
+    "repository": "https://github.com/northleftt/SHUMap",
+    "commit": "5aebaf0e58cf7b3975be1c1c6cc0a4d95785ec60",
+    "releaseId": "release_bac1fb7cdadc43788076d33fd44aaa2f"
+  },
+  "campuses": [
+    {
+      "id": "baoshan",
+      "name": "宝山校区",
+      "asset": "assets/campus_map/maps/baoshan.svg",
+      "viewBox": [
+        0.0,
+        0.0,
+        921.6,
+        1019.7
+      ],
+      "geoTransform": {
+        "a": 57870.544764976614,
+        "b": -500.5009122558277,
+        "c": -7008973.362112238,
+        "d": 298.4269436275414,
+        "e": -68036.38369392864,
+        "f": 2094863.561334667
+      },
+      "metersPerMapUnit": {
+        "x": 1.6433,
+        "y": 1.6306
+      },
+      "initialView": {
+        "zoom": 1.75,
+        "center": {
+          "x": 452.7,
+          "y": 469.6
+        }
+      },
+      "backgroundColor": "#EAEADF"
+    },
+    {
+      "id": "yanchang",
+      "name": "延长校区",
+      "asset": "assets/campus_map/maps/yanchang.svg",
+      "viewBox": [
+        0.0,
+        0.0,
+        1430.0,
+        1316.0
+      ],
+      "geoTransform": {
+        "a": 137462.09448305416,
+        "b": 46048.38875404894,
+        "c": -18135449.011917878,
+        "d": 41441.49991853116,
+        "e": -162736.4906877537,
+        "f": 57019.43915576581
+      },
+      "metersPerMapUnit": {
+        "x": 0.6627,
+        "y": 0.656
+      },
+      "initialView": {
+        "zoom": 1.1,
+        "center": {
+          "x": 624.8,
+          "y": 697.1
+        }
+      },
+      "backgroundColor": "#EAEADF"
+    },
+    {
+      "id": "jiading",
+      "name": "嘉定校区",
+      "asset": "assets/campus_map/maps/jiading.svg",
+      "viewBox": [
+        0.0,
+        0.0,
+        466.0,
+        362.0
+      ],
+      "geoTransform": {
+        "a": 36184.114252367835,
+        "b": 26650.692067126518,
+        "c": -5223290.478750084,
+        "d": 21126.05151793013,
+        "e": -42297.949780660805,
+        "f": -1234168.403812408
+      },
+      "metersPerMapUnit": {
+        "x": 2.2683,
+        "y": 2.2191
+      },
+      "initialView": {
+        "zoom": 1.3,
+        "center": {
+          "x": 237.4,
+          "y": 172.3
+        }
+      },
+      "backgroundColor": "#EAEADF"
+    }
+  ],
+  "places": [
+    {
+      "id": "place_baoshan_building-a",
+      "campusId": "baoshan",
+      "name": "A 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 A楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_A"
+      ],
+      "navigation": {
+        "longitude": 121.395486,
+        "latitude": 31.3135377
+      },
+      "point": {
+        "x": 577.09053,
+        "y": 631.37942
+      }
+    },
+    {
+      "id": "place_baoshan_building-b",
+      "campusId": "baoshan",
+      "name": "B 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 B楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_B"
+      ],
+      "navigation": {
+        "longitude": 121.3953988,
+        "latitude": 31.3140917
+      },
+      "point": {
+        "x": 571.76694,
+        "y": 593.66124
+      }
+    },
+    {
+      "id": "place_baoshan_building-c",
+      "campusId": "baoshan",
+      "name": "C 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 C楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_C"
+      ],
+      "navigation": {
+        "longitude": 121.3951343,
+        "latitude": 31.3145402
+      },
+      "point": {
+        "x": 556.23571,
+        "y": 563.06799
+      }
+    },
+    {
+      "id": "place_baoshan_building-d",
+      "campusId": "baoshan",
+      "name": "D 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_D"
+      ],
+      "navigation": {
+        "longitude": 121.3948065,
+        "latitude": 31.3149598
+      },
+      "point": {
+        "x": 537.05573,
+        "y": 534.4221
+      }
+    },
+    {
+      "id": "place_baoshan_main-library",
+      "campusId": "baoshan",
+      "name": "本部图书馆",
+      "kind": "图书馆",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 本部图书馆",
+      "description": "",
+      "aliases": [],
+      "facts": [
+        {
+          "label": "开放时间",
+          "value": "周一至周五 8:00～20:00"
+        },
+        {
+          "label": "联系电话",
+          "value": "021－66134667"
+        },
+        {
+          "label": "所属单位",
+          "value": "校图书馆"
+        }
+      ],
+      "featureIds": [
+        "main_library"
+      ],
+      "navigation": {
+        "longitude": 121.3920478,
+        "latitude": 31.3169757
+      },
+      "point": {
+        "x": 376.3993,
+        "y": 396.44428
+      }
+    },
+    {
+      "id": "place_baoshan_building-aj",
+      "campusId": "baoshan",
+      "name": "AJ 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 AJ楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_AJ"
+      ],
+      "navigation": {
+        "longitude": 121.3966631,
+        "latitude": 31.3140139
+      },
+      "point": {
+        "x": 644.97161,
+        "y": 599.33177
+      }
+    },
+    {
+      "id": "place_baoshan_building-bj",
+      "campusId": "baoshan",
+      "name": "BJ 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 BJ楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_BJ"
+      ],
+      "navigation": {
+        "longitude": 121.3962887,
+        "latitude": 31.3144343
+      },
+      "point": {
+        "x": 623.09447,
+        "y": 570.61755
+      }
+    },
+    {
+      "id": "place_baoshan_building-cj",
+      "campusId": "baoshan",
+      "name": "CJ 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 CJ楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_CJ"
+      ],
+      "navigation": {
+        "longitude": 121.3960264,
+        "latitude": 31.3148828
+      },
+      "point": {
+        "x": 607.69055,
+        "y": 540.02495
+      }
+    },
+    {
+      "id": "place_baoshan_building-dj",
+      "campusId": "baoshan",
+      "name": "DJ 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 DJ楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_DJ"
+      ],
+      "navigation": {
+        "longitude": 121.3956857,
+        "latitude": 31.3153188
+      },
+      "point": {
+        "x": 587.75584,
+        "y": 510.25941
+      }
+    },
+    {
+      "id": "place_baoshan_building-e",
+      "campusId": "baoshan",
+      "name": "E 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 E楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_E"
+      ],
+      "navigation": {
+        "longitude": 121.394229,
+        "latitude": 31.3161189
+      },
+      "point": {
+        "x": 503.05536,
+        "y": 455.38878
+      }
+    },
+    {
+      "id": "place_baoshan_building-f",
+      "campusId": "baoshan",
+      "name": "F 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 F楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_F"
+      ],
+      "navigation": {
+        "longitude": 121.3938663,
+        "latitude": 31.3165642
+      },
+      "point": {
+        "x": 481.84284,
+        "y": 424.98394
+      }
+    },
+    {
+      "id": "place_baoshan_building-g",
+      "campusId": "baoshan",
+      "name": "G 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 G楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_G"
+      ],
+      "navigation": {
+        "longitude": 121.3935724,
+        "latitude": 31.3169861
+      },
+      "point": {
+        "x": 464.62353,
+        "y": 396.19168
+      }
+    },
+    {
+      "id": "place_baoshan_weichang-building",
+      "campusId": "baoshan",
+      "name": "伟长楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 伟长楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "weichang_building"
+      ],
+      "navigation": {
+        "longitude": 121.3951483,
+        "latitude": 31.3176999
+      },
+      "point": {
+        "x": 555.46446,
+        "y": 348.09761
+      }
+    },
+    {
+      "id": "place_baoshan_building-ej",
+      "campusId": "baoshan",
+      "name": "EJ 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 EJ楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_EJ"
+      ],
+      "navigation": {
+        "longitude": 121.3950448,
+        "latitude": 31.3163247
+      },
+      "point": {
+        "x": 550.16315,
+        "y": 441.63035
+      }
+    },
+    {
+      "id": "place_baoshan_building-fj",
+      "campusId": "baoshan",
+      "name": "FJ 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 FJ楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_FJ"
+      ],
+      "navigation": {
+        "longitude": 121.3946947,
+        "latitude": 31.316752
+      },
+      "point": {
+        "x": 529.68881,
+        "y": 412.45393
+      }
+    },
+    {
+      "id": "place_baoshan_building-gj",
+      "campusId": "baoshan",
+      "name": "GJ 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 GJ楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_GJ"
+      ],
+      "navigation": {
+        "longitude": 121.39433,
+        "latitude": 31.3171888
+      },
+      "point": {
+        "x": 508.3648,
+        "y": 382.6268
+      }
+    },
+    {
+      "id": "place_baoshan_4th-canteen",
+      "campusId": "baoshan",
+      "name": "水秀食堂",
+      "kind": "食堂",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 水秀食堂",
+      "description": "",
+      "aliases": [
+        "水秀",
+        "食堂"
+      ],
+      "facts": [],
+      "featureIds": [
+        "_4th_canteen"
+      ],
+      "navigation": {
+        "longitude": 121.3959058,
+        "latitude": 31.316524
+      },
+      "point": {
+        "x": 599.88994,
+        "y": 428.32765
+      }
+    },
+    {
+      "id": "place_baoshan_building-ha",
+      "campusId": "baoshan",
+      "name": "HA 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 HA楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_HA"
+      ],
+      "navigation": {
+        "longitude": 121.3967115,
+        "latitude": 31.3167678
+      },
+      "point": {
+        "x": 646.39422,
+        "y": 411.98082
+      }
+    },
+    {
+      "id": "place_baoshan_building-hb",
+      "campusId": "baoshan",
+      "name": "HB 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 HB楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_HB"
+      ],
+      "navigation": {
+        "longitude": 121.3969025,
+        "latitude": 31.3163642
+      },
+      "point": {
+        "x": 657.64949,
+        "y": 439.4973
+      }
+    },
+    {
+      "id": "place_baoshan_building-hd",
+      "campusId": "baoshan",
+      "name": "HD 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 HD楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_HD"
+      ],
+      "navigation": {
+        "longitude": 121.3963842,
+        "latitude": 31.3159253
+      },
+      "point": {
+        "x": 627.87486,
+        "y": 469.2038
+      }
+    },
+    {
+      "id": "place_baoshan_building-hc",
+      "campusId": "baoshan",
+      "name": "HC 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 HC楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_HC"
+      ],
+      "navigation": {
+        "longitude": 121.3970363,
+        "latitude": 31.3158072
+      },
+      "point": {
+        "x": 665.67135,
+        "y": 477.4335
+      }
+    },
+    {
+      "id": "place_baoshan_building-he",
+      "campusId": "baoshan",
+      "name": "HE 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 HE楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_HE"
+      ],
+      "navigation": {
+        "longitude": 121.3968697,
+        "latitude": 31.3153201
+      },
+      "point": {
+        "x": 656.27391,
+        "y": 510.5243
+      }
+    },
+    {
+      "id": "place_baoshan_gym",
+      "campusId": "baoshan",
+      "name": "体育馆",
+      "kind": "其他",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 体育馆",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "GYM"
+      ],
+      "navigation": {
+        "longitude": 121.3953866,
+        "latitude": 31.3196028
+      },
+      "point": {
+        "x": 568.30261,
+        "y": 218.70229
+      }
+    },
+    {
+      "id": "place_baoshan_swimming-pool",
+      "campusId": "baoshan",
+      "name": "游泳馆",
+      "kind": "其他",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 游泳馆",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "swimming_pool"
+      ],
+      "navigation": {
+        "longitude": 121.394083,
+        "latitude": 31.3195244
+      },
+      "point": {
+        "x": 492.90181,
+        "y": 223.64731
+      }
+    },
+    {
+      "id": "place_baoshan_building-j",
+      "campusId": "baoshan",
+      "name": "J 楼",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 J楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_J"
+      ],
+      "navigation": {
+        "longitude": 121.3937875,
+        "latitude": 31.3153506
+      },
+      "point": {
+        "x": 477.89005,
+        "y": 507.52938
+      }
+    },
+    {
+      "id": "place_baoshan_art-college",
+      "campusId": "baoshan",
+      "name": "美术学院",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 美术学院",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "art_college"
+      ],
+      "navigation": {
+        "longitude": 121.3937237,
+        "latitude": 31.3129743
+      },
+      "point": {
+        "x": 475.38725,
+        "y": 669.1852
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-1",
+      "campusId": "baoshan",
+      "name": "1号楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 1号楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_1"
+      ],
+      "navigation": {
+        "longitude": 121.3890274,
+        "latitude": 31.3154009
+      },
+      "point": {
+        "x": 202.3953,
+        "y": 502.68661
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-2",
+      "campusId": "baoshan",
+      "name": "2号楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 2号楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_2"
+      ],
+      "navigation": {
+        "longitude": 121.3892253,
+        "latitude": 31.315019
+      },
+      "point": {
+        "x": 214.03902,
+        "y": 528.72876
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-3",
+      "campusId": "baoshan",
+      "name": "3号楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 3号楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_3"
+      ],
+      "navigation": {
+        "longitude": 121.389528,
+        "latitude": 31.314609
+      },
+      "point": {
+        "x": 231.76164,
+        "y": 556.71401
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-4",
+      "campusId": "baoshan",
+      "name": "4号楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 4号楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_4"
+      ],
+      "navigation": {
+        "longitude": 121.3902362,
+        "latitude": 31.3150787
+      },
+      "point": {
+        "x": 272.51047,
+        "y": 524.96867
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-5",
+      "campusId": "baoshan",
+      "name": "5号楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 5号楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_5"
+      ],
+      "navigation": {
+        "longitude": 121.3904004,
+        "latitude": 31.3146914
+      },
+      "point": {
+        "x": 282.20666,
+        "y": 551.36816
+      }
+    },
+    {
+      "id": "place_baoshan_1st-canteen",
+      "campusId": "baoshan",
+      "name": "益新食堂",
+      "kind": "食堂",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 益新食堂",
+      "description": "",
+      "aliases": [
+        "一食堂",
+        "益新",
+        "食堂"
+      ],
+      "facts": [],
+      "featureIds": [
+        "_1st_canteen"
+      ],
+      "navigation": {
+        "longitude": 121.3892323,
+        "latitude": 31.3163785
+      },
+      "point": {
+        "x": 213.76368,
+        "y": 436.23539
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-m",
+      "campusId": "baoshan",
+      "name": "M楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 M楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_M"
+      ],
+      "navigation": {
+        "longitude": 121.3899574,
+        "latitude": 31.3161804
+      },
+      "point": {
+        "x": 255.82476,
+        "y": 449.92979
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-n",
+      "campusId": "baoshan",
+      "name": "N楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 N楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_N"
+      ],
+      "navigation": {
+        "longitude": 121.3901888,
+        "latitude": 31.3165014
+      },
+      "point": {
+        "x": 269.05535,
+        "y": 428.15916
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-p",
+      "campusId": "baoshan",
+      "name": "P楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 P楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_P"
+      ],
+      "navigation": {
+        "longitude": 121.3898235,
+        "latitude": 31.3168297
+      },
+      "point": {
+        "x": 247.75092,
+        "y": 405.7138
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-q",
+      "campusId": "baoshan",
+      "name": "Q楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 Q楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_Q"
+      ],
+      "navigation": {
+        "longitude": 121.3902362,
+        "latitude": 31.3171375
+      },
+      "point": {
+        "x": 271.48004,
+        "y": 384.89536
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-r",
+      "campusId": "baoshan",
+      "name": "R楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 R楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_R"
+      ],
+      "navigation": {
+        "longitude": 121.3900734,
+        "latitude": 31.3174461
+      },
+      "point": {
+        "x": 261.90426,
+        "y": 363.85075
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-i",
+      "campusId": "baoshan",
+      "name": "I楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 I楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_I"
+      ],
+      "navigation": {
+        "longitude": 121.3899458,
+        "latitude": 31.3178452
+      },
+      "point": {
+        "x": 254.32023,
+        "y": 336.65935
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-o",
+      "campusId": "baoshan",
+      "name": "O楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 O楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_O"
+      ],
+      "navigation": {
+        "longitude": 121.389834,
+        "latitude": 31.3181871
+      },
+      "point": {
+        "x": 247.67918,
+        "y": 313.36435
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-k",
+      "campusId": "baoshan",
+      "name": "K楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 K楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_K"
+      ],
+      "navigation": {
+        "longitude": 121.3896218,
+        "latitude": 31.3185286
+      },
+      "point": {
+        "x": 235.22813,
+        "y": 290.0666
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-l",
+      "campusId": "baoshan",
+      "name": "L楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 L楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_L"
+      ],
+      "navigation": {
+        "longitude": 121.3893836,
+        "latitude": 31.3188178
+      },
+      "point": {
+        "x": 221.29862,
+        "y": 270.31939
+      }
+    },
+    {
+      "id": "place_baoshan_3rd-canteen",
+      "campusId": "baoshan",
+      "name": "山明食堂",
+      "kind": "食堂",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 山明食堂",
+      "description": "",
+      "aliases": [
+        "山明",
+        "食堂"
+      ],
+      "facts": [],
+      "featureIds": [
+        "_3rd_canteen"
+      ],
+      "navigation": {
+        "longitude": 121.3886584,
+        "latitude": 31.3177527
+      },
+      "point": {
+        "x": 179.86399,
+        "y": 342.56852
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-t",
+      "campusId": "baoshan",
+      "name": "T楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 T楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_T"
+      ],
+      "navigation": {
+        "longitude": 121.3886473,
+        "latitude": 31.3172251
+      },
+      "point": {
+        "x": 179.48569,
+        "y": 378.46121
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-s",
+      "campusId": "baoshan",
+      "name": "S楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 S楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_S"
+      ],
+      "navigation": {
+        "longitude": 121.3891273,
+        "latitude": 31.3169177
+      },
+      "point": {
+        "x": 207.41741,
+        "y": 399.51884
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-x",
+      "campusId": "baoshan",
+      "name": "X楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 X楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_X"
+      ],
+      "navigation": {
+        "longitude": 121.3912728,
+        "latitude": 31.3181416
+      },
+      "point": {
+        "x": 330.9661,
+        "y": 316.88938
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-y",
+      "campusId": "baoshan",
+      "name": "Y楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 Y楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_Y"
+      ],
+      "navigation": {
+        "longitude": 121.3911137,
+        "latitude": 31.3184911
+      },
+      "point": {
+        "x": 321.58397,
+        "y": 293.06319
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-z",
+      "campusId": "baoshan",
+      "name": "Z楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 Z楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_Z"
+      ],
+      "navigation": {
+        "longitude": 121.3906378,
+        "latitude": 31.3189248
+      },
+      "point": {
+        "x": 293.82631,
+        "y": 263.41378
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-w",
+      "campusId": "baoshan",
+      "name": "W楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 W楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_W"
+      ],
+      "navigation": {
+        "longitude": 121.3919586,
+        "latitude": 31.318702
+      },
+      "point": {
+        "x": 370.37324,
+        "y": 278.96645
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-u",
+      "campusId": "baoshan",
+      "name": "U楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 U楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_U"
+      ],
+      "navigation": {
+        "longitude": 121.3921016,
+        "latitude": 31.3183552
+      },
+      "point": {
+        "x": 378.8223,
+        "y": 302.60415
+      }
+    },
+    {
+      "id": "place_baoshan_2nd-canteen",
+      "campusId": "baoshan",
+      "name": "尔美食堂",
+      "kind": "食堂",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 尔美食堂",
+      "description": "",
+      "aliases": [
+        "尔美",
+        "食堂"
+      ],
+      "facts": [],
+      "featureIds": [
+        "_2nd_canteen"
+      ],
+      "navigation": {
+        "longitude": 121.3915344,
+        "latitude": 31.3193997
+      },
+      "point": {
+        "x": 345.47535,
+        "y": 231.37088
+      }
+    },
+    {
+      "id": "place_baoshan_qianweichang-library",
+      "campusId": "baoshan",
+      "name": "钱伟长图书馆",
+      "kind": "图书馆",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 钱伟长图书馆",
+      "description": "",
+      "aliases": [
+        "钱伟长",
+        "图书馆"
+      ],
+      "facts": [],
+      "featureIds": [
+        "qianweichang_library"
+      ],
+      "navigation": {
+        "longitude": 121.3996481,
+        "latitude": 31.3144133
+      },
+      "point": {
+        "x": 817.51529,
+        "y": 573.04885
+      }
+    },
+    {
+      "id": "place_baoshan_6th-canteen-2",
+      "campusId": "baoshan",
+      "name": "东区食堂",
+      "kind": "食堂",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 留韵食堂",
+      "description": "",
+      "aliases": [
+        "东区",
+        "食堂"
+      ],
+      "facts": [],
+      "featureIds": [
+        "_6th_canteen-2"
+      ],
+      "navigation": {
+        "longitude": 121.3984426,
+        "latitude": 31.3149209
+      },
+      "point": {
+        "x": 747.49829,
+        "y": 538.15382
+      }
+    },
+    {
+      "id": "place_baoshan_building-d10",
+      "campusId": "baoshan",
+      "name": "D10 楼（通用实验楼）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D10楼",
+      "description": "",
+      "aliases": [
+        "D10 楼",
+        "（通用实验楼）",
+        "通用实验楼"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D10"
+      ],
+      "navigation": {
+        "longitude": 121.3985317,
+        "latitude": 31.315551
+      },
+      "point": {
+        "x": 752.33919,
+        "y": 495.31069
+      }
+    },
+    {
+      "id": "place_baoshan_building-d11",
+      "campusId": "baoshan",
+      "name": "D11 楼（土木楼）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D11楼",
+      "description": "",
+      "aliases": [
+        "D11 楼",
+        "（土木楼）",
+        "土木楼"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D11"
+      ],
+      "navigation": {
+        "longitude": 121.3984707,
+        "latitude": 31.3160668
+      },
+      "point": {
+        "x": 748.55093,
+        "y": 460.19932
+      }
+    },
+    {
+      "id": "place_baoshan_building-d12",
+      "campusId": "baoshan",
+      "name": "D12 楼（通信实验楼）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D12楼",
+      "description": "",
+      "aliases": [
+        "D12 楼",
+        "（通信实验楼）",
+        "通信实验楼"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D12"
+      ],
+      "navigation": {
+        "longitude": 121.3984281,
+        "latitude": 31.3165414
+      },
+      "point": {
+        "x": 745.84811,
+        "y": 427.89654
+      }
+    },
+    {
+      "id": "place_baoshan_building-d13",
+      "campusId": "baoshan",
+      "name": "D13 楼（材料实验楼）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D13楼",
+      "description": "",
+      "aliases": [
+        "D13 楼",
+        "（材料实验楼）",
+        "材料实验楼"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D13"
+      ],
+      "navigation": {
+        "longitude": 121.3983834,
+        "latitude": 31.3170533
+      },
+      "point": {
+        "x": 743.00509,
+        "y": 393.05537
+      }
+    },
+    {
+      "id": "place_baoshan_building-d1",
+      "campusId": "baoshan",
+      "name": "D1 楼（经管大楼）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D1楼",
+      "description": "",
+      "aliases": [
+        "D1 楼",
+        "经管大楼"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D1"
+      ],
+      "navigation": {
+        "longitude": 121.3990955,
+        "latitude": 31.3131912
+      },
+      "point": {
+        "x": 786.14769,
+        "y": 656.0312
+      }
+    },
+    {
+      "id": "place_baoshan_building-d3",
+      "campusId": "baoshan",
+      "name": "D3 楼（校出版社）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D3楼",
+      "description": "",
+      "aliases": [
+        "D3 楼",
+        "校出版社"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D3"
+      ],
+      "navigation": {
+        "longitude": 121.3986274,
+        "latitude": 31.3136728
+      },
+      "point": {
+        "x": 758.81744,
+        "y": 623.12518
+      }
+    },
+    {
+      "id": "place_baoshan_building-d2",
+      "campusId": "baoshan",
+      "name": "D2 楼（社会科学学部）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D2楼",
+      "description": "",
+      "aliases": [
+        "D2 楼",
+        "社会科学学部"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D2"
+      ],
+      "navigation": {
+        "longitude": 121.3998315,
+        "latitude": 31.3137189
+      },
+      "point": {
+        "x": 828.47629,
+        "y": 620.34804
+      }
+    },
+    {
+      "id": "place_baoshan_building-d4",
+      "campusId": "baoshan",
+      "name": "D4 楼（法学院）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D4楼",
+      "description": "",
+      "aliases": [
+        "D4 楼",
+        "法学院"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D4"
+      ],
+      "navigation": {
+        "longitude": 121.4004908,
+        "latitude": 31.314084
+      },
+      "point": {
+        "x": 866.44761,
+        "y": 595.70471
+      }
+    },
+    {
+      "id": "place_baoshan_building-d5",
+      "campusId": "baoshan",
+      "name": "D5 楼（文学院）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D5楼",
+      "description": "",
+      "aliases": [
+        "D5 楼",
+        "文学院"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D5"
+      ],
+      "navigation": {
+        "longitude": 121.4004656,
+        "latitude": 31.3144616
+      },
+      "point": {
+        "x": 864.80028,
+        "y": 570.00665
+      }
+    },
+    {
+      "id": "place_baoshan_building-d6",
+      "campusId": "baoshan",
+      "name": "D6 楼（中欧工程技术学院）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D6楼",
+      "description": "",
+      "aliases": [
+        "D6 楼",
+        "（中欧工程技术学院）",
+        "中欧工程技术学院"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D6"
+      ],
+      "navigation": {
+        "longitude": 121.4004356,
+        "latitude": 31.3148404
+      },
+      "point": {
+        "x": 862.87458,
+        "y": 544.22552
+      }
+    },
+    {
+      "id": "place_baoshan_building-d7",
+      "campusId": "baoshan",
+      "name": "D7 楼（材料基因工程研究院）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D7楼",
+      "description": "",
+      "aliases": [
+        "D7 楼",
+        "材料基因工程研究院"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D7"
+      ],
+      "navigation": {
+        "longitude": 121.3998118,
+        "latitude": 31.3150901
+      },
+      "point": {
+        "x": 826.64996,
+        "y": 527.05067
+      }
+    },
+    {
+      "id": "place_baoshan_building-d9",
+      "campusId": "baoshan",
+      "name": "D9 楼（机自大楼）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D9楼",
+      "description": "",
+      "aliases": [
+        "D9 楼",
+        "机自大楼"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D9"
+      ],
+      "navigation": {
+        "longitude": 121.3999609,
+        "latitude": 31.3163144
+      },
+      "point": {
+        "x": 834.66569,
+        "y": 443.79822
+      }
+    },
+    {
+      "id": "place_baoshan_building-d14",
+      "campusId": "baoshan",
+      "name": "D14 楼（翔英楼）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D14楼",
+      "description": "",
+      "aliases": [
+        "D14 楼",
+        "翔英楼"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D14"
+      ],
+      "navigation": {
+        "longitude": 121.3996943,
+        "latitude": 31.3170043
+      },
+      "point": {
+        "x": 818.89211,
+        "y": 396.78036
+      }
+    },
+    {
+      "id": "place_baoshan_building-d15",
+      "campusId": "baoshan",
+      "name": "D15 楼（计算机楼）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D15楼",
+      "description": "",
+      "aliases": [
+        "D15 楼",
+        "计算机楼"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D15"
+      ],
+      "navigation": {
+        "longitude": 121.3999264,
+        "latitude": 31.3174488
+      },
+      "point": {
+        "x": 832.10139,
+        "y": 366.60746
+      }
+    },
+    {
+      "id": "place_baoshan_building-d16",
+      "campusId": "baoshan",
+      "name": "D16 楼（材料楼）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D16楼",
+      "description": "",
+      "aliases": [
+        "D16 楼",
+        "材料楼"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D16"
+      ],
+      "navigation": {
+        "longitude": 121.4001345,
+        "latitude": 31.3180287
+      },
+      "point": {
+        "x": 843.85401,
+        "y": 327.21526
+      }
+    },
+    {
+      "id": "place_baoshan_building-d17",
+      "campusId": "baoshan",
+      "name": "D17 楼（材料楼）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D17楼",
+      "description": "",
+      "aliases": [
+        "D17 楼",
+        "材料楼"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D17"
+      ],
+      "navigation": {
+        "longitude": 121.3998607,
+        "latitude": 31.3183916
+      },
+      "point": {
+        "x": 827.82742,
+        "y": 302.44315
+      }
+    },
+    {
+      "id": "place_baoshan_building-d18",
+      "campusId": "baoshan",
+      "name": "D18 楼（环化楼）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D18楼",
+      "description": "",
+      "aliases": [
+        "D18 楼",
+        "环化楼"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D18"
+      ],
+      "navigation": {
+        "longitude": 121.3999799,
+        "latitude": 31.3193471
+      },
+      "point": {
+        "x": 834.24736,
+        "y": 237.46995
+      }
+    },
+    {
+      "id": "place_baoshan_building-d19",
+      "campusId": "baoshan",
+      "name": "D19 楼（生科楼）",
+      "kind": "建筑",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D19楼",
+      "description": "",
+      "aliases": [
+        "D19 楼",
+        "生科楼"
+      ],
+      "facts": [],
+      "featureIds": [
+        "building_D19"
+      ],
+      "navigation": {
+        "longitude": 121.399366,
+        "latitude": 31.3199817
+      },
+      "point": {
+        "x": 798.40302,
+        "y": 194.11086
+      }
+    },
+    {
+      "id": "place_baoshan_hospital",
+      "campusId": "baoshan",
+      "name": "校医院",
+      "kind": "其他",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 校医院",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "hospital"
+      ],
+      "navigation": {
+        "longitude": 121.3884167,
+        "latitude": 31.3202375
+      },
+      "point": {
+        "x": 164.63303,
+        "y": 173.43959
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-6",
+      "campusId": "baoshan",
+      "name": "6号楼",
+      "kind": "宿舍",
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 6号楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_6"
+      ],
+      "navigation": {
+        "longitude": 121.3902339,
+        "latitude": 31.3155317
+      },
+      "point": {
+        "x": 272.15065,
+        "y": 494.1475
+      }
+    },
+    {
+      "id": "place_yanchang_wenwu-building",
+      "campusId": "yanchang",
+      "name": "文武大楼",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 文武大楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "wenwu_building"
+      ],
+      "navigation": {
+        "longitude": 121.4562011,
+        "latitude": 31.2779685
+      },
+      "point": {
+        "x": 474.83217,
+        "y": 279.75761
+      }
+    },
+    {
+      "id": "place_yanchang_yinli-building",
+      "campusId": "yanchang",
+      "name": "引力楼",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 引力楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "yinli_building"
+      ],
+      "navigation": {
+        "longitude": 121.4567522,
+        "latitude": 31.2783424
+      },
+      "point": {
+        "x": 567.80502,
+        "y": 241.74885
+      }
+    },
+    {
+      "id": "place_yanchang_xingjian-building",
+      "campusId": "yanchang",
+      "name": "行健楼",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 行健楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "xingjian_building"
+      ],
+      "navigation": {
+        "longitude": 121.4576292,
+        "latitude": 31.2780022
+      },
+      "point": {
+        "x": 672.69362,
+        "y": 333.456
+      }
+    },
+    {
+      "id": "place_yanchang_quishi-building",
+      "campusId": "yanchang",
+      "name": "秋实楼",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 秋实楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "quishi_building"
+      ],
+      "navigation": {
+        "longitude": 121.4584133,
+        "latitude": 31.278276
+      },
+      "point": {
+        "x": 793.08569,
+        "y": 321.39303
+      }
+    },
+    {
+      "id": "place_yanchang_keji-building",
+      "campusId": "yanchang",
+      "name": "科技楼",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 科技楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "keji_building"
+      ],
+      "navigation": {
+        "longitude": 121.4586452,
+        "latitude": 31.277686
+      },
+      "point": {
+        "x": 797.7946,
+        "y": 427.01784
+      }
+    },
+    {
+      "id": "place_yanchang_wenhui-library",
+      "campusId": "yanchang",
+      "name": "文荟图书馆",
+      "kind": "图书馆",
+      "address": "上海市静安区延长路149号 上海大学延长校区 文荟图书馆",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "wenhui_library"
+      ],
+      "navigation": {
+        "longitude": 121.4586928,
+        "latitude": 31.2771222
+      },
+      "point": {
+        "x": 778.37572,
+        "y": 520.74129
+      }
+    },
+    {
+      "id": "place_yanchang_shanghai-art-college",
+      "campusId": "yanchang",
+      "name": "上海美术学院",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 上海美术学院",
+      "description": "",
+      "aliases": [
+        "上海",
+        "美术",
+        "学院"
+      ],
+      "facts": [],
+      "featureIds": [
+        "shanghai_art_college"
+      ],
+      "navigation": {
+        "longitude": 121.457885,
+        "latitude": 31.2768057
+      },
+      "point": {
+        "x": 652.75952,
+        "y": 538.77095
+      }
+    },
+    {
+      "id": "place_yanchang_communication-center",
+      "campusId": "yanchang",
+      "name": "交流展示中心",
+      "kind": "其他",
+      "address": "上海市静安区延长路149号 上海大学延长校区 交流展示中心",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "communication_center"
+      ],
+      "navigation": {
+        "longitude": 121.4580546,
+        "latitude": 31.275716
+      },
+      "point": {
+        "x": 625.89416,
+        "y": 723.13338
+      }
+    },
+    {
+      "id": "place_yanchang_north-building",
+      "campusId": "yanchang",
+      "name": "北大楼",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 北大楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "north_building"
+      ],
+      "navigation": {
+        "longitude": 121.4584699,
+        "latitude": 31.2748876
+      },
+      "point": {
+        "x": 644.83569,
+        "y": 875.15494
+      }
+    },
+    {
+      "id": "place_yanchang_vancouver-film-college-2",
+      "campusId": "yanchang",
+      "name": "温哥华电影学院",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 温哥华电影学院",
+      "description": "",
+      "aliases": [
+        "第一教学楼"
+      ],
+      "facts": [],
+      "featureIds": [
+        "vancouver_film_college_2"
+      ],
+      "navigation": {
+        "longitude": 121.4581173,
+        "latitude": 31.2739401
+      },
+      "point": {
+        "x": 552.7357,
+        "y": 1014.7355
+      }
+    },
+    {
+      "id": "place_yanchang_vancouver-film-college",
+      "campusId": "yanchang",
+      "name": "温哥华电影学院",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 温哥华电影学院",
+      "description": "",
+      "aliases": [
+        "M1楼"
+      ],
+      "facts": [],
+      "featureIds": [
+        "vancouver_film_college"
+      ],
+      "navigation": {
+        "longitude": 121.4572819,
+        "latitude": 31.2746198
+      },
+      "point": {
+        "x": 469.19896,
+        "y": 869.50327
+      }
+    },
+    {
+      "id": "place_yanchang_3rd-teaching-building",
+      "campusId": "yanchang",
+      "name": "第三教学楼",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 第三教学楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "_3rd_teaching_building"
+      ],
+      "navigation": {
+        "longitude": 121.4574504,
+        "latitude": 31.2741049
+      },
+      "point": {
+        "x": 468.65101,
+        "y": 960.27919
+      }
+    },
+    {
+      "id": "place_yanchang_2nd-teaching-building",
+      "campusId": "yanchang",
+      "name": "第二教学楼",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 第二教学楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "_2nd_teaching_building"
+      ],
+      "navigation": {
+        "longitude": 121.4575814,
+        "latitude": 31.2738032
+      },
+      "point": {
+        "x": 472.76574,
+        "y": 1014.80562
+      }
+    },
+    {
+      "id": "place_yanchang_hospital",
+      "campusId": "yanchang",
+      "name": "校医院",
+      "kind": "其他",
+      "address": "上海市静安区延长路149号 上海大学延长校区 校医院",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "hospital"
+      ],
+      "navigation": {
+        "longitude": 121.4577016,
+        "latitude": 31.2734586
+      },
+      "point": {
+        "x": 473.42041,
+        "y": 1075.86588
+      }
+    },
+    {
+      "id": "place_yanchang_xinyuan-building",
+      "campusId": "yanchang",
+      "name": "莘远楼",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 莘远楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "xinyuan_building"
+      ],
+      "navigation": {
+        "longitude": 121.4579173,
+        "latitude": 31.2727215
+      },
+      "point": {
+        "x": 469.12872,
+        "y": 1204.75788
+      }
+    },
+    {
+      "id": "place_yanchang_lehu-building",
+      "campusId": "yanchang",
+      "name": "乐乎楼",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 乐乎楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "lehu_building"
+      ],
+      "navigation": {
+        "longitude": 121.4583865,
+        "latitude": 31.2732042
+      },
+      "point": {
+        "x": 555.85349,
+        "y": 1145.64933
+      }
+    },
+    {
+      "id": "place_yanchang_south-building",
+      "campusId": "yanchang",
+      "name": "南大楼",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 南大楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "south_building"
+      ],
+      "navigation": {
+        "longitude": 121.459026,
+        "latitude": 31.2733713
+      },
+      "point": {
+        "x": 651.45519,
+        "y": 1144.9579
+      }
+    },
+    {
+      "id": "place_yanchang_dianji-building",
+      "campusId": "yanchang",
+      "name": "电机楼",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 电机楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dianji_building"
+      ],
+      "navigation": {
+        "longitude": 121.4600993,
+        "latitude": 31.2736525
+      },
+      "point": {
+        "x": 811.94206,
+        "y": 1143.67556
+      }
+    },
+    {
+      "id": "place_yanchang_shanghai-film-college",
+      "campusId": "yanchang",
+      "name": "上海电影学院",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 上海电影学院",
+      "description": "",
+      "aliases": [
+        "第四教学楼"
+      ],
+      "facts": [],
+      "featureIds": [
+        "shanghai_film_college"
+      ],
+      "navigation": {
+        "longitude": 121.4598144,
+        "latitude": 31.2743748
+      },
+      "point": {
+        "x": 806.03986,
+        "y": 1014.32431
+      }
+    },
+    {
+      "id": "place_yanchang_news-communication-college",
+      "campusId": "yanchang",
+      "name": "新传学院",
+      "kind": "建筑",
+      "address": "上海市静安区延长路149号 上海大学延长校区 新传学院",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "news_communication_college"
+      ],
+      "navigation": {
+        "longitude": 121.4592563,
+        "latitude": 31.2751072
+      },
+      "point": {
+        "x": 763.0481,
+        "y": 872.00761
+      }
+    },
+    {
+      "id": "place_jiading_dorm-7",
+      "campusId": "jiading",
+      "name": "7号楼",
+      "kind": "宿舍",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 7号楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_7"
+      ],
+      "navigation": {
+        "longitude": 121.2499226,
+        "latitude": 31.378576
+      },
+      "point": {
+        "x": 291.34018,
+        "y": 114.27574
+      }
+    },
+    {
+      "id": "place_jiading_1st-canteen",
+      "campusId": "jiading",
+      "name": "一食堂",
+      "kind": "食堂",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 一食堂",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "_1st_canteen"
+      ],
+      "navigation": {
+        "longitude": 121.2495658,
+        "latitude": 31.3790818
+      },
+      "point": {
+        "x": 291.90961,
+        "y": 85.34367
+      }
+    },
+    {
+      "id": "place_jiading_dorm-6",
+      "campusId": "jiading",
+      "name": "6号楼",
+      "kind": "宿舍",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 6号楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_6"
+      ],
+      "navigation": {
+        "longitude": 121.2501118,
+        "latitude": 31.378304
+      },
+      "point": {
+        "x": 290.93723,
+        "y": 129.77783
+      }
+    },
+    {
+      "id": "place_jiading_dorm-5",
+      "campusId": "jiading",
+      "name": "5号楼",
+      "kind": "宿舍",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 5号楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_5"
+      ],
+      "navigation": {
+        "longitude": 121.2503163,
+        "latitude": 31.3780302
+      },
+      "point": {
+        "x": 291.03992,
+        "y": 145.67929
+      }
+    },
+    {
+      "id": "place_jiading_dorm-4",
+      "campusId": "jiading",
+      "name": "4号楼",
+      "kind": "宿舍",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 4号楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_4"
+      ],
+      "navigation": {
+        "longitude": 121.2504969,
+        "latitude": 31.3777587
+      },
+      "point": {
+        "x": 290.33911,
+        "y": 160.97855
+      }
+    },
+    {
+      "id": "place_jiading_dorm-3",
+      "campusId": "jiading",
+      "name": "3号楼",
+      "kind": "宿舍",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 3号楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_3"
+      ],
+      "navigation": {
+        "longitude": 121.250746,
+        "latitude": 31.377482
+      },
+      "point": {
+        "x": 291.97832,
+        "y": 177.94489
+      }
+    },
+    {
+      "id": "place_jiading_dorm-2",
+      "campusId": "jiading",
+      "name": "2号楼",
+      "kind": "宿舍",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 2号楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_2"
+      ],
+      "navigation": {
+        "longitude": 121.2509946,
+        "latitude": 31.3772289
+      },
+      "point": {
+        "x": 294.2284,
+        "y": 193.90244
+      }
+    },
+    {
+      "id": "place_jiading_dorm-1",
+      "campusId": "jiading",
+      "name": "1号楼",
+      "kind": "宿舍",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 1号楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_1"
+      ],
+      "navigation": {
+        "longitude": 121.2511912,
+        "latitude": 31.3769334
+      },
+      "point": {
+        "x": 293.46692,
+        "y": 210.55486
+      }
+    },
+    {
+      "id": "place_jiading_1st-teaching-building",
+      "campusId": "jiading",
+      "name": "第一教学楼",
+      "kind": "建筑",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 第一教学楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "_1st_teaching_building"
+      ],
+      "navigation": {
+        "longitude": 121.2496884,
+        "latitude": 31.3757152
+      },
+      "point": {
+        "x": 206.62356,
+        "y": 230.334
+      }
+    },
+    {
+      "id": "place_jiading_2nd-teaching-building",
+      "campusId": "jiading",
+      "name": "第二教学楼",
+      "kind": "建筑",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 第二教学楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "_2nd_teaching_building"
+      ],
+      "navigation": {
+        "longitude": 121.249333,
+        "latitude": 31.3761106
+      },
+      "point": {
+        "x": 204.30141,
+        "y": 206.10119
+      }
+    },
+    {
+      "id": "place_jiading_microelectronic-a-building",
+      "campusId": "jiading",
+      "name": "微电子A楼",
+      "kind": "建筑",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 微电子A楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "microelectronic_A_building"
+      ],
+      "navigation": {
+        "longitude": 121.2500555,
+        "latitude": 31.3763595
+      },
+      "point": {
+        "x": 237.07779,
+        "y": 210.8368
+      }
+    },
+    {
+      "id": "place_jiading_chemistry-building",
+      "campusId": "jiading",
+      "name": "化学楼",
+      "kind": "建筑",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 化学楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "chemistry_building_"
+      ],
+      "navigation": {
+        "longitude": 121.2497142,
+        "latitude": 31.3751937
+      },
+      "point": {
+        "x": 193.65877,
+        "y": 252.93743
+      }
+    },
+    {
+      "id": "place_jiading_dorm-9",
+      "campusId": "jiading",
+      "name": "9号楼",
+      "kind": "宿舍",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 9号楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_9"
+      ],
+      "navigation": {
+        "longitude": 121.2485552,
+        "latitude": 31.374767
+      },
+      "point": {
+        "x": 140.34954,
+        "y": 246.50087
+      }
+    },
+    {
+      "id": "place_jiading_wende-building",
+      "campusId": "jiading",
+      "name": "文德楼",
+      "kind": "建筑",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 文德楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "wende_building"
+      ],
+      "navigation": {
+        "longitude": 121.2482089,
+        "latitude": 31.3770061
+      },
+      "point": {
+        "x": 187.49254,
+        "y": 144.47558
+      }
+    },
+    {
+      "id": "place_jiading_wenhui-building",
+      "campusId": "jiading",
+      "name": "文荟楼",
+      "kind": "建筑",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 文荟楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "wenhui_building"
+      ],
+      "navigation": {
+        "longitude": 121.2484461,
+        "latitude": 31.3776524
+      },
+      "point": {
+        "x": 213.29976,
+        "y": 122.14951
+      }
+    },
+    {
+      "id": "place_jiading_wenshang-building",
+      "campusId": "jiading",
+      "name": "文商楼",
+      "kind": "建筑",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 文商楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "wenshang_building"
+      ],
+      "navigation": {
+        "longitude": 121.248198,
+        "latitude": 31.3779742
+      },
+      "point": {
+        "x": 212.89867,
+        "y": 103.29666
+      }
+    },
+    {
+      "id": "place_jiading_wenda-building",
+      "campusId": "jiading",
+      "name": "文达楼",
+      "kind": "建筑",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 文达楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "wenda_building"
+      ],
+      "navigation": {
+        "longitude": 121.2479661,
+        "latitude": 31.3783057
+      },
+      "point": {
+        "x": 213.34228,
+        "y": 84.37576
+      }
+    },
+    {
+      "id": "place_jiading_gym",
+      "campusId": "jiading",
+      "name": "体育馆",
+      "kind": "其他",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 体育馆",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "GYM"
+      ],
+      "navigation": {
+        "longitude": 121.2486448,
+        "latitude": 31.3784422
+      },
+      "point": {
+        "x": 241.53826,
+        "y": 92.94034
+      }
+    },
+    {
+      "id": "place_jiading_jd-library",
+      "campusId": "jiading",
+      "name": "联合图书馆",
+      "kind": "图书馆",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 图书馆",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "jd_library"
+      ],
+      "navigation": {
+        "longitude": 121.2476167,
+        "latitude": 31.3765949
+      },
+      "point": {
+        "x": 155.10554,
+        "y": 149.35765
+      }
+    },
+    {
+      "id": "place_jiading_2nd-canteen",
+      "campusId": "jiading",
+      "name": "二食堂",
+      "kind": "食堂",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 二食堂",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "_2nd_canteen"
+      ],
+      "navigation": {
+        "longitude": 121.2498826,
+        "latitude": 31.3747875
+      },
+      "point": {
+        "x": 188.92667,
+        "y": 273.67648
+      }
+    },
+    {
+      "id": "place_jiading_dorm-f",
+      "campusId": "jiading",
+      "name": "F 楼",
+      "kind": "宿舍",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 F楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_F"
+      ],
+      "navigation": {
+        "longitude": 121.2471588,
+        "latitude": 31.3759444
+      },
+      "point": {
+        "x": 121.20056,
+        "y": 167.19885
+      }
+    },
+    {
+      "id": "place_jiading_dorm-e",
+      "campusId": "jiading",
+      "name": "E 楼",
+      "kind": "宿舍",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 E楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_E"
+      ],
+      "navigation": {
+        "longitude": 121.2468948,
+        "latitude": 31.376179
+      },
+      "point": {
+        "x": 117.90021,
+        "y": 151.69847
+      }
+    },
+    {
+      "id": "place_jiading_dorm-d",
+      "campusId": "jiading",
+      "name": "D 楼",
+      "kind": "宿舍",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 D楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_D"
+      ],
+      "navigation": {
+        "longitude": 121.2466617,
+        "latitude": 31.3764242
+      },
+      "point": {
+        "x": 116.00044,
+        "y": 136.40253
+      }
+    },
+    {
+      "id": "place_jiading_dorm-c",
+      "campusId": "jiading",
+      "name": "C 楼",
+      "kind": "宿舍",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 C楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_C"
+      ],
+      "navigation": {
+        "longitude": 121.246404,
+        "latitude": 31.3766502
+      },
+      "point": {
+        "x": 112.69885,
+        "y": 121.39901
+      }
+    },
+    {
+      "id": "place_jiading_dorm-b",
+      "campusId": "jiading",
+      "name": "B 楼",
+      "kind": "宿舍",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 B楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_B"
+      ],
+      "navigation": {
+        "longitude": 121.2462,
+        "latitude": 31.3769029
+      },
+      "point": {
+        "x": 112.05192,
+        "y": 106.4006
+      }
+    },
+    {
+      "id": "place_jiading_dorm-a",
+      "campusId": "jiading",
+      "name": "A 楼",
+      "kind": "宿舍",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 A楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_A"
+      ],
+      "navigation": {
+        "longitude": 121.2459404,
+        "latitude": 31.3771539
+      },
+      "point": {
+        "x": 109.34785,
+        "y": 90.2995
+      }
+    },
+    {
+      "id": "place_jiading_dorm-8",
+      "campusId": "jiading",
+      "name": "8号楼",
+      "kind": "宿舍",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 8号楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_8"
+      ],
+      "navigation": {
+        "longitude": 121.2459796,
+        "latitude": 31.3775137
+      },
+      "point": {
+        "x": 120.35519,
+        "y": 75.90883
+      }
+    },
+    {
+      "id": "place_jiading_admin-building",
+      "campusId": "jiading",
+      "name": "行政楼",
+      "kind": "建筑",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 行政楼",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "admin_building"
+      ],
+      "navigation": {
+        "longitude": 121.2471099,
+        "latitude": 31.3779628
+      },
+      "point": {
+        "x": 173.22292,
+        "y": 80.7916
+      }
+    },
+    {
+      "id": "place_jiading_xingjian-center",
+      "campusId": "jiading",
+      "name": "行健文体中心",
+      "kind": "其他",
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 行健文体中心",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "xingjian_center"
+      ],
+      "navigation": {
+        "longitude": 121.2484371,
+        "latitude": 31.3778654
+      },
+      "point": {
+        "x": 218.6507,
+        "y": 112.94992
+      }
+    },
+    {
+      "id": "place_baoshan_hj-building",
+      "campusId": "baoshan",
+      "name": "上海大学博物馆",
+      "kind": "建筑",
+      "address": "",
+      "description": "上海大学博物馆",
+      "aliases": [
+        "博物馆"
+      ],
+      "facts": [
+        {
+          "label": "开放时间",
+          "value": "周一到周日 8:30-16:30"
+        }
+      ],
+      "featureIds": [
+        "HJ_building"
+      ],
+      "navigation": {
+        "longitude": 121.3941174,
+        "latitude": 31.3175576
+      },
+      "point": {
+        "x": 495.87694,
+        "y": 357.47153
+      }
+    },
+    {
+      "id": "place_baoshan_5th-canteen",
+      "campusId": "baoshan",
+      "name": "南区食堂",
+      "kind": "食堂",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "_5th_canteen"
+      ],
+      "navigation": {
+        "longitude": 121.3894338,
+        "latitude": 31.3107086
+      },
+      "point": {
+        "x": 228.26239,
+        "y": 822.05501
+      }
+    },
+    {
+      "id": "place_baoshan_admin-building",
+      "campusId": "baoshan",
+      "name": "行政楼",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "admin_building"
+      ],
+      "navigation": {
+        "longitude": 121.3966444,
+        "latitude": 31.3134845
+      },
+      "point": {
+        "x": 644.1544,
+        "y": 635.34465
+      }
+    },
+    {
+      "id": "place_baoshan_basketball",
+      "campusId": "baoshan",
+      "name": "篮球场（I区）",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [
+        "篮球场",
+        "（I区）",
+        "I区"
+      ],
+      "facts": [],
+      "featureIds": [
+        "basketball"
+      ],
+      "navigation": {
+        "longitude": 121.3892198,
+        "latitude": 31.3136529
+      },
+      "point": {
+        "x": 214.40447,
+        "y": 621.67163
+      }
+    },
+    {
+      "id": "place_baoshan_basketball-h",
+      "campusId": "baoshan",
+      "name": "篮球场（H区）",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [
+        "篮球场",
+        "（H区）",
+        "H区"
+      ],
+      "facts": [],
+      "featureIds": [
+        "basketball_h"
+      ],
+      "navigation": {
+        "longitude": 121.3881642,
+        "latitude": 31.3154756
+      },
+      "point": {
+        "x": 152.40406,
+        "y": 497.34669
+      }
+    },
+    {
+      "id": "place_baoshan_basketball-volleyball",
+      "campusId": "baoshan",
+      "name": "篮排球场（F区）",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [
+        "篮排球场",
+        "（F区）",
+        "F区"
+      ],
+      "facts": [],
+      "featureIds": [
+        "basketball_volleyball"
+      ],
+      "navigation": {
+        "longitude": 121.3877588,
+        "latitude": 31.3176267
+      },
+      "point": {
+        "x": 127.86671,
+        "y": 350.87264
+      }
+    },
+    {
+      "id": "place_baoshan_building-7",
+      "campusId": "baoshan",
+      "name": "7号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_7"
+      ],
+      "navigation": {
+        "longitude": 121.3896176,
+        "latitude": 31.3193062
+      },
+      "point": {
+        "x": 234.59589,
+        "y": 237.16025
+      }
+    },
+    {
+      "id": "place_baoshan_building-8",
+      "campusId": "baoshan",
+      "name": "8号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_8"
+      ],
+      "navigation": {
+        "longitude": 121.3900883,
+        "latitude": 31.3195561
+      },
+      "point": {
+        "x": 261.71048,
+        "y": 220.29843
+      }
+    },
+    {
+      "id": "place_baoshan_building-h",
+      "campusId": "baoshan",
+      "name": "GA楼",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_H"
+      ],
+      "navigation": {
+        "longitude": 121.3933339,
+        "latitude": 31.3174324
+      },
+      "point": {
+        "x": 450.59803,
+        "y": 365.75587
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-14",
+      "campusId": "baoshan",
+      "name": "南区14号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_14"
+      ],
+      "navigation": {
+        "longitude": 121.3884307,
+        "latitude": 31.3108005
+      },
+      "point": {
+        "x": 170.16645,
+        "y": 815.50312
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-s1",
+      "campusId": "baoshan",
+      "name": "南区1号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_s1"
+      ],
+      "navigation": {
+        "longitude": 121.3895104,
+        "latitude": 31.3082692
+      },
+      "point": {
+        "x": 233.91619,
+        "y": 988.04583
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-s10",
+      "campusId": "baoshan",
+      "name": "南区10号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_s10"
+      ],
+      "navigation": {
+        "longitude": 121.3885474,
+        "latitude": 31.3097661
+      },
+      "point": {
+        "x": 177.43766,
+        "y": 885.91478
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-s11",
+      "campusId": "baoshan",
+      "name": "南区11号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_s11"
+      ],
+      "navigation": {
+        "longitude": 121.3893301,
+        "latitude": 31.3102701
+      },
+      "point": {
+        "x": 222.48068,
+        "y": 851.85802
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-s12",
+      "campusId": "baoshan",
+      "name": "南区12号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_s12"
+      ],
+      "navigation": {
+        "longitude": 121.3883766,
+        "latitude": 31.3103722
+      },
+      "point": {
+        "x": 167.25002,
+        "y": 844.62696
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-s2",
+      "campusId": "baoshan",
+      "name": "南区2号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_s2"
+      ],
+      "navigation": {
+        "longitude": 121.3886704,
+        "latitude": 31.3083132
+      },
+      "point": {
+        "x": 185.28291,
+        "y": 984.80155
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-s3",
+      "campusId": "baoshan",
+      "name": "南区3号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_s3"
+      ],
+      "navigation": {
+        "longitude": 121.3894871,
+        "latitude": 31.3086276
+      },
+      "point": {
+        "x": 232.38843,
+        "y": 963.65463
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-s4",
+      "campusId": "baoshan",
+      "name": "南区4号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_s4"
+      ],
+      "navigation": {
+        "longitude": 121.3886472,
+        "latitude": 31.3086676
+      },
+      "point": {
+        "x": 183.76294,
+        "y": 960.68253
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-s5",
+      "campusId": "baoshan",
+      "name": "南区5号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_s5"
+      ],
+      "navigation": {
+        "longitude": 121.3894605,
+        "latitude": 31.309022
+      },
+      "point": {
+        "x": 230.65168,
+        "y": 936.81315
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-s6",
+      "campusId": "baoshan",
+      "name": "南区6号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_s6"
+      ],
+      "navigation": {
+        "longitude": 121.3886199,
+        "latitude": 31.3090048
+      },
+      "point": {
+        "x": 182.01431,
+        "y": 937.73251
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-s7",
+      "campusId": "baoshan",
+      "name": "南区7号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_s7"
+      ],
+      "navigation": {
+        "longitude": 121.3894484,
+        "latitude": 31.3094148
+      },
+      "point": {
+        "x": 229.75485,
+        "y": 910.08484
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-s8",
+      "campusId": "baoshan",
+      "name": "南区8号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_s8"
+      ],
+      "navigation": {
+        "longitude": 121.3885938,
+        "latitude": 31.3093771
+      },
+      "point": {
+        "x": 180.31755,
+        "y": 912.39478
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-s9",
+      "campusId": "baoshan",
+      "name": "南区9号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_s9"
+      ],
+      "navigation": {
+        "longitude": 121.3894052,
+        "latitude": 31.3098234
+      },
+      "point": {
+        "x": 227.05033,
+        "y": 882.27229
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj1",
+      "campusId": "baoshan",
+      "name": "新世纪1幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj1"
+      ],
+      "navigation": {
+        "longitude": 121.386884,
+        "latitude": 31.3147917
+      },
+      "point": {
+        "x": 78.66048,
+        "y": 543.49473
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj10",
+      "campusId": "baoshan",
+      "name": "新世纪10幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj10"
+      ],
+      "navigation": {
+        "longitude": 121.3871025,
+        "latitude": 31.313315
+      },
+      "point": {
+        "x": 92.04428,
+        "y": 644.02926
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj11",
+      "campusId": "baoshan",
+      "name": "新世纪11幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [
+        "新世纪",
+        "11幢"
+      ],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj11"
+      ],
+      "navigation": {
+        "longitude": 121.3860934,
+        "latitude": 31.3130111
+      },
+      "point": {
+        "x": 33.79922,
+        "y": 664.40438
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj12",
+      "campusId": "baoshan",
+      "name": "新世纪12幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj12"
+      ],
+      "navigation": {
+        "longitude": 121.3871194,
+        "latitude": 31.3128359
+      },
+      "point": {
+        "x": 93.26208,
+        "y": 676.63054
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj14",
+      "campusId": "baoshan",
+      "name": "新世纪14幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj14"
+      ],
+      "navigation": {
+        "longitude": 121.3871071,
+        "latitude": 31.3124825
+      },
+      "point": {
+        "x": 92.72715,
+        "y": 700.67092
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj15",
+      "campusId": "baoshan",
+      "name": "新世纪15幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj15"
+      ],
+      "navigation": {
+        "longitude": 121.3864357,
+        "latitude": 31.312424
+      },
+      "point": {
+        "x": 53.90215,
+        "y": 704.45069
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj16",
+      "campusId": "baoshan",
+      "name": "新世纪16幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj16"
+      ],
+      "navigation": {
+        "longitude": 121.3871475,
+        "latitude": 31.3122026
+      },
+      "point": {
+        "x": 95.20521,
+        "y": 719.72636
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj17",
+      "campusId": "baoshan",
+      "name": "新世纪17幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj17"
+      ],
+      "navigation": {
+        "longitude": 121.3865774,
+        "latitude": 31.3121638
+      },
+      "point": {
+        "x": 62.23264,
+        "y": 722.19604
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj18",
+      "campusId": "baoshan",
+      "name": "新世纪18幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj18"
+      ],
+      "navigation": {
+        "longitude": 121.3871809,
+        "latitude": 31.3119202
+      },
+      "point": {
+        "x": 97.27943,
+        "y": 738.94981
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj19",
+      "campusId": "baoshan",
+      "name": "新世纪19幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj19"
+      ],
+      "navigation": {
+        "longitude": 121.3868522,
+        "latitude": 31.3117257
+      },
+      "point": {
+        "x": 78.35473,
+        "y": 752.08479
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj2",
+      "campusId": "baoshan",
+      "name": "新世纪2幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj2"
+      ],
+      "navigation": {
+        "longitude": 121.3869809,
+        "latitude": 31.3145243
+      },
+      "point": {
+        "x": 84.40197,
+        "y": 561.71657
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj20",
+      "campusId": "baoshan",
+      "name": "新世纪20幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj20"
+      ],
+      "navigation": {
+        "longitude": 121.3869643,
+        "latitude": 31.3114547
+      },
+      "point": {
+        "x": 84.97765,
+        "y": 770.5561
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj3",
+      "campusId": "baoshan",
+      "name": "新世纪3幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj3"
+      ],
+      "navigation": {
+        "longitude": 121.3864097,
+        "latitude": 31.3144759
+      },
+      "point": {
+        "x": 51.37054,
+        "y": 564.83907
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj4",
+      "campusId": "baoshan",
+      "name": "新世纪4幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj4"
+      ],
+      "navigation": {
+        "longitude": 121.3869843,
+        "latitude": 31.3142318
+      },
+      "point": {
+        "x": 84.74512,
+        "y": 581.61823
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj5",
+      "campusId": "baoshan",
+      "name": "新世纪5幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj5"
+      ],
+      "navigation": {
+        "longitude": 121.3864233,
+        "latitude": 31.3141958
+      },
+      "point": {
+        "x": 52.29777,
+        "y": 583.90012
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj6",
+      "campusId": "baoshan",
+      "name": "新世纪6幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj6"
+      ],
+      "navigation": {
+        "longitude": 121.3870039,
+        "latitude": 31.3139375
+      },
+      "point": {
+        "x": 86.02668,
+        "y": 601.64719
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj7",
+      "campusId": "baoshan",
+      "name": "新世纪7幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj7"
+      ],
+      "navigation": {
+        "longitude": 121.3864026,
+        "latitude": 31.313897
+      },
+      "point": {
+        "x": 51.2494,
+        "y": 604.22322
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj8",
+      "campusId": "baoshan",
+      "name": "新世纪8幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj8"
+      ],
+      "navigation": {
+        "longitude": 121.3870054,
+        "latitude": 31.3136413
+      },
+      "point": {
+        "x": 86.26174,
+        "y": 621.80001
+      }
+    },
+    {
+      "id": "place_baoshan_dorm-xsj9",
+      "campusId": "baoshan",
+      "name": "新世纪9幢",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj9"
+      ],
+      "navigation": {
+        "longitude": 121.3863319,
+        "latitude": 31.3136035
+      },
+      "point": {
+        "x": 47.30485,
+        "y": 624.1708
+      }
+    },
+    {
+      "id": "place_baoshan_east-stadium",
+      "campusId": "baoshan",
+      "name": "东体育场（B区）",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [
+        "东体育场",
+        "（B区）",
+        "B区"
+      ],
+      "facts": [],
+      "featureIds": [
+        "east_stadium"
+      ],
+      "navigation": {
+        "longitude": 121.3962215,
+        "latitude": 31.3193293
+      },
+      "point": {
+        "x": 616.75562,
+        "y": 237.55939
+      }
+    },
+    {
+      "id": "place_baoshan_guard",
+      "campusId": "baoshan",
+      "name": "保卫处",
+      "kind": "服务地点",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "guard"
+      ],
+      "navigation": {
+        "longitude": 121.3896071,
+        "latitude": 31.3203622
+      },
+      "point": {
+        "x": 233.45972,
+        "y": 165.3107
+      }
+    },
+    {
+      "id": "place_baoshan_infra-building",
+      "campusId": "baoshan",
+      "name": "后勤基建大楼",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "infra_building"
+      ],
+      "navigation": {
+        "longitude": 121.3889886,
+        "latitude": 31.312379
+      },
+      "point": {
+        "x": 201.66238,
+        "y": 708.27418
+      }
+    },
+    {
+      "id": "place_baoshan_lehuxinlou",
+      "campusId": "baoshan",
+      "name": "乐乎新楼",
+      "kind": "其他",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "lehuxinlou"
+      ],
+      "navigation": {
+        "longitude": 121.3908903,
+        "latitude": 31.3205065
+      },
+      "point": {
+        "x": 307.64698,
+        "y": 155.87599
+      }
+    },
+    {
+      "id": "place_baoshan_music-college",
+      "campusId": "baoshan",
+      "name": "音乐学院",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "music_college"
+      ],
+      "navigation": {
+        "longitude": 121.3940576,
+        "latitude": 31.3185441
+      },
+      "point": {
+        "x": 491.92254,
+        "y": 290.3358
+      }
+    },
+    {
+      "id": "place_baoshan_outdoorgym",
+      "campusId": "baoshan",
+      "name": "风雨操场（C区）",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [
+        "风雨操场",
+        "C区"
+      ],
+      "facts": [],
+      "featureIds": [
+        "outdoorgym"
+      ],
+      "navigation": {
+        "longitude": 121.3920842,
+        "latitude": 31.3198919
+      },
+      "point": {
+        "x": 377.04623,
+        "y": 198.04744
+      }
+    },
+    {
+      "id": "place_baoshan_rixin-building",
+      "campusId": "baoshan",
+      "name": "日新楼",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "rixin_building"
+      ],
+      "navigation": {
+        "longitude": 121.4000415,
+        "latitude": 31.3154791
+      },
+      "point": {
+        "x": 839.74813,
+        "y": 500.65307
+      }
+    },
+    {
+      "id": "place_baoshan_robot-building",
+      "campusId": "baoshan",
+      "name": "上海机器人研究院",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "robot_building"
+      ],
+      "navigation": {
+        "longitude": 121.3994289,
+        "latitude": 31.31571
+      },
+      "point": {
+        "x": 804.18106,
+        "y": 484.76065
+      }
+    },
+    {
+      "id": "place_baoshan_shengwuyigong",
+      "campusId": "baoshan",
+      "name": "生物医工实验大楼",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "shengwuyigong"
+      ],
+      "navigation": {
+        "longitude": 121.3985525,
+        "latitude": 31.3193256
+      },
+      "point": {
+        "x": 751.65371,
+        "y": 238.50676
+      }
+    },
+    {
+      "id": "place_baoshan_soccer",
+      "campusId": "baoshan",
+      "name": "足球场（J区）",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [
+        "足球场",
+        "J区"
+      ],
+      "facts": [],
+      "featureIds": [
+        "soccer"
+      ],
+      "navigation": {
+        "longitude": 121.3882992,
+        "latitude": 31.3141144
+      },
+      "point": {
+        "x": 160.89786,
+        "y": 589.9981
+      }
+    },
+    {
+      "id": "place_baoshan_tennis",
+      "campusId": "baoshan",
+      "name": "网球场（E区）",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [
+        "网球场",
+        "（E区）",
+        "E区"
+      ],
+      "facts": [],
+      "featureIds": [
+        "tennis"
+      ],
+      "navigation": {
+        "longitude": 121.3881451,
+        "latitude": 31.3192646
+      },
+      "point": {
+        "x": 149.40233,
+        "y": 239.55113
+      }
+    },
+    {
+      "id": "place_baoshan_tennisgym",
+      "campusId": "baoshan",
+      "name": "网球馆",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [
+        "网球馆(D区）",
+        "D区"
+      ],
+      "facts": [],
+      "featureIds": [
+        "tennisgym"
+      ],
+      "navigation": {
+        "longitude": 121.3885561,
+        "latitude": 31.3192363
+      },
+      "point": {
+        "x": 173.20129,
+        "y": 241.59922
+      }
+    },
+    {
+      "id": "place_baoshan_training-center",
+      "campusId": "baoshan",
+      "name": "训练馆",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "training_center"
+      ],
+      "navigation": {
+        "longitude": 121.3946489,
+        "latitude": 31.3197231
+      },
+      "point": {
+        "x": 525.5513,
+        "y": 210.29736
+      }
+    },
+    {
+      "id": "place_baoshan_west-stadium",
+      "campusId": "baoshan",
+      "name": "西体育场（A区）",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [
+        "西体育场",
+        "（A区）",
+        "A区"
+      ],
+      "facts": [],
+      "featureIds": [
+        "west_stadium"
+      ],
+      "navigation": {
+        "longitude": 121.3936203,
+        "latitude": 31.3191404
+      },
+      "point": {
+        "x": 466.3173,
+        "y": 249.6352
+      }
+    },
+    {
+      "id": "place_baoshan_xinyuanxin-building",
+      "campusId": "baoshan",
+      "name": "莘远新楼",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "xinyuanxin_building"
+      ],
+      "navigation": {
+        "longitude": 121.3887337,
+        "latitude": 31.3181421
+      },
+      "point": {
+        "x": 184.02675,
+        "y": 316.09763
+      }
+    },
+    {
+      "id": "place_baoshan_yanjiuzhongxin",
+      "campusId": "baoshan",
+      "name": "技术研究中心",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "yanjiuzhongxin"
+      ],
+      "navigation": {
+        "longitude": 121.3984996,
+        "latitude": 31.3201653
+      },
+      "point": {
+        "x": 748.17209,
+        "y": 181.36082
+      }
+    },
+    {
+      "id": "place_baoshan_zhuanjiagongyu",
+      "campusId": "baoshan",
+      "name": "专家公寓",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "zhuanjiagongyu"
+      ],
+      "navigation": {
+        "longitude": 121.398448,
+        "latitude": 31.3209559
+      },
+      "point": {
+        "x": 744.79027,
+        "y": 127.55586
+      }
+    },
+    {
+      "id": "place_jiading_alumni-center",
+      "campusId": "jiading",
+      "name": "校友中心",
+      "kind": "服务地点",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "alumni_center"
+      ],
+      "navigation": {
+        "longitude": 121.2480354,
+        "latitude": 31.377452
+      },
+      "point": {
+        "x": 193.09814,
+        "y": 121.94955
+      }
+    },
+    {
+      "id": "place_jiading_basketball-court",
+      "campusId": "jiading",
+      "name": "篮球场",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "basketball_court"
+      ],
+      "navigation": {
+        "longitude": 121.2498279,
+        "latitude": 31.3766262
+      },
+      "point": {
+        "x": 235.95002,
+        "y": 194.74765
+      }
+    },
+    {
+      "id": "place_jiading_playground",
+      "campusId": "jiading",
+      "name": "操场",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "playground"
+      ],
+      "navigation": {
+        "longitude": 121.2495078,
+        "latitude": 31.3776105
+      },
+      "point": {
+        "x": 250.59977,
+        "y": 146.35133
+      }
+    },
+    {
+      "id": "place_jiading_tennis-court",
+      "campusId": "jiading",
+      "name": "网球场",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "tennis_court"
+      ],
+      "navigation": {
+        "longitude": 121.2479263,
+        "latitude": 31.3788834
+      },
+      "point": {
+        "x": 227.29826,
+        "y": 59.09942
+      }
+    },
+    {
+      "id": "place_jiading_wenbo-building",
+      "campusId": "jiading",
+      "name": "文博楼",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "wenbo_building"
+      ],
+      "navigation": {
+        "longitude": 121.2489932,
+        "latitude": 31.3769209
+      },
+      "point": {
+        "x": 213.6011,
+        "y": 164.64853
+      }
+    },
+    {
+      "id": "place_yanchang_building-b",
+      "campusId": "yanchang",
+      "name": "B号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_B"
+      ],
+      "navigation": {
+        "longitude": 121.4559286,
+        "latitude": 31.2725107
+      },
+      "point": {
+        "x": 186.05085,
+        "y": 1156.64802
+      }
+    },
+    {
+      "id": "place_yanchang_building-c1",
+      "campusId": "yanchang",
+      "name": "C1楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_C1"
+      ],
+      "navigation": {
+        "longitude": 121.4557003,
+        "latitude": 31.2728308
+      },
+      "point": {
+        "x": 169.40834,
+        "y": 1095.09498
+      }
+    },
+    {
+      "id": "place_yanchang_building-c2",
+      "campusId": "yanchang",
+      "name": "C2楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_C2"
+      ],
+      "navigation": {
+        "longitude": 121.4554961,
+        "latitude": 31.2727628
+      },
+      "point": {
+        "x": 138.20729,
+        "y": 1097.69871
+      }
+    },
+    {
+      "id": "place_yanchang_building-c3",
+      "campusId": "yanchang",
+      "name": "C3楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_C3"
+      ],
+      "navigation": {
+        "longitude": 121.4552857,
+        "latitude": 31.2726926
+      },
+      "point": {
+        "x": 106.05267,
+        "y": 1100.40352
+      }
+    },
+    {
+      "id": "place_yanchang_building-c4",
+      "campusId": "yanchang",
+      "name": "C4楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_C4"
+      ],
+      "navigation": {
+        "longitude": 121.4550617,
+        "latitude": 31.2726184
+      },
+      "point": {
+        "x": 71.84437,
+        "y": 1103.19567
+      }
+    },
+    {
+      "id": "place_yanchang_building-m2",
+      "campusId": "yanchang",
+      "name": "M2楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_M2"
+      ],
+      "navigation": {
+        "longitude": 121.4571746,
+        "latitude": 31.2748521
+      },
+      "point": {
+        "x": 465.14632,
+        "y": 827.25291
+      }
+    },
+    {
+      "id": "place_yanchang_building-m3",
+      "campusId": "yanchang",
+      "name": "M3楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_M3"
+      ],
+      "navigation": {
+        "longitude": 121.4570637,
+        "latitude": 31.2750995
+      },
+      "point": {
+        "x": 461.29414,
+        "y": 782.39604
+      }
+    },
+    {
+      "id": "place_yanchang_building-m4",
+      "campusId": "yanchang",
+      "name": "M4楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_M4"
+      ],
+      "navigation": {
+        "longitude": 121.4569771,
+        "latitude": 31.2754123
+      },
+      "point": {
+        "x": 463.79386,
+        "y": 727.90324
+      }
+    },
+    {
+      "id": "place_yanchang_building-m5",
+      "campusId": "yanchang",
+      "name": "M5楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_M5"
+      ],
+      "navigation": {
+        "longitude": 121.4568954,
+        "latitude": 31.274082
+      },
+      "point": {
+        "x": 391.30504,
+        "y": 941.00582
+      }
+    },
+    {
+      "id": "place_yanchang_building-m6",
+      "campusId": "yanchang",
+      "name": "M6楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_M6"
+      ],
+      "navigation": {
+        "longitude": 121.4566589,
+        "latitude": 31.2747411
+      },
+      "point": {
+        "x": 389.14575,
+        "y": 823.94528
+      }
+    },
+    {
+      "id": "place_yanchang_building-m7",
+      "campusId": "yanchang",
+      "name": "M7楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_M7"
+      ],
+      "navigation": {
+        "longitude": 121.4565571,
+        "latitude": 31.274992
+      },
+      "point": {
+        "x": 386.70564,
+        "y": 778.89595
+      }
+    },
+    {
+      "id": "place_yanchang_building-m8",
+      "campusId": "yanchang",
+      "name": "M8楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_M8"
+      ],
+      "navigation": {
+        "longitude": 121.4565036,
+        "latitude": 31.2752524
+      },
+      "point": {
+        "x": 391.34242,
+        "y": 734.30225
+      }
+    },
+    {
+      "id": "place_yanchang_building-w4",
+      "campusId": "yanchang",
+      "name": "W4楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_W4"
+      ],
+      "navigation": {
+        "longitude": 121.4555095,
+        "latitude": 31.2730332
+      },
+      "point": {
+        "x": 152.50077,
+        "y": 1054.25008
+      }
+    },
+    {
+      "id": "place_yanchang_building-w5",
+      "campusId": "yanchang",
+      "name": "W5楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "building_W5"
+      ],
+      "navigation": {
+        "longitude": 121.4552616,
+        "latitude": 31.2736168
+      },
+      "point": {
+        "x": 145.29776,
+        "y": 949.00371
+      }
+    },
+    {
+      "id": "place_yanchang_cailiao-college",
+      "campusId": "yanchang",
+      "name": "材料学院",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "cailiao_college"
+      ],
+      "navigation": {
+        "longitude": 121.4576335,
+        "latitude": 31.2763714
+      },
+      "point": {
+        "x": 598.18899,
+        "y": 599.02487
+      }
+    },
+    {
+      "id": "place_yanchang_cailiaosuo",
+      "campusId": "yanchang",
+      "name": "材料所",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "cailiaosuo"
+      ],
+      "navigation": {
+        "longitude": 121.4584662,
+        "latitude": 31.2765044
+      },
+      "point": {
+        "x": 718.77811,
+        "y": 611.88925
+      }
+    },
+    {
+      "id": "place_yanchang_chengjiao-building",
+      "campusId": "yanchang",
+      "name": "成教楼",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "chengjiao_building"
+      ],
+      "navigation": {
+        "longitude": 121.4580514,
+        "latitude": 31.2731375
+      },
+      "point": {
+        "x": 506.71852,
+        "y": 1142.61681
+      }
+    },
+    {
+      "id": "place_yanchang_chilun-building",
+      "campusId": "yanchang",
+      "name": "齿轮楼",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "chilun_building"
+      ],
+      "navigation": {
+        "longitude": 121.4588512,
+        "latitude": 31.2760976
+      },
+      "point": {
+        "x": 752.96853,
+        "y": 694.04543
+      }
+    },
+    {
+      "id": "place_yanchang_dorm-2",
+      "campusId": "yanchang",
+      "name": "2号楼",
+      "kind": "宿舍",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "dorm_2"
+      ],
+      "navigation": {
+        "longitude": 121.4552476,
+        "latitude": 31.2722884
+      },
+      "point": {
+        "x": 82.20261,
+        "y": 1164.60268
+      }
+    },
+    {
+      "id": "place_yanchang_huanhua-college",
+      "campusId": "yanchang",
+      "name": "环化学院",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "huanhua_college"
+      ],
+      "navigation": {
+        "longitude": 121.4575507,
+        "latitude": 31.2767887
+      },
+      "point": {
+        "x": 606.02312,
+        "y": 527.68357
+      }
+    },
+    {
+      "id": "place_yanchang_jianzhuyuan",
+      "campusId": "yanchang",
+      "name": "建筑院",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "jianzhuyuan"
+      ],
+      "navigation": {
+        "longitude": 121.4552756,
+        "latitude": 31.273283
+      },
+      "point": {
+        "x": 131.85127,
+        "y": 1003.90533
+      }
+    },
+    {
+      "id": "place_yanchang_kuangji-building",
+      "campusId": "yanchang",
+      "name": "矿机楼",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "kuangji_building"
+      ],
+      "navigation": {
+        "longitude": 121.4589102,
+        "latitude": 31.2757722
+      },
+      "point": {
+        "x": 746.09465,
+        "y": 749.44494
+      }
+    },
+    {
+      "id": "place_yanchang_lixuesuo",
+      "campusId": "yanchang",
+      "name": "力学所",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "lixuesuo"
+      ],
+      "navigation": {
+        "longitude": 121.4588334,
+        "latitude": 31.2764
+      },
+      "point": {
+        "x": 764.44674,
+        "y": 644.09626
+      }
+    },
+    {
+      "id": "place_yanchang_pingban-building",
+      "campusId": "yanchang",
+      "name": "平板楼",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "pingban_building"
+      ],
+      "navigation": {
+        "longitude": 121.4590297,
+        "latitude": 31.2755221
+      },
+      "point": {
+        "x": 751.00467,
+        "y": 795.09759
+      }
+    },
+    {
+      "id": "place_yanchang_playground",
+      "campusId": "yanchang",
+      "name": "操场",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "playground"
+      ],
+      "navigation": {
+        "longitude": 121.4570949,
+        "latitude": 31.2766991
+      },
+      "point": {
+        "x": 539.24196,
+        "y": 523.37573
+      }
+    },
+    {
+      "id": "place_yanchang_qiulinge",
+      "campusId": "yanchang",
+      "name": "秋林阁",
+      "kind": "食堂",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "qiulinge"
+      ],
+      "navigation": {
+        "longitude": 121.456101,
+        "latitude": 31.2735694
+      },
+      "point": {
+        "x": 258.50075,
+        "y": 991.50342
+      }
+    },
+    {
+      "id": "place_yanchang_rixin-building",
+      "campusId": "yanchang",
+      "name": "日新楼",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "rixin_building"
+      ],
+      "navigation": {
+        "longitude": 121.4574022,
+        "latitude": 31.2771419
+      },
+      "point": {
+        "x": 601.87429,
+        "y": 464.05098
+      }
+    },
+    {
+      "id": "place_yanchang_robot-institute",
+      "campusId": "yanchang",
+      "name": "机器人研究所",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "robot_institute"
+      ],
+      "navigation": {
+        "longitude": 121.4595589,
+        "latitude": 31.2749342
+      },
+      "point": {
+        "x": 796.67776,
+        "y": 912.70122
+      }
+    },
+    {
+      "id": "place_yanchang_shanghai-film-college-2",
+      "campusId": "yanchang",
+      "name": "上海电影学院",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [
+        "上海",
+        "电影",
+        "学院"
+      ],
+      "facts": [],
+      "featureIds": [
+        "shanghai_film_college_2"
+      ],
+      "navigation": {
+        "longitude": 121.4575269,
+        "latitude": 31.2751394
+      },
+      "point": {
+        "x": 526.80392,
+        "y": 795.09856
+      }
+    },
+    {
+      "id": "place_yanchang_yibiao-building",
+      "campusId": "yanchang",
+      "name": "仪表楼",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "yibiao_building"
+      ],
+      "navigation": {
+        "longitude": 121.4549357,
+        "latitude": 31.2740414
+      },
+      "point": {
+        "x": 120.05101,
+        "y": 866.40001
+      }
+    },
+    {
+      "id": "place_yanchang_zhoucheng-building",
+      "campusId": "yanchang",
+      "name": "轴承楼",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "zhoucheng_building"
+      ],
+      "navigation": {
+        "longitude": 121.4593272,
+        "latitude": 31.2765592
+      },
+      "point": {
+        "x": 839.65643,
+        "y": 638.65242
+      }
+    },
+    {
+      "id": "place_yanchang_zidonghua-building",
+      "campusId": "yanchang",
+      "name": "自动化楼",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [],
+      "facts": [],
+      "featureIds": [
+        "zidonghua_building"
+      ],
+      "navigation": {
+        "longitude": 121.4558155,
+        "latitude": 31.2742467
+      },
+      "point": {
+        "x": 250.44389,
+        "y": 869.45044
+      }
+    },
+    {
+      "id": "place_850d4b83c1fe41f4a9c8acc7f2b9429a",
+      "campusId": "baoshan",
+      "name": "新世纪13幢",
+      "kind": "建筑",
+      "address": "",
+      "description": "",
+      "aliases": [
+        "新世纪",
+        "13幢"
+      ],
+      "facts": [],
+      "featureIds": [
+        "dorm_xsj13"
+      ]
+    },
+    {
+      "id": "place_338a26b9c93c4b22a892a231fa7fea69",
+      "campusId": "baoshan",
+      "name": "高尔夫球场（L区）",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [
+        "高尔夫球场",
+        "L区"
+      ],
+      "facts": [],
+      "featureIds": [
+        "golf"
+      ],
+      "point": {
+        "x": 170.6,
+        "y": 677.5
+      }
+    },
+    {
+      "id": "place_e476d1a5a86d4df1a2eea4e5d9a63f22",
+      "campusId": "baoshan",
+      "name": "篮球场（B区）",
+      "kind": "运动场馆",
+      "address": "",
+      "description": "",
+      "aliases": [
+        "篮球场",
+        "（B区）",
+        "B区"
+      ],
+      "facts": [],
+      "featureIds": [
+        "basketball_x5F_b"
+      ]
+    }
+  ]
+}
