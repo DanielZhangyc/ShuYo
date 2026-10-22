@@ -837,6 +837,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         shuyoRoute(
           builder: (_) => LibraryBookingPage(
             accountService: _unifiedAccountService,
+            initialCampus: _preferredCampus,
             // The page owns one There client per venue for concurrent loads.
             chaoxingClient: _chaoxingBookingClient ??= ChaoxingBookingClient(),
             useWebVpn: useWebVpn,

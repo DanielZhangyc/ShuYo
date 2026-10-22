@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/cupertino.dart' show CupertinoPicker;
 import 'package:flutter/material.dart';
 
+import '../../data/models/classroom.dart';
 import '../../data/services/academic_account_store.dart';
 import '../../data/services/chaoxing_booking_adapter.dart';
 import '../../data/services/chaoxing_booking_client.dart';
@@ -124,6 +125,12 @@ enum _BookingCampus {
   final String label;
   final List<BookingVenue> venues;
 
+  static _BookingCampus fromPreferredCampus(String campus) => switch (campus) {
+        '延长' => yanchang,
+        '嘉定' => jiading,
+        _ => baoshan,
+      };
+
   static String venueLabel(BookingVenue venue) {
     final campus =
         values.where((item) => item.venues.contains(venue)).firstOrNull;
@@ -141,6 +148,7 @@ class LibraryBookingPage extends StatefulWidget {
     this.useWebVpn = false,
     this.onWebVpnSessionRequired,
     this.onChaoxingLoginRequired,
+    this.initialCampus = ClassroomCampus.defaultName,
     this.schoolClock,
   });
 
@@ -150,6 +158,7 @@ class LibraryBookingPage extends StatefulWidget {
   final bool useWebVpn;
   final Future<bool> Function()? onWebVpnSessionRequired;
   final Future<bool> Function()? onChaoxingLoginRequired;
+  final String initialCampus;
 
   /// Shanghai wall-clock time, overridable for deterministic time selection.
   final DateTime Function()? schoolClock;
@@ -160,6 +169,7 @@ class LibraryBookingPage extends StatefulWidget {
 
 class _LibraryBookingPageState extends State<LibraryBookingPage> {
   static const double _timeDigitFontSize = 22;
+  static const _snapshotLifetime = Duration(seconds: 60);
 
   final Map<BookingVenue, ThereBookingClient> _thereClients = {};
   final Map<BookingVenue, ChaoxingBookingAdapter> _chaoxingAdapters = {};
@@ -258,7 +268,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   }
 
   _BookingStep _step = _BookingStep.venue;
-  _BookingCampus _campus = _BookingCampus.baoshan;
+  late _BookingCampus _campus;
   bool _slideForward = true;
   BookingVenue _venue = BookingVenue.library;
   bool _viewOnly = false;
@@ -266,8 +276,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   final Set<BookingVenue> _viewVenueSelection = {};
   final Set<BookingVenue> _expandedVenues = {};
   final Map<BookingVenue, List<Map<String, dynamic>>> _homeAreasByVenue = {};
+  final Map<BookingVenue, Future<void>> _homeAreaLoads = {};
+  final Map<BookingVenue, DateTime> _homeAreasUpdatedAt = {};
   final Set<BookingVenue> _loadingHomeAreas = {};
-  final Set<BookingVenue> _refreshingHomeSeatCounts = {};
   final Map<BookingVenue, String> _homeAreaErrors = {};
   final Map<BookingVenue, int> _homeAreaGenerations = {};
   late String _day;
@@ -282,7 +293,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   Map<String, dynamic>? _profile;
   Map<String, dynamic>? _areaData;
   List<Map<String, dynamic>> _rooms = [];
-  List<Map<String, dynamic>> _recent = [];
+  final List<Map<String, dynamic>> _recent = [];
   final LibraryBookingCache _bookingCache = LibraryBookingCache();
   List<Map<String, dynamic>> _homeRecent = [];
   List<Map<String, dynamic>> _cachedHistory = [];
@@ -329,21 +340,32 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
   bool _loading = false;
   bool _loadingSeats = false;
   bool _busy = false;
-  bool _bookingWriteRefreshing = false;
   int _generation = 0;
   Future<void> _authenticationQueue = Future<void>.value();
   String _bookingFilter = '全部';
   int _bookingAnimationEpoch = 0;
-  bool _bookingsIncomplete = false;
-  bool _bookingsLoading = false;
-  bool _showBookingLoadFailures = true;
-  Future<void> _bookingsLoadFinished = Future<void>.value();
+  final Map<BookingVenue, Future<bool>> _bookingLoads = {};
+  final Map<BookingVenue, DateTime> _bookingsUpdatedAt = {};
+  final Set<BookingVenue> _bookingLoadFailures = {};
+
+  bool get _bookingsIncomplete => _bookingLoadFailures.isNotEmpty;
+  bool get _bookingsLoading => _bookingLoads.isNotEmpty;
+
+  bool _isFresh(DateTime? updatedAt) {
+    if (updatedAt == null) return false;
+    final now = _schoolNow;
+    final age = now.difference(updatedAt);
+    return DateUtils.isSameDay(updatedAt, now) &&
+        age >= Duration.zero &&
+        age < _snapshotLifetime;
+  }
 
   @override
   void initState() {
     super.initState();
+    _campus = _BookingCampus.fromPreferredCampus(widget.initialCampus);
     _day = _clockDay;
-    _refreshHomeData(refreshVenues: true);
+    unawaited(_refreshHomeData());
   }
 
   @override
@@ -368,92 +390,24 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       _slideForward = forward;
       _step = step;
       _loading = false;
-      _bookingsLoading = false;
       _loadingSeats = false;
       _loadingAllAreas = false;
       _error = null;
     });
-    if (enteringHome) _refreshHomeData();
+    if (enteringHome) unawaited(_refreshHomeData());
   }
 
-  void _refreshHomeData({bool refreshVenues = false}) {
+  Future<void> _refreshHomeData({bool force = false}) async {
     if (!_homeCacheLoaded) unawaited(_loadHomeCache());
-    unawaited(_loadBookings(showFailures: false));
-    if (refreshVenues) {
-      for (final venue in BookingVenue.values) {
-        unawaited(_loadHomeVenueAreas(venue));
-      }
-    } else {
-      unawaited(_refreshHomeSeatCounts());
-    }
+    await Future.wait([
+      _loadBookings(showFailures: force, force: force),
+      _loadHomeCampusAreas(force: force),
+    ]);
   }
 
-  Future<void> _refreshHomeSeatCounts() async {
-    Future<void> refreshVenue(BookingVenue venue) async {
-      if (_homeAreasByVenue[venue] == null ||
-          _loadingHomeAreas.contains(venue) ||
-          !_refreshingHomeSeatCounts.add(venue)) {
-        return;
-      }
-      final generation = _homeAreaGenerations[venue] ?? 0;
-      try {
-        final client = _clientForVenue(venue);
-        final request = () async {
-          final profile = await _read(() async {
-            await _ensureVenueSelected(venue, client);
-            return client.profile();
-          }, venue: venue, client: client, interactiveAuth: false);
-          await _checkAccount(profile, client: client);
-          return _read(() => client.areas(_clockDay),
-              venue: venue, client: client, interactiveAuth: false);
-        }();
-        final latest = _areasForVenue(
-            await request.timeout(const Duration(seconds: 15)), venue);
-        if (!mounted ||
-            _homeAreaGenerations[venue] != generation ||
-            _loadingHomeAreas.contains(venue)) {
-          return;
-        }
-        final latestById = <String, Map<String, dynamic>>{};
-        for (final area in latest) {
-          final id = ThereBookingClient.string(area['id']);
-          if (id != null) latestById[id] = area;
-        }
-        final current = _homeAreasByVenue[venue];
-        if (current == null) return;
-        var changed = false;
-        final refreshed = <Map<String, dynamic>>[];
-        for (final area in current) {
-          final id = ThereBookingClient.string(area['id']);
-          final update = id == null ? null : latestById[id];
-          if (update == null) {
-            refreshed.add(area);
-            continue;
-          }
-          final merged = Map<String, dynamic>.of(area);
-          for (final key in const [
-            'totalResourceCount',
-            'disabledResourceCount',
-            'freeResourceCount',
-          ]) {
-            if (update.containsKey(key) && merged[key] != update[key]) {
-              merged[key] = update[key];
-              changed = true;
-            }
-          }
-          refreshed.add(merged);
-        }
-        if (changed) {
-          setState(() => _homeAreasByVenue[venue] = refreshed);
-        }
-      } on Object {
-        // A quiet seat-count refresh must not interrupt the home screen.
-      } finally {
-        _refreshingHomeSeatCounts.remove(venue);
-      }
-    }
-
-    await Future.wait(BookingVenue.values.map(refreshVenue));
+  Future<void> _loadHomeCampusAreas({bool force = false}) async {
+    await Future.wait(_campus.venues
+        .map((venue) => _loadHomeVenueAreas(venue, force: force)));
   }
 
   Future<void> _loadHomeCache() async {
@@ -654,12 +608,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                       icon: const Icon(Icons.arrow_back),
                     ),
               title: Text(_pageTitle),
-              bottom: PreferredSize(
-                preferredSize: const Size.fromHeight(3),
-                child: _showBookingProgress
-                    ? const LinearProgressIndicator(minHeight: 3)
-                    : const SizedBox(height: 3),
-              ),
             ),
             body: _loading
                 ? _loadingBody()
@@ -694,16 +642,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         _BookingStep.time => '创建预约',
         _BookingStep.seat => _viewOnly ? '查看座位情况' : '选择座位',
         _BookingStep.bookings => '我的预约',
-      };
-
-  bool get _showBookingProgress => switch (_step) {
-        _BookingStep.venue => _bookingsLoading ||
-            !_homeCacheLoaded ||
-            _busy ||
-            _bookingWriteRefreshing,
-        _BookingStep.bookings =>
-          _bookingsLoading || _busy || _bookingWriteRefreshing,
-        _ => false,
       };
 
   Widget _loadingBody() => Center(
@@ -743,7 +681,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     );
   }
 
-  Widget _pageList(List<Widget> children) => ListView(
+  Widget _pageList(List<Widget> children, {bool refreshable = false}) =>
+      ListView(
+        physics: refreshable ? const AlwaysScrollableScrollPhysics() : null,
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: children,
       );
@@ -805,72 +745,83 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         ),
       );
 
+  void _selectCampus(int index) {
+    final campus = _BookingCampus.values[index];
+    if (campus == _campus) return;
+    setState(() => _campus = campus);
+    if (_step == _BookingStep.venue) unawaited(_loadHomeCampusAreas());
+  }
+
   Widget _campusBar() => _selectionTabBar(
         labels: [for (final campus in _BookingCampus.values) campus.label],
         selectedIndex: _campus.index,
-        onTap: (index) =>
-            setState(() => _campus = _BookingCampus.values[index]),
+        onTap: _selectCampus,
       );
 
-  Widget _venuePage() => _pageList([
-        _homeRecentSection(),
-        const SizedBox(height: 18),
-        Row(children: [
-          Expanded(
-              child:
-                  Text('选择场馆', style: Theme.of(context).textTheme.titleLarge)),
-          _infoLink('使用规则', () => _openInfo('使用规则', libraryRulesAsset)),
-        ]),
-        const SizedBox(height: 16),
-        _campusBar(),
-        const SizedBox(height: 16),
-        for (final (index, venue) in _campus.venues.indexed) ...[
-          if (index > 0) Divider(height: 1, color: context.shuyoColors.border),
-          ListTile(
-            key: ValueKey('home-venue-${venue.name}'),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-            title: Row(children: [
-              Flexible(
-                child: Text(LibraryBookingNames.venue(venue),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium),
-              ),
-              if (!_loadingHomeAreas.contains(venue))
-                if (_homeAreasByVenue[venue]
-                    case final List<Map<String, dynamic>> areas) ...[
-                  const SizedBox(width: 8),
-                  Text('${_selectableAreas(areas).length}分区',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: context.shuyoColors.textTertiary)),
-                ],
-            ]),
-            trailing: _loadingHomeAreas.contains(venue)
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Icon(_expandedVenues.contains(venue)
-                    ? Icons.keyboard_arrow_up
-                    : Icons.keyboard_arrow_down),
-            onTap: () => _toggleHomeVenue(venue),
-            // The old area step remains available in the page state, but the
-            // venue row now expands its areas directly on this screen.
-            // onTap: () { setState(() => _venue = venue); unawaited(_loadVenue()); },
-          ),
-          AnimatedSize(
-            duration: const Duration(milliseconds: 220),
-            alignment: Alignment.topCenter,
-            curve: Curves.easeOutCubic,
-            child: _expandedVenues.contains(venue)
-                ? _homeVenueAreas(venue)
-                : const SizedBox(width: double.infinity),
-          ),
-        ],
-      ]);
+  Widget _venuePage() => RefreshIndicator(
+        key: const ValueKey('booking-home-refresh'),
+        onRefresh: () async {
+          if (!_busy) await _refreshHomeData(force: true);
+        },
+        child: _pageList([
+          _homeRecentSection(),
+          const SizedBox(height: 18),
+          Row(children: [
+            Expanded(
+                child: Text('选择场馆',
+                    style: Theme.of(context).textTheme.titleLarge)),
+            _infoLink('使用规则', () => _openInfo('使用规则', libraryRulesAsset)),
+          ]),
+          const SizedBox(height: 16),
+          _campusBar(),
+          const SizedBox(height: 16),
+          for (final (index, venue) in _campus.venues.indexed) ...[
+            if (index > 0)
+              Divider(height: 1, color: context.shuyoColors.border),
+            ListTile(
+              key: ValueKey('home-venue-${venue.name}'),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+              title: Row(children: [
+                Flexible(
+                  child: Text(LibraryBookingNames.venue(venue),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium),
+                ),
+                if (!_loadingHomeAreas.contains(venue))
+                  if (_homeAreasByVenue[venue]
+                      case final List<Map<String, dynamic>> areas) ...[
+                    const SizedBox(width: 8),
+                    Text('${_selectableAreas(areas).length}分区',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: context.shuyoColors.textTertiary)),
+                  ],
+              ]),
+              trailing: _loadingHomeAreas.contains(venue)
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(_expandedVenues.contains(venue)
+                      ? Icons.keyboard_arrow_up
+                      : Icons.keyboard_arrow_down),
+              onTap: () => _toggleHomeVenue(venue),
+              // The old area step remains available in the page state, but the
+              // venue row now expands its areas directly on this screen.
+              // onTap: () { setState(() => _venue = venue); unawaited(_loadVenue()); },
+            ),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 220),
+              alignment: Alignment.topCenter,
+              curve: Curves.easeOutCubic,
+              child: _expandedVenues.contains(venue)
+                  ? _homeVenueAreas(venue)
+                  : const SizedBox(width: double.infinity),
+            ),
+          ],
+        ], refreshable: true),
+      );
 
   Widget _homeVenueAreas(BookingVenue venue) {
     final areas = _homeAreasByVenue[venue];
@@ -915,27 +866,48 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         padding: const EdgeInsets.fromLTRB(0, 8, 16, 8),
         child: Text('我的预约', style: Theme.of(context).textTheme.titleLarge),
       ),
-      if (!_bookingsLoading && _homeCacheLoaded && records.isEmpty)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Text(_bookingsIncomplete ? '预约列表暂时无法完整加载' : '暂无待履约或进行中的预约',
-              style: TextStyle(color: colors.textTertiary)),
+      SizedBox(
+        key: const ValueKey('home-bookings-viewport'),
+        width: double.infinity,
+        height: _homeBookingsHeight(),
+        child: SingleChildScrollView(
+          key: const ValueKey('home-bookings-scroll'),
+          primary: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (records.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Text(
+                      _bookingsLoading || !_homeCacheLoaded
+                          ? '加载中'
+                          : _bookingsIncomplete
+                              ? '预约列表暂时无法完整加载'
+                              : '暂无待履约或进行中的预约',
+                      style: TextStyle(color: colors.textTertiary)),
+                ),
+              if (!_bookingsLoading &&
+                  records.isNotEmpty &&
+                  _bookingsIncomplete)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text('部分预约状态暂时无法更新',
+                      style: TextStyle(color: colors.textTertiary)),
+                ),
+              for (final (index, item) in records.indexed) ...[
+                if (index > 0)
+                  CustomBackgroundScope.maybeOf(context) != null
+                      ? const SizedBox.shrink()
+                      : Divider(height: 1, color: colors.border),
+                _bookingTile(item, index,
+                    key: ValueKey<String>(
+                        'home:${ThereBookingClient.string(item['id'])}')),
+              ],
+            ],
+          ),
         ),
-      if (!_bookingsLoading && records.isNotEmpty && _bookingsIncomplete)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Text('部分预约状态暂时无法更新',
-              style: TextStyle(color: colors.textTertiary)),
-        ),
-      for (final (index, item) in records.indexed) ...[
-        if (index > 0)
-          CustomBackgroundScope.maybeOf(context) != null
-              ? const SizedBox.shrink()
-              : Divider(height: 1, color: colors.border),
-        _bookingTile(item, index,
-            key: ValueKey<String>(
-                'home:${ThereBookingClient.string(item['id'])}')),
-      ],
+      ),
       Align(
         alignment: Alignment.centerRight,
         child: TextButton(
@@ -952,6 +924,31 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         ),
       ),
     ]);
+  }
+
+  double _homeBookingsHeight() {
+    final theme = Theme.of(context).textTheme;
+    double lineHeight(TextStyle? style) {
+      final painter = TextPainter(
+        text: TextSpan(
+            text: '预约', style: DefaultTextStyle.of(context).style.merge(style)),
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+        locale: Localizations.maybeLocaleOf(context),
+      )..layout();
+      final height = painter.height;
+      painter.dispose();
+      return height;
+    }
+
+    // Reserve one typical row, including its padding and gaps.
+    // Wrapping titles and additional bookings scroll within the same space.
+    final rowHeight = 32 +
+        7 +
+        8 +
+        lineHeight(theme.titleMedium) +
+        2 * lineHeight(theme.bodySmall);
+    return rowHeight;
   }
 
   Widget _bookingTile(Map<String, dynamic> item, int index,
@@ -1007,12 +1004,32 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
           .toList();
 
   Future<void> _loadHomeVenueAreas(BookingVenue venue,
-      {bool interactiveAuth = false}) async {
-    if (!mounted) return;
+      {bool interactiveAuth = false, bool force = false}) {
+    final pending = _homeAreaLoads[venue];
+    if (pending != null) return pending;
+    if (!mounted || !force && _isFresh(_homeAreasUpdatedAt[venue])) {
+      return Future<void>.value();
+    }
+    if (force && venue.isChaoxing && !_sharedChaoxingRoomLoadPending) {
+      _sharedChaoxingRoomLoad = null;
+      _sharedChaoxingRoomLoadAt = null;
+    }
+    late final Future<void> load;
+    load = _fetchHomeVenueAreas(venue, interactiveAuth: interactiveAuth)
+        .whenComplete(() {
+      if (identical(_homeAreaLoads[venue], load)) _homeAreaLoads.remove(venue);
+    });
+    _homeAreaLoads[venue] = load;
+    return load;
+  }
+
+  Future<void> _fetchHomeVenueAreas(BookingVenue venue,
+      {required bool interactiveAuth}) async {
     final generation = (_homeAreaGenerations[venue] ?? 0) + 1;
     _homeAreaGenerations[venue] = generation;
+    _homeAreasUpdatedAt.remove(venue);
     setState(() {
-      _loadingHomeAreas.add(venue);
+      if (!_homeAreasByVenue.containsKey(venue)) _loadingHomeAreas.add(venue);
       _homeAreaErrors.remove(venue);
     });
     final client = _clientForVenue(venue);
@@ -1043,6 +1060,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       }
       setState(() {
         _homeAreasByVenue[venue] = supported;
+        _homeAreasUpdatedAt[venue] = _schoolNow;
         _loadingHomeAreas.remove(venue);
       });
     } on Object {
@@ -1063,9 +1081,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         _expandedVenues.remove(venue);
       }
     });
-    if (expand &&
-        !_loadingHomeAreas.contains(venue) &&
-        !_homeAreasByVenue.containsKey(venue)) {
+    if (expand) {
       unawaited(_loadHomeVenueAreas(venue, interactiveAuth: true));
     }
   }
@@ -2449,33 +2465,42 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         ),
       ),
       Expanded(
-        child: visible.isEmpty
-            ? _bookingsLoading
-                ? const SizedBox.shrink()
-                : ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                    children: [
+        child: RefreshIndicator(
+          key: const ValueKey('booking-history-refresh'),
+          onRefresh: () async {
+            if (!_busy) await _loadBookings(force: true);
+          },
+          child: visible.isEmpty
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                  children: [
+                    if (!_bookingsLoading)
                       Text(history.isEmpty
                           ? (_bookingsIncomplete ? '暂无可显示的预约记录' : '暂无预约记录')
                           : '没有符合条件的预约'),
-                    ],
-                  )
-            : ListView.separated(
-                padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
-                itemCount: visible.length,
-                findItemIndexCallback: (key) =>
-                    key is ValueKey<String> ? visibleIndices[key.value] : null,
-                itemBuilder: (context, index) {
-                  final item = visible[index];
-                  final id = ThereBookingClient.string(item['id']);
-                  return _bookingTile(item, index,
-                      key: ValueKey<String>('$_bookingAnimationEpoch:$id'));
-                },
-                separatorBuilder: (context, index) =>
-                    CustomBackgroundScope.maybeOf(context) != null
-                        ? const SizedBox.shrink()
-                        : Divider(height: 1, color: context.shuyoColors.border),
-              ),
+                  ],
+                )
+              : ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
+                  itemCount: visible.length,
+                  findItemIndexCallback: (key) => key is ValueKey<String>
+                      ? visibleIndices[key.value]
+                      : null,
+                  itemBuilder: (context, index) {
+                    final item = visible[index];
+                    final id = ThereBookingClient.string(item['id']);
+                    return _bookingTile(item, index,
+                        key: ValueKey<String>('$_bookingAnimationEpoch:$id'));
+                  },
+                  separatorBuilder: (context, index) =>
+                      CustomBackgroundScope.maybeOf(context) != null
+                          ? const SizedBox.shrink()
+                          : Divider(
+                              height: 1, color: context.shuyoColors.border),
+                ),
+        ),
       ),
     ]);
   }
@@ -2495,13 +2520,12 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       case _BookingStep.seat:
         unawaited(_refreshSeats());
       case _BookingStep.bookings:
-        unawaited(_loadBookings());
+        unawaited(_loadBookings(force: true));
     }
   }
 
   void _openBookings() {
     if (_busy) return;
-    _showBookingLoadFailures = true;
     setState(() {
       _slideForward = true;
       _step = _BookingStep.bookings;
@@ -2524,7 +2548,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       _slideForward = true;
       _step = _BookingStep.area;
       _loading = true;
-      _bookingsLoading = false;
       _loadingLabel = '正在连接至${LibraryBookingNames.venue(_venue)}';
       _error = null;
       _selectedArea = null;
@@ -2576,7 +2599,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       _step = _BookingStep.allAreas;
       _viewOnly = true;
       _loading = true;
-      _bookingsLoading = false;
       _loadingAllAreas = true;
       _loadingLabel = '正在连接至座位预约系统';
       _allAreasError = null;
@@ -2801,160 +2823,134 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     }
   }
 
-  Future<void> _loadBookings({bool showFailures = true}) async {
-    final generation = ++_generation;
-    _showBookingLoadFailures = showFailures;
-    final loadFinished = Completer<void>();
-    _bookingsLoadFinished = loadFinished.future;
-    setState(() {
-      _bookingsLoading = true;
-      _recent = [];
-      _prefetchedDetails.clear();
-      _error = null;
-      _bookingsIncomplete = false;
-    });
-    var hadFailure = false;
-    var successfulVenues = 0;
+  Future<void> _loadBookings({
+    bool showFailures = true,
+    bool force = false,
+  }) async {
+    if (!mounted) return;
+    final requested = BookingVenue.values
+        .where((venue) =>
+            force ||
+            _bookingLoads.containsKey(venue) ||
+            !_isFresh(_bookingsUpdatedAt[venue]))
+        .toList();
+    final startedNew =
+        requested.any((venue) => !_bookingLoads.containsKey(venue));
+    final results = await Future.wait(requested.map(
+        (venue) => _loadVenueBookings(venue, interactiveAuth: showFailures)));
+    if (!mounted || !showFailures || !startedNew || !results.contains(false)) {
+      return;
+    }
+    final successful = BookingVenue.values
+        .where((venue) => _isFresh(_bookingsUpdatedAt[venue]))
+        .length;
+    _showMessage(successful == 0 && _bookingHistory().isEmpty
+        ? '预约加载失败，请下拉重试'
+        : successful == 0
+            ? '未能更新预约状态，已显示本地保存的预约记录'
+            : '部分预约加载失败，请下拉重试');
+  }
 
-    Future<bool?> loadVenue(BookingVenue venue,
-        {required bool verifyAccount, required bool prefetchDetails}) async {
-      if (!mounted || generation != _generation) return false;
-      final client = _clientForVenue(venue);
-      var accountVerified = !verifyAccount;
-      try {
-        late final List<Map<String, dynamic>> recent;
-        if (prefetchDetails) {
-          await _read(() async {
-            await _ensureVenueSelected(venue, client);
-            if (verifyAccount) {
-              await _checkAccount(await client.profile(), client: client);
-              accountVerified = true;
-            }
-            return true;
-          }, venue: venue, client: client, interactiveAuth: showFailures);
-          recent = await _read(client.recent,
-              venue: venue, client: client, interactiveAuth: showFailures);
-        } else {
-          await _read(() async {
-            await _ensureVenueSelected(venue, client);
-            return true;
-          }, venue: venue, client: client, interactiveAuth: showFailures);
-          final recentFuture = _read(client.recent,
-              venue: venue, client: client, interactiveAuth: showFailures);
-          if (verifyAccount) {
-            final profileFuture = _read(() async {
-              await _checkAccount(await client.profile(), client: client);
-            }, venue: venue, client: client, interactiveAuth: showFailures);
-            await Future.wait<Object?>([
-              profileFuture.then<Object?>((_) => null),
-              recentFuture.then<Object?>((records) => records),
-            ]);
-            accountVerified = true;
+  Future<bool> _loadVenueBookings(BookingVenue venue,
+      {required bool interactiveAuth}) {
+    final pending = _bookingLoads[venue];
+    if (pending != null) return pending;
+    late final Future<bool> load;
+    load = _fetchVenueBookings(venue,
+            interactiveAuth: interactiveAuth,
+            prefetchDetails: _step == _BookingStep.bookings)
+        .whenComplete(() {
+      if (!identical(_bookingLoads[venue], load)) return;
+      _bookingLoads.remove(venue);
+      if (mounted) setState(() {});
+    });
+    _bookingLoads[venue] = load;
+    if (mounted) setState(() {});
+    return load;
+  }
+
+  Future<bool> _fetchVenueBookings(BookingVenue venue,
+      {required bool interactiveAuth, required bool prefetchDetails}) async {
+    final client = _clientForVenue(venue);
+    _bookingsUpdatedAt.remove(venue);
+    try {
+      await _read(() async {
+        await _ensureVenueSelected(venue, client);
+        await _checkAccount(await client.profile(), client: client);
+      }, venue: venue, client: client, interactiveAuth: interactiveAuth);
+      final recent = await _read(client.recent,
+          venue: venue, client: client, interactiveAuth: interactiveAuth);
+      if (!mounted) return false;
+      final confirmed = <Map<String, dynamic>>[];
+      var writeStatusPending = false;
+      for (final item in recent) {
+        final id = ThereBookingClient.string(item['id']);
+        if (id == null || item['roomType'] != venue.roomType) continue;
+        final expectsFinish = _awaitingWriteStatus[id];
+        if (expectsFinish != null) {
+          if (!_writeStatusConfirmed(item, expectsFinish)) {
+            writeStatusPending = true;
+            continue;
           }
-          recent = await recentFuture;
+          _awaitingWriteStatus.remove(id);
         }
-        if (!mounted || generation != _generation) return accountVerified;
-        successfulVenues++;
-        _cacheRecentForVenue(venue, recent);
-        for (final item in recent) {
-          final id = ThereBookingClient.string(item['id']);
-          if (id == null || item['roomType'] != venue.roomType) continue;
-          final expectsFinish = _awaitingWriteStatus[id];
-          if (expectsFinish != null) {
-            if (!_writeStatusConfirmed(item, expectsFinish)) continue;
-            _awaitingWriteStatus.remove(id);
+        confirmed.add(item);
+      }
+      final oldIds = _recent
+          .where((item) => item['roomType'] == venue.roomType)
+          .map((item) => ThereBookingClient.string(item['id']))
+          .toSet();
+      setState(() {
+        _prefetchedDetails.removeWhere((id, _) => oldIds.contains(id));
+        _recent.removeWhere((item) => item['roomType'] == venue.roomType);
+        _recent.addAll(confirmed);
+        _recent.sort((a, b) => (ThereBookingClient.string(b['beginTime']) ?? '')
+            .compareTo(ThereBookingClient.string(a['beginTime']) ?? ''));
+        _bookingLoadFailures.remove(venue);
+      });
+      _cacheRecentForVenue(venue, confirmed);
+      if (prefetchDetails) {
+        for (final item in confirmed) {
+          final id = ThereBookingClient.string(item['id'])!;
+          final category = LibraryBookingRecord.category(item, _schoolNow);
+          if (venue.isChaoxing ||
+              category == '已取消' ||
+              LibraryBookingRecord.finishedEarly(item) ||
+              category == '已结束' && item['endTime'] != null) {
+            continue;
           }
-          Map<String, dynamic>? prefetchedDetail;
-          final recentAllowsCancellation =
-              ThereBookingClient.strings(item['abilities']).contains('cancel');
-          final needsDetail = prefetchDetails &&
-              (venue.isChaoxing ||
-                  (LibraryBookingRecord.category(item, _schoolNow) != '已取消' &&
-                      !LibraryBookingRecord.finishedEarly(item) &&
-                      (LibraryBookingRecord.category(item, _schoolNow) !=
-                              '已结束' ||
-                          ThereBookingClient.string(item['endTime']) == null)));
-          if (needsDetail) {
-            try {
-              final detail = venue.isChaoxing
-                  ? item
-                  : await _read(() => client.detail(id),
-                      venue: venue,
-                      client: client,
-                      interactiveAuth: showFailures);
-              if (!mounted || generation != _generation) return accountVerified;
-              prefetchedDetail = detail;
-            } on Object {
-              // Recent carries the same cancel ability as the detail API.
-              // Keep the action available when only detail loading fails.
-              if (recentAllowsCancellation) prefetchedDetail = item;
+          Map<String, dynamic>? detail;
+          try {
+            detail = await _read(() => client.detail(id),
+                venue: venue, client: client, interactiveAuth: interactiveAuth);
+          } on Object {
+            if (ThereBookingClient.strings(item['abilities'])
+                .contains('cancel')) {
+              detail = item;
             }
           }
-          if (!mounted || generation != _generation) return accountVerified;
-          setState(() {
-            final resolvedItem = {
-              ...item,
-              if (prefetchedDetail?['abilities'] != null)
-                'abilities': prefetchedDetail!['abilities'],
-            };
-            if (prefetchedDetail == null) {
-              _prefetchedDetails.remove(id);
-            } else {
-              _prefetchedDetails[id] = prefetchedDetail;
-            }
-            _recent.removeWhere(
-                (existing) => ThereBookingClient.string(existing['id']) == id);
-            final begin = ThereBookingClient.string(item['beginTime']) ?? '';
-            final index = _recent.indexWhere((existing) =>
-                (ThereBookingClient.string(existing['beginTime']) ?? '')
-                    .compareTo(begin) <
-                0);
-            _recent.insert(index < 0 ? _recent.length : index, resolvedItem);
-          });
-        }
-      } on Object catch (error) {
-        if (!mounted || generation != _generation) return accountVerified;
-        hadFailure = true;
-        if (error is ThereBookingException &&
-            (error.kind == ThereFailureKind.loginRequired ||
-                error.kind == ThereFailureKind.webVpnLoginRequired ||
-                error.kind == ThereFailureKind.unreachable)) {
-          return null;
+          if (!mounted) return false;
+          if (detail != null) {
+            final resolved = detail;
+            setState(() {
+              _prefetchedDetails[id] = resolved;
+              final index = _recent.indexWhere((record) => record['id'] == id);
+              if (index >= 0 && resolved['abilities'] != null) {
+                _recent[index] = {
+                  ..._recent[index],
+                  'abilities': resolved['abilities']
+                };
+              }
+            });
+          }
         }
       }
-      return accountVerified;
-    }
-
-    Future<void> loadSystem(bool isChaoxing) async {
-      final venues = BookingVenue.values
-          .where((venue) => venue.isChaoxing == isChaoxing)
-          .toList();
-      final historyMode = _step == _BookingStep.bookings;
-      await Future.wait<void>(venues.map((venue) async {
-        await loadVenue(
-          venue,
-          verifyAccount: true,
-          prefetchDetails: historyMode,
-        );
-      }));
-    }
-
-    try {
-      await Future.wait<void>([loadSystem(false), loadSystem(true)]);
-    } finally {
-      loadFinished.complete();
-    }
-    if (!mounted || generation != _generation) return;
-    setState(() {
-      _bookingsLoading = false;
-      _bookingsIncomplete = hadFailure;
-    });
-    if (hadFailure && _showBookingLoadFailures) {
-      _showMessage(successfulVenues == 0 && _bookingHistory().isEmpty
-          ? '预约加载失败，请稍后刷新'
-          : successfulVenues == 0
-              ? '未能更新预约状态，已显示本地保存的预约记录'
-              : '部分预约加载失败，请稍后刷新');
+      if (!mounted) return false;
+      if (!writeStatusPending) _bookingsUpdatedAt[venue] = _schoolNow;
+      return true;
+    } on Object {
+      if (mounted) setState(() => _bookingLoadFailures.add(venue));
+      return false;
     }
   }
 
@@ -3141,6 +3137,10 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     });
     String? createdId;
     try {
+      await _bookingLoads[venue];
+      if (!mounted) return;
+      _bookingsUpdatedAt.remove(venue);
+      _homeAreasUpdatedAt.remove(venue);
       await _selectBookingVenue(venue, refresh: true);
       createdId = await client.create(
         areaId: areaId,
@@ -3217,6 +3217,10 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         });
       }
     }
+    if (createdBooking != null && mounted) {
+      _bookingsUpdatedAt[venue] = _schoolNow;
+      unawaited(_loadHomeVenueAreas(venue, force: true));
+    }
     if (createdBooking != null && mounted) await _openDetail(createdBooking);
   }
 
@@ -3228,10 +3232,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
               .where((item) => item.roomType == booking['roomType'])
               .firstOrNull ??
           _venue;
-      final prefix = 'cx:${venue.roomType}:';
-      final displayId = venue.isChaoxing
-          ? 'cx:${id.startsWith(prefix) ? id.substring(prefix.length) : id}'
-          : 'there:$id';
       final prefetched = _prefetchedDetails[id];
       final category = LibraryBookingRecord.category(booking, _schoolNow);
       // Refresh details for current cancel and finish abilities.
@@ -3350,8 +3350,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                           createdAt.length >= 16
                               ? createdAt.substring(0, 16)
                               : createdAt),
-                    _bookingDetailField(sheetContext, '预约编号', displayId,
-                        selectable: true),
                     if (canCancel || canSign) ...[
                       const SizedBox(height: 6),
                       Row(children: [
@@ -3408,8 +3406,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     }
   }
 
-  Widget _bookingDetailField(BuildContext context, String label, String value,
-      {bool selectable = false}) {
+  Widget _bookingDetailField(BuildContext context, String label, String value) {
     if (value.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
@@ -3421,51 +3418,29 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
                     .textTheme
                     .bodySmall
                     ?.copyWith(color: context.shuyoColors.textSecondary))),
-        Expanded(child: selectable ? SelectableText(value) : Text(value)),
+        Expanded(child: Text(value)),
       ]),
     );
   }
 
   Future<void> _refreshAfterBookingWrite(BookingVenue venue) async {
-    if (_step == _BookingStep.venue) {
-      final client = _clientForVenue(venue);
-      final recent = await _read(client.recent, venue: venue, client: client);
-      if (!mounted) return;
-      final updated = <Map<String, dynamic>>[];
-      for (final item in recent) {
-        if (item['roomType'] != venue.roomType) continue;
-        final id = ThereBookingClient.string(item['id']);
-        if (id == null) continue;
-        final expectsFinish = _awaitingWriteStatus[id];
-        if (expectsFinish != null) {
-          if (!_writeStatusConfirmed(item, expectsFinish)) continue;
-          _awaitingWriteStatus.remove(id);
-        }
-        updated.add(item);
-      }
-      setState(() {
-        for (final item
-            in _recent.where((item) => item['roomType'] == venue.roomType)) {
-          final id = ThereBookingClient.string(item['id']);
-          if (id != null) _prefetchedDetails.remove(id);
-        }
-        _recent.removeWhere((item) => item['roomType'] == venue.roomType);
-        _recent.addAll(updated);
-        _recent.sort((a, b) => (ThereBookingClient.string(b['beginTime']) ?? '')
-            .compareTo(ThereBookingClient.string(a['beginTime']) ?? ''));
-      });
-      _cacheRecentForVenue(venue, updated);
-      return;
-    }
-    if (_step == _BookingStep.bookings) {
-      await _loadBookings();
-      return;
-    }
-    final client = _clientForVenue(venue);
-    final recent = await _read(client.recent, venue: venue, client: client);
+    // A write needs a read started after it, even if an earlier read is pending.
+    await _bookingLoads[venue];
     if (!mounted) return;
-    setState(() => _recent = recent);
-    await _refreshSeats();
+    _homeAreasUpdatedAt.remove(venue);
+    final success = await _loadVenueBookings(venue, interactiveAuth: true);
+    if (!success) {
+      throw const ThereBookingException(
+          ThereFailureKind.unreachable, '预约状态暂时无法更新');
+    }
+    if (!mounted) return;
+    if (_campus.venues.contains(venue) &&
+        _homeAreasByVenue.containsKey(venue)) {
+      await _homeAreaLoads[venue];
+      if (!mounted) return;
+      await _loadHomeVenueAreas(venue, force: true);
+    }
+    if (_step == _BookingStep.seat && _venue == venue) await _refreshSeats();
   }
 
   Future<void> _cancelBooking(String id, {required BookingVenue venue}) async {
@@ -3488,12 +3463,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         ) ??
         false;
     if (!confirmed || !mounted) return;
-    if (_bookingsLoading) await _bookingsLoadFinished;
+    await _bookingLoads[venue];
     if (!mounted) return;
-    setState(() {
-      _busy = true;
-      _bookingWriteRefreshing = true;
-    });
+    setState(() => _busy = true);
     var cancelled = false;
     var uncertain = false;
     final client = _clientForVenue(venue);
@@ -3517,10 +3489,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-    if ((!cancelled && !uncertain) || !mounted) {
-      if (mounted) setState(() => _bookingWriteRefreshing = false);
-      return;
-    }
+    if ((!cancelled && !uncertain) || !mounted) return;
     if (cancelled) {
       _showMessage('已取消预约');
       _awaitingWriteStatus[id] = false;
@@ -3533,7 +3502,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         _showMessage(cancelled ? '已取消预约，列表暂时无法刷新' : '取消结果暂未确认，请稍后刷新我的预约');
       }
     }
-    if (mounted) setState(() => _bookingWriteRefreshing = false);
   }
 
   Future<void> _finishBooking(String id, {required BookingVenue venue}) async {
@@ -3556,12 +3524,9 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         ) ??
         false;
     if (!confirmed || !mounted) return;
-    if (_bookingsLoading) await _bookingsLoadFinished;
+    await _bookingLoads[venue];
     if (!mounted) return;
-    setState(() {
-      _busy = true;
-      _bookingWriteRefreshing = true;
-    });
+    setState(() => _busy = true);
     var finished = false;
     final client = _clientForVenue(venue);
     try {
@@ -3583,10 +3548,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-    if (!finished || !mounted) {
-      if (mounted) setState(() => _bookingWriteRefreshing = false);
-      return;
-    }
+    if (!finished || !mounted) return;
     _showMessage('已提交退座，正在读取最终状态');
     _awaitingWriteStatus[id] = true;
     _removeBookingFromRecent(id);
@@ -3595,17 +3557,13 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     } on Object {
       if (mounted) _showMessage('操作已提交，列表暂时无法刷新');
     }
-    if (mounted) setState(() => _bookingWriteRefreshing = false);
   }
 
   Future<void> _signBooking(String id, {required BookingVenue venue}) async {
     if (!venue.isChaoxing) return;
-    if (_bookingsLoading) await _bookingsLoadFinished;
+    await _bookingLoads[venue];
     if (!mounted || _busy) return;
-    setState(() {
-      _busy = true;
-      _bookingWriteRefreshing = true;
-    });
+    setState(() => _busy = true);
     var signed = false;
     var uncertain = false;
     final client = _clientForVenue(venue) as ChaoxingBookingAdapter;
@@ -3629,10 +3587,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-    if ((!signed && !uncertain) || !mounted) {
-      if (mounted) setState(() => _bookingWriteRefreshing = false);
-      return;
-    }
+    if ((!signed && !uncertain) || !mounted) return;
     if (signed) _showMessage('签到已提交，正在读取最新状态');
     try {
       await _refreshAfterBookingWrite(venue);
@@ -3641,7 +3596,6 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
         _showMessage(signed ? '签到已提交，列表暂时无法刷新' : '签到结果暂未确认，请稍后刷新我的预约');
       }
     }
-    if (mounted) setState(() => _bookingWriteRefreshing = false);
   }
 
   Future<void> _recoverAfterWrite({bool webVpn = false}) async {
@@ -3652,7 +3606,7 @@ class _LibraryBookingPageState extends State<LibraryBookingPage> {
       if (!recovered || !mounted) return;
       if (webVpn) _client.resetSession();
       if (_step == _BookingStep.bookings) {
-        await _loadBookings();
+        await _loadBookings(force: true);
       } else {
         await _loadVenue();
       }

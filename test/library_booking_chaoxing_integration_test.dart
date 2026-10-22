@@ -199,6 +199,8 @@ void main() {
       expect(find.textContaining('使用中 —'), findsNothing);
       expect(find.textContaining('超星'), findsNothing);
 
+      await tester.ensureVisible(find.text(entry.value.areaName));
+      await tester.pumpAndSettle();
       await tester.tap(find.text(entry.value.areaName));
       await tester.pumpAndSettle();
       expect(find.text('创建预约'), findsOneWidget);
@@ -239,10 +241,12 @@ void main() {
       await tester.tap(find.text('确认座位'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
-          find.byKey(const ValueKey('selected-seat-label')), 180);
+          find.byKey(const ValueKey('selected-seat-label')), 180,
+          scrollable: find.byType(Scrollable).first);
       expect(find.text('001'), findsOneWidget);
       await tester.scrollUntilVisible(
-          find.widgetWithText(FilledButton, '创建预约'), 180);
+          find.widgetWithText(FilledButton, '创建预约'), 180,
+          scrollable: find.byType(Scrollable).first);
       await tester.tap(find.widgetWithText(FilledButton, '创建预约'));
       await tester.pumpAndSettle();
       expect(find.text('提交'), findsOneWidget);
@@ -260,7 +264,7 @@ void main() {
       expect(
           find.byKey(ValueKey<String>('home:cx:${entry.key.roomType}:12345')),
           findsOneWidget);
-      expect(find.text('预约编号'), findsOneWidget);
+      expect(find.text('预约编号'), findsNothing);
       expect(find.text('待履约'), findsWidgets);
       expect(find.textContaining('超星'), findsNothing);
     });
