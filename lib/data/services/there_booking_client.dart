@@ -14,15 +14,20 @@ enum BookingVenue {
   library('校本部图书馆', 'LIB_SEAT', '/mobile/libseat', true),
   studySpace('24H学习空间', 'STATION', '/mobile/seat2021', true),
   yanchang('延长智能中心', 'SEAT', '/mobile/seat-mgr', false),
-  scienceArt('科学与艺术中心', 'CS_SEAT', '/mobile/csseat', false);
+  scienceArt('科学与艺术中心', 'CS_SEAT', '/mobile/csseat', false),
+  qianweichang('钱伟长图书馆', 'CX_QWC', '', false, isChaoxing: true),
+  jiading('嘉定联合馆', 'CX_JD', '', false, isChaoxing: true),
+  wenhui('延长文荟馆', 'CX_WH', '', false, isChaoxing: true);
 
   const BookingVenue(
-      this.label, this.roomType, this.mobilePath, this.showChecks);
+      this.label, this.roomType, this.mobilePath, this.showChecks,
+      {this.isChaoxing = false});
 
   final String label;
   final String roomType;
   final String mobilePath;
   final bool showChecks;
+  final bool isChaoxing;
 }
 
 enum ThereFailureKind {
@@ -139,6 +144,12 @@ class ThereBookingClient {
 
   /// Re-reads each mobile entry because x-hys-session belongs to that entry.
   Future<void> selectVenue(BookingVenue venue) async {
+    if (venue.isChaoxing) {
+      throw const ThereBookingException(
+        ThereFailureKind.business,
+        '该场馆需要通过对应的预约服务访问',
+      );
+    }
     if (_venue == venue && hasBusinessSession) return;
     _venue = venue;
     _sessionId = null;
@@ -196,6 +207,11 @@ class ThereBookingClient {
       );
     }
     _sessionId = session;
+  }
+
+  Future<void> refreshVenue(BookingVenue venue) async {
+    _sessionId = null;
+    await selectVenue(venue);
   }
 
   Future<Map<String, dynamic>> profile() async {
@@ -351,7 +367,7 @@ class ThereBookingClient {
     if (!strings(current['abilities']).contains('close')) {
       throw const ThereBookingException(
         ThereFailureKind.business,
-        '当前预约不可提前结束',
+        '当前预约不可退座',
       );
     }
     await _api(
@@ -687,24 +703,10 @@ class ThereBookingClient {
       );
     } on TimeoutException {
       _logTransportFailure(path, 'timeout', timer.elapsedMilliseconds);
-      throw ThereBookingException(
-        createRequest
-            ? ThereFailureKind.uncertain
-            : ThereFailureKind.unreachable,
-        createRequest
-            ? '预约提交结果未确认，请先查看我的预约'
-            : '暂时无法访问预约系统。请连接校园网、学校VPN，或开启WebVPN后重试。',
-      );
+      throw _connectionFailure(createRequest);
     } on SocketException {
       _logTransportFailure(path, 'socket', timer.elapsedMilliseconds);
-      throw ThereBookingException(
-        createRequest
-            ? ThereFailureKind.uncertain
-            : ThereFailureKind.unreachable,
-        createRequest
-            ? '预约提交结果未确认，请先查看我的预约'
-            : '暂时无法访问预约系统。请连接校园网、学校VPN，或开启WebVPN后重试。',
-      );
+      throw _connectionFailure(createRequest);
     } on HandshakeException {
       _logTransportFailure(path, 'tls', timer.elapsedMilliseconds);
       throw const ThereBookingException(
@@ -713,6 +715,16 @@ class ThereBookingClient {
       );
     }
   }
+
+  ThereBookingException _connectionFailure(bool createRequest) => createRequest
+      ? const ThereBookingException(
+          ThereFailureKind.uncertain,
+          '预约提交结果未确认，请先查看我的预约',
+        )
+      : const ThereBookingException(
+          ThereFailureKind.unreachable,
+          '暂时无法访问预约系统。请连接校园网、学校VPN，或开启WebVPN后重试。',
+        );
 
   void _logTransportFailure(String path, String kind, int durationMs) {
     if (!kDebugMode) return;
@@ -818,10 +830,7 @@ class ThereBookingClient {
   }
 
   void _requirePage(_ThereResponse response) {
-    if (response.status == 401 ||
-        (response.status >= 300 &&
-            response.status < 400 &&
-            _isLoginRedirect(response.location))) {
+    if (_requiresLogin(response)) {
       throw const ThereBookingException(
         ThereFailureKind.loginRequired,
         '图书馆预约需要登录',
@@ -836,10 +845,7 @@ class ThereBookingClient {
   }
 
   void _requireBusinessResponse(_ThereResponse response) {
-    if (response.status == 401 ||
-        (response.status >= 300 &&
-            response.status < 400 &&
-            _isLoginRedirect(response.location))) {
+    if (_requiresLogin(response)) {
       throw const ThereBookingException(
         ThereFailureKind.loginRequired,
         '图书馆预约需要登录',
@@ -852,6 +858,12 @@ class ThereBookingClient {
       );
     }
   }
+
+  bool _requiresLogin(_ThereResponse response) =>
+      response.status == 401 ||
+      (response.status >= 300 &&
+          response.status < 400 &&
+          _isLoginRedirect(response.location));
 
   bool _isLoginRedirect(Uri? location) =>
       location != null &&
