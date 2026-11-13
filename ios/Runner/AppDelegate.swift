@@ -42,6 +42,18 @@ import UserNotifications
         DispatchQueue.main.async {
           self?.presentFeedback(result: result)
         }
+      case "send":
+        if #available(iOS 15.0, *) {
+          self?.sendFeedback(call: call, result: result)
+        } else {
+          result(
+            FlutterError(
+              code: "feedback_unavailable",
+              message: "AirFeedback requires iOS 15 or later.",
+              details: nil
+            )
+          )
+        }
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -96,6 +108,39 @@ import UserNotifications
     controller.modalPresentationStyle = .pageSheet
     presenter.present(controller, animated: true)
     result(nil)
+  }
+
+  @available(iOS 15.0, *)
+  private func sendFeedback(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard
+      let arguments = call.arguments as? [String: Any],
+      let message = arguments["message"] as? String,
+      !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
+      result(
+        FlutterError(
+          code: "invalid_feedback",
+          message: "Expected a non-empty feedback message.",
+          details: nil
+        )
+      )
+      return
+    }
+
+    Task { @MainActor in
+      do {
+        try await FeedbackClient.send(message: message, images: [])
+        result(nil)
+      } catch {
+        result(
+          FlutterError(
+            code: "feedback_send_failed",
+            message: error.localizedDescription,
+            details: nil
+          )
+        )
+      }
+    }
   }
 
   private func handleEarlyClassAlarm(call: FlutterMethodCall, result: @escaping FlutterResult) {

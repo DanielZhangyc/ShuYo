@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../data/models/client_backend.dart';
 import '../../data/repositories/client_backend_repository.dart';
+import '../../data/services/air_feedback_service.dart';
 import '../../data/services/student_identity_service.dart';
 import '../../shared/compact_number.dart';
 import '../../shared/shuyo_text_styles.dart';
@@ -15,9 +16,11 @@ class ClientFeedbackPage extends StatefulWidget {
   const ClientFeedbackPage({
     super.key,
     required this.repository,
+    this.airFeedbackBridge = defaultAirFeedbackBridge,
   });
 
   final ClientBackendRepository repository;
+  final AirFeedbackBridge airFeedbackBridge;
 
   @override
   State<ClientFeedbackPage> createState() => _ClientFeedbackPageState();
@@ -164,12 +167,21 @@ class _ClientFeedbackPageState extends State<ClientFeedbackPage> {
       return;
     }
 
+    final title = _titleController.text.trim();
+    final content = _contentController.text.trim();
+    final submission = ClientFeedbackSubmissionService(
+      bridge: widget.airFeedbackBridge,
+    );
     setState(() => _submitting = true);
     try {
-      await widget.repository.submitFeedback(
-        title: _titleController.text.trim(),
-        content: _contentController.text.trim(),
-        contact: _contactController.text.trim(),
+      await submission.submit(
+        title: title,
+        content: content,
+        submitLegacy: () => widget.repository.submitFeedback(
+          title: title,
+          content: content,
+          contact: _contactController.text.trim(),
+        ),
       );
       if (!mounted) {
         return;
