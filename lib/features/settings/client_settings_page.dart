@@ -83,10 +83,11 @@ class ClientSettingsPage extends StatelessWidget {
       appBar: AppBar(title: const Text('设置')),
       body: ListView(
         children: [
-          _SettingsRow(
-            title: '发送匿名问题报告',
-            onTap: () => _openAirFeedback(context),
-          ),
+          if (defaultTargetPlatform == TargetPlatform.iOS)
+            _SettingsRow(
+              title: '发送匿名问题报告',
+              onTap: () => _openAirFeedback(context),
+            ),
           _SettingsRow(
             title: '主题切换',
             onTap: () => Navigator.of(context).push<void>(
