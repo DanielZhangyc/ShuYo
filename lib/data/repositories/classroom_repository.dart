@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/classroom_url_resolver.dart';
 import '../models/classroom.dart';
 import '../models/common.dart';
 import '../services/classroom_api_client.dart';
@@ -54,11 +55,20 @@ class ClassroomRepository {
   ClassroomSearchOptions? _memoryOptions;
   final _scheduleCache = <String, _CachedClassroomSchedule>{};
 
+  /// The options already held in memory from an earlier [loadOptions].
+  ///
+  /// A page opened right after a previous visit can paint them on its first
+  /// frame instead of flashing the loading state while [loadOptions] resolves
+  /// from the same entry.
+  ClassroomSearchOptions? get optionsSnapshot => _memoryOptions;
+
   ClassroomApiClient get _client => _apiClient ??= ClassroomApiClient();
 
   Future<ClassroomSearchOptions> loadOptions({
     bool forceRefresh = false,
+    ClassroomAccessMode? accessMode,
   }) async {
+    final mode = accessMode ?? ClassroomUrlResolver.accessMode;
     if (!forceRefresh && _memoryOptions != null) {
       return _memoryOptions!;
     }
@@ -68,7 +78,7 @@ class ClassroomRepository {
       return cached;
     }
     try {
-      final options = await _client.fetchSearchOptions();
+      final options = await _client.fetchSearchOptions(accessMode: mode);
       await _saveOptions(options);
       return options;
     } on Object {
@@ -83,11 +93,13 @@ class ClassroomRepository {
   Future<ClassroomAvailabilityResult> search(
     ClassroomAvailabilityQuery query, {
     bool forceRefresh = false,
+    ClassroomAccessMode? accessMode,
   }) async {
     final schedule = await _loadBuildingSchedule(
       building: query.building,
       date: query.date,
       forceRefresh: forceRefresh,
+      accessMode: accessMode ?? ClassroomUrlResolver.accessMode,
     );
     final floors = schedule.floors.map((floor) {
       final available = floor.rooms
@@ -112,8 +124,10 @@ class ClassroomRepository {
     required ClassroomBuilding building,
     required DateTime date,
     bool forceRefresh = false,
+    required ClassroomAccessMode accessMode,
   }) async {
-    final key = '${building.id}:${date.year}-${date.month}-${date.day}';
+    final key = '${accessMode.name}:${building.id}:'
+        '${date.year}-${date.month}-${date.day}';
     final cached = _scheduleCache[key];
     if (!forceRefresh &&
         cached != null &&
@@ -123,6 +137,7 @@ class ClassroomRepository {
     final schedule = await _client.fetchBuildingSchedule(
       building: building,
       date: date,
+      accessMode: accessMode,
     );
     _scheduleCache[key] = _CachedClassroomSchedule(
       schedule: schedule,
@@ -153,13 +168,6 @@ class ClassroomRepository {
     if (ranges.isEmpty) {
       return const ClassroomSectionRange(start: 1, end: 2);
     }
-    final current = options.currentSection;
-    if (current > 0) {
-      return ranges.firstWhere(
-        (range) => range.contains(current),
-        orElse: () => ranges.first,
-      );
-    }
     final section = _sectionFromTime(options.sections, now ?? DateTime.now());
     if (section != null) {
       return ranges.firstWhere(
@@ -167,7 +175,31 @@ class ClassroomRepository {
         orElse: () => ranges.first,
       );
     }
-    return ranges.first;
+    return ranges.firstWhere(
+      (range) => range.start == 3 && range.end == 4,
+      orElse: () => ranges.first,
+    );
+  }
+
+  DateTime defaultDateFor(
+    ClassroomSearchOptions options, {
+    DateTime? now,
+  }) {
+    final current = now ?? DateTime.now();
+    final minutes = current.hour * 60 + current.minute;
+    final endMinutes = options.sections
+        .map((section) => _minutes(section.endTime))
+        .whereType<int>()
+        .fold<int?>(null, (latest, value) {
+      if (latest == null || value > latest) {
+        return value;
+      }
+      return latest;
+    });
+    if (endMinutes != null && minutes > endMinutes) {
+      return DateTime(current.year, current.month, current.day + 1);
+    }
+    return DateTime(current.year, current.month, current.day);
   }
 
   Future<ClassroomSearchOptions?> _loadCachedOptions() async {

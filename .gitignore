@@ -18,7 +18,13 @@ ios/.symlinks/
 *.iml
 *.log
 .idea/
+.vscode/
 
 /.DS_Store
 /.demo
 /.plan
+# Widget Preview related
+.widget_preview/
+
+/docs
+.DS_Store

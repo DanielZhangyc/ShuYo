@@ -1,9 +1,13 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
+
+import 'package:material_ui/material_ui.dart';
 
 import '../../core/classroom_url_resolver.dart';
 import '../../data/models/classroom.dart';
+import '../../data/models/client_backend.dart';
 import '../../data/repositories/classroom_repository.dart';
 import '../../data/services/classroom_api_client.dart';
+import '../../data/services/unified_account_service.dart';
 import '../../shared/shuyo_text_styles.dart';
 import '../../shared/theme/shuyo_theme.dart';
 import '../../shared/widgets/empty_state.dart';
@@ -13,12 +17,19 @@ class EmptyClassroomPage extends StatefulWidget {
     super.key,
     required this.repository,
     this.initialDate,
+    this.initialCampus = ClassroomCampus.defaultName,
     this.onWebVpnExpired,
+    this.onWebVpnRecoveryRequired,
+    this.webVpnServiceStatus,
   });
 
   final ClassroomRepository repository;
   final DateTime? initialDate;
+  final String initialCampus;
   final Future<void> Function()? onWebVpnExpired;
+  final Future<WebVpnRecoveryOutcome> Function(bool interactive)?
+      onWebVpnRecoveryRequired;
+  final WebVpnServiceStatus Function()? webVpnServiceStatus;
 
   @override
   State<EmptyClassroomPage> createState() => _EmptyClassroomPageState();
@@ -32,13 +43,40 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
   ClassroomSectionRange? _selectedRange;
   String? _selectedCampus;
   late DateTime _selectedDate = widget.initialDate ?? DateTime.now();
+  bool _loadingOptions = false;
   bool _refreshingOptions = false;
   String _keyword = '';
+  bool _initialSelectionApplied = false;
+  ClassroomAccessMode? _retryingMode;
+  Object? _retryingError;
 
   @override
   void initState() {
     super.initState();
-    _loadFuture = _loadOptions();
+    final snapshot = widget.repository.optionsSnapshot;
+    if (snapshot == null || snapshot.buildings.isEmpty) {
+      _loadFuture = _loadOptions();
+      return;
+    }
+    // Reopening the page can show the options kept in memory on the first
+    // frame instead of the loading state; loading them again would only
+    // return that same instance.
+    _applyOptionsSnapshot(snapshot);
+    _loadFuture = Future<void>.value();
+  }
+
+  /// Restores the options and their matching selections and starts the query
+  /// they describe right away.
+  void _applyOptionsSnapshot(ClassroomSearchOptions options) {
+    final now = DateTime.now();
+    _options = options;
+    _selectedCampus = _validCampus(options);
+    _selectedBuilding = _validBuilding(options);
+    _selectedDate = widget.initialDate ??
+        widget.repository.defaultDateFor(options, now: now);
+    _selectedRange = widget.repository.defaultRangeFor(options, now: now);
+    _initialSelectionApplied = true;
+    _search();
   }
 
   @override
@@ -49,7 +87,8 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
         actions: [
           IconButton(
             tooltip: '刷新',
-            onPressed: _refreshingOptions ? null : _refresh,
+            onPressed:
+                _loadingOptions || _retryingMode != null ? null : _refresh,
             icon: _refreshingOptions
                 ? const SizedBox(
                     width: 20,
@@ -61,7 +100,20 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
           const SizedBox(width: 2),
         ],
       ),
-      body: FutureBuilder<void>(
+      body: _loadedBody(),
+    );
+  }
+
+  /// Renders the query controls as soon as options exist, and waits on
+  /// [_loadFuture] only when none were remembered.
+  Widget _loadedBody() {
+    final options = _options;
+    if (options == null) {
+      final retryingError = _retryingError;
+      if (retryingError != null) {
+        return _failureState(retryingError, initialLoad: true);
+      }
+      return FutureBuilder<void>(
         future: _loadFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
@@ -69,51 +121,52 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
                 child: CircularProgressIndicator(strokeWidth: 3));
           }
           if (snapshot.hasError) {
-            return EmptyState(
-              icon: Icons.meeting_room_outlined,
-              title: '空教室加载失败',
-              message: _friendlyError(snapshot.error!),
-              action: TextButton.icon(
-                onPressed: () {
-                  setState(() => _loadFuture = _loadOptions(force: true));
-                },
-                icon: const Icon(Icons.refresh),
-                label: const Text('重试'),
-              ),
-            );
+            return _failureState(snapshot.error!, initialLoad: true);
           }
-          final options = _options;
-          if (options == null || options.buildings.isEmpty) {
-            return const EmptyState(
-              icon: Icons.meeting_room_outlined,
-              title: '暂无教学楼',
-              message: '空教室系统没有返回可查询的教学楼。',
-            );
-          }
-          return Column(
-            children: [
-              _SearchControls(
-                options: options,
-                selectedCampus: _selectedCampus,
-                selectedBuilding: _selectedBuilding,
-                selectedRange: _selectedRange,
-                selectedDate: _selectedDate,
-                ranges: widget.repository.defaultRanges(options.sections),
-                onCampusChanged: _setCampus,
-                onBuildingChanged: _setBuilding,
-                onRangeChanged: _setRange,
-                onDateChanged: _setDate,
-                onKeywordChanged: (value) => setState(() => _keyword = value),
-              ),
-              Expanded(child: _resultBody()),
-            ],
-          );
+          // Options arrive through setState; a finished load without them
+          // cannot render the controls.
+          return const SizedBox.shrink();
         },
-      ),
+      );
+    }
+    if (options.buildings.isEmpty) {
+      return const EmptyState(
+        icon: Icons.meeting_room_outlined,
+        title: '暂无教学楼',
+        message: '空教室系统没有返回可查询的教学楼。',
+      );
+    }
+    return Column(
+      children: [
+        ExcludeFocus(
+          excluding: _retryingMode != null,
+          child: AbsorbPointer(
+            absorbing: _retryingMode != null,
+            child: _SearchControls(
+              options: options,
+              selectedCampus: _selectedCampus,
+              selectedBuilding: _selectedBuilding,
+              selectedRange: _selectedRange,
+              selectedDate: _selectedDate,
+              ranges: widget.repository.defaultRanges(options.sections),
+              onCampusChanged: _setCampus,
+              onBuildingChanged: _setBuilding,
+              onRangeChanged: _setRange,
+              onPreviousRange: () => _stepRange(-1),
+              onNextRange: () => _stepRange(1),
+              onDateChanged: _setDate,
+              onKeywordChanged: (value) => setState(() => _keyword = value),
+            ),
+          ),
+        ),
+        Expanded(child: _resultBody()),
+      ],
     );
   }
 
   Widget _resultBody() {
+    final retryingError = _retryingError;
+    if (retryingError != null) return _failureState(retryingError);
     final future = _resultFuture;
     if (future == null) {
       return const EmptyState(
@@ -125,39 +178,51 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
     return FutureBuilder<_ClassroomQueryResult>(
       future: future,
       builder: (context, snapshot) {
+        // FutureBuilder retains the previous result while a new query runs.
+        // Keep it visible until the replacement is ready to avoid a flash.
+        if (snapshot.hasData) {
+          return RefreshIndicator(
+            onRefresh: _search,
+            child: _ClassroomResultList(
+              result: snapshot.data!,
+              keyword: _keyword,
+            ),
+          );
+        }
         if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator(strokeWidth: 3));
         }
         if (snapshot.hasError) {
-          return EmptyState(
-            icon: Icons.error_outline,
-            title: '查询失败',
-            message: _friendlyError(snapshot.error!),
-            action: TextButton.icon(
-              onPressed: _search,
-              icon: const Icon(Icons.refresh),
-              label: const Text('重试'),
-            ),
-          );
+          return _failureState(snapshot.error!);
         }
-        return RefreshIndicator(
-          onRefresh: _search,
-          child: _ClassroomResultList(
-            result: snapshot.data!,
-            keyword: _keyword,
-          ),
-        );
+        return const SizedBox.shrink();
       },
     );
   }
 
-  Future<void> _loadOptions({bool force = false}) async {
-    if (_refreshingOptions) {
+  Future<void> _loadOptions({
+    bool force = false,
+    ClassroomAccessMode? accessMode,
+  }) async {
+    final mode = accessMode ?? ClassroomUrlResolver.accessMode;
+    if (_loadingOptions) {
       return;
     }
-    setState(() => _refreshingOptions = true);
+    _loadingOptions = true;
+    // Only an explicit refresh needs the toolbar spinner: a first load is
+    // covered by the body indicator, and a cached snapshot paints instantly.
+    final showRefreshSpinner = force && _options != null;
+    if (showRefreshSpinner) {
+      setState(() => _refreshingOptions = true);
+    }
     try {
-      final options = await widget.repository.loadOptions(forceRefresh: force);
+      final options = await _withWebVpnRecovery(
+        () => widget.repository.loadOptions(
+          forceRefresh: force,
+          accessMode: mode,
+        ),
+        accessMode: mode,
+      );
       if (!mounted) {
         return;
       }
@@ -165,13 +230,20 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
         _options = options;
         _selectedCampus = _validCampus(options);
         _selectedBuilding = _validBuilding(options);
-        _selectedRange ??= widget.repository.defaultRangeFor(options);
+        if (!_initialSelectionApplied) {
+          final now = DateTime.now();
+          if (widget.initialDate == null) {
+            _selectedDate = widget.repository.defaultDateFor(options, now: now);
+          }
+          _selectedRange = widget.repository.defaultRangeFor(options, now: now);
+          _initialSelectionApplied = true;
+        } else {
+          _selectedRange ??= widget.repository.defaultRangeFor(options);
+        }
       });
-      _search(forceRefresh: force);
-    } on ClassroomWebVpnAuthException {
-      await widget.onWebVpnExpired?.call();
-      rethrow;
+      await _search(forceRefresh: force, accessMode: mode);
     } finally {
+      _loadingOptions = false;
       if (mounted) {
         setState(() => _refreshingOptions = false);
       }
@@ -179,7 +251,143 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
   }
 
   Future<void> _refresh() async {
-    await _loadOptions(force: true);
+    if (_retryingMode != null || _loadingOptions) return;
+    final future = _loadOptions(force: true);
+    setState(() {
+      _loadFuture = future;
+    });
+    // First-load failures are rendered by _loadFuture; keep toolbar retries
+    // from also escaping as unhandled asynchronous errors.
+    await future.then<void>((_) {}, onError: (_) {});
+  }
+
+  Future<T> _withWebVpnRecovery<T>(
+    Future<T> Function() operation, {
+    required ClassroomAccessMode accessMode,
+  }) async {
+    final accessRevision = ClassroomUrlResolver.revision;
+    bool canRecover() =>
+        mounted &&
+        accessMode == ClassroomAccessMode.webVpn &&
+        ClassroomUrlResolver.usesWebVpn &&
+        accessRevision == ClassroomUrlResolver.revision;
+    try {
+      try {
+        return await operation();
+      } on ClassroomWebVpnAuthException {
+        // A late failure must not undo a newer choice of network mode.
+        if (!canRecover()) rethrow;
+        if (_webVpnServiceUnavailable) {
+          throw const ClassroomApiException(
+            '暂时无法连接WebVPN，请稍后重试',
+            accessMode: ClassroomAccessMode.webVpn,
+          );
+        }
+        final recover = widget.onWebVpnRecoveryRequired;
+        if (recover == null) {
+          await widget.onWebVpnExpired?.call();
+          rethrow;
+        }
+        final interactive =
+            mounted && ModalRoute.of(context)?.isCurrent != false;
+        final outcome = await recover(interactive);
+        if (!canRecover()) rethrow;
+        switch (outcome) {
+          case WebVpnRecoveryOutcome.alreadyValid:
+          case WebVpnRecoveryOutcome.recovered:
+            // Reads can retry once. A second rejection reaches the error UI.
+            return await operation();
+          case WebVpnRecoveryOutcome.needsAuthentication:
+            rethrow;
+          case WebVpnRecoveryOutcome.unavailable:
+            throw const ClassroomApiException(
+              '暂时无法连接WebVPN，请稍后重试',
+              accessMode: ClassroomAccessMode.webVpn,
+            );
+          case WebVpnRecoveryOutcome.businessFailure:
+            throw const ClassroomApiException(
+              'WebVPN会话恢复失败，请稍后重试',
+              accessMode: ClassroomAccessMode.webVpn,
+            );
+        }
+      }
+    } catch (error, stackTrace) {
+      Error.throwWithStackTrace(
+        ClassroomApiException.forRequest(error, accessMode: accessMode),
+        stackTrace,
+      );
+    }
+  }
+
+  bool get _webVpnServiceUnavailable =>
+      widget.webVpnServiceStatus?.call().effectiveStateAt(DateTime.now()) ==
+      WebVpnServiceState.unavailable;
+
+  Widget _failureState(Object error, {bool initialLoad = false}) {
+    final mode = error is ClassroomApiException
+        ? error.accessMode ?? ClassroomUrlResolver.accessMode
+        : ClassroomUrlResolver.accessMode;
+    final needsAuthentication =
+        error is ClassroomWebVpnAuthException && !_webVpnServiceUnavailable;
+    final state = EmptyState(
+      icon: initialLoad ? Icons.meeting_room_outlined : Icons.error_outline,
+      title: initialLoad ? '空教室加载失败' : '查询失败',
+      message: _friendlyError(error),
+      action: _ClassroomFailureActions(
+        accessMode: mode,
+        needsAuthentication: needsAuthentication,
+        retryingMode: _retryingMode,
+        onRetry: () =>
+            _retry(error, initialLoad: initialLoad, accessMode: mode),
+        onTryDirect: () => _retry(
+          error,
+          initialLoad: initialLoad,
+          accessMode: ClassroomAccessMode.direct,
+        ),
+      ),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: state,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _retry(
+    Object error, {
+    required bool initialLoad,
+    required ClassroomAccessMode accessMode,
+  }) async {
+    if (_retryingMode != null || _loadingOptions) return;
+    setState(() {
+      _retryingError = error;
+      _retryingMode = accessMode;
+    });
+    try {
+      // Bypass query caches so choosing a transport really tries that route.
+      // The override belongs to this operation, never the global resolver.
+      if (initialLoad) {
+        final future = _loadOptions(force: true, accessMode: accessMode);
+        setState(() {
+          _loadFuture = future;
+        });
+        await future;
+      } else {
+        await _search(forceRefresh: true, accessMode: accessMode);
+      }
+    } on ClassroomApiException {
+      // _loadFuture and _resultFuture own the corresponding error UI.
+    } finally {
+      if (mounted) {
+        setState(() {
+          _retryingError = null;
+          _retryingMode = null;
+        });
+      }
+    }
   }
 
   String? _validCampus(ClassroomSearchOptions options) {
@@ -187,8 +395,11 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
     if (names.contains(_selectedCampus)) {
       return _selectedCampus;
     }
-    if (names.contains('宝山')) {
-      return '宝山';
+    if (names.contains(widget.initialCampus)) {
+      return widget.initialCampus;
+    }
+    if (names.contains(ClassroomCampus.defaultName)) {
+      return ClassroomCampus.defaultName;
     }
     return names.isEmpty ? null : names.first;
   }
@@ -236,12 +447,36 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
     _search();
   }
 
+  void _stepRange(int delta) {
+    final options = _options;
+    if (options == null) {
+      return;
+    }
+    final ranges = widget.repository.defaultRanges(options.sections);
+    final currentIndex = ranges.indexWhere(
+      (range) =>
+          range.start == _selectedRange?.start &&
+          range.end == _selectedRange?.end,
+    );
+    if (currentIndex < 0) {
+      return;
+    }
+    final nextIndex = currentIndex + delta;
+    if (nextIndex < 0 || nextIndex >= ranges.length) {
+      return;
+    }
+    _setRange(ranges[nextIndex]);
+  }
+
   void _setDate(DateTime date) {
     setState(() => _selectedDate = date);
     _search();
   }
 
-  Future<void> _search({bool forceRefresh = false}) async {
+  Future<void> _search({
+    bool forceRefresh = false,
+    ClassroomAccessMode? accessMode,
+  }) async {
     final range = _selectedRange;
     if (range == null) {
       return;
@@ -255,9 +490,13 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
     final future = _searchBuildings(
       buildings: buildings,
       range: range,
+      date: _selectedDate,
       forceRefresh: forceRefresh,
+      accessMode: accessMode ?? ClassroomUrlResolver.accessMode,
     );
-    setState(() => _resultFuture = future);
+    setState(() {
+      _resultFuture = future;
+    });
     await future.then<void>((_) {}, onError: (_) {});
   }
 
@@ -275,28 +514,29 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
   Future<_ClassroomQueryResult> _searchBuildings({
     required List<ClassroomBuilding> buildings,
     required ClassroomSectionRange range,
+    required DateTime date,
     required bool forceRefresh,
+    required ClassroomAccessMode accessMode,
   }) async {
     final results = <ClassroomAvailabilityResult>[];
-    try {
-      for (final building in buildings) {
-        final result = await widget.repository.search(
+    for (final building in buildings) {
+      final result = await _withWebVpnRecovery(
+        () => widget.repository.search(
           ClassroomAvailabilityQuery(
             building: building,
-            date: _selectedDate,
+            date: date,
             startSection: range.start,
             endSection: range.end,
           ),
           forceRefresh: forceRefresh,
-        );
-        results.add(result);
-      }
-    } on ClassroomWebVpnAuthException {
-      await widget.onWebVpnExpired?.call();
-      rethrow;
+          accessMode: accessMode,
+        ),
+        accessMode: accessMode,
+      );
+      results.add(result);
     }
     return _ClassroomQueryResult(
-      date: _selectedDate,
+      date: date,
       startSection: range.start,
       endSection: range.end,
       results: results,
@@ -304,14 +544,108 @@ class _EmptyClassroomPageState extends State<EmptyClassroomPage> {
   }
 
   String _friendlyError(Object error) {
-    if (error is ClassroomWebVpnAuthException) {
-      return error.message;
-    }
-    if (error is ClassroomApiException && ClassroomUrlResolver.usesWebVpn) {
-      return error.message;
+    final failure = error is ClassroomApiException ? error : null;
+    final mode = failure?.accessMode ?? ClassroomUrlResolver.accessMode;
+    if (mode == ClassroomAccessMode.webVpn) {
+      if (error is ClassroomWebVpnAuthException && !_webVpnServiceUnavailable) {
+        return error.message;
+      }
+      return ClassroomAccessWindow.webVpnFailureMessage(
+        detail: failure?.message,
+        serviceUnavailable: _webVpnServiceUnavailable,
+      );
     }
     return ClassroomAccessWindow.directFailureMessage(
-      detail: error is ClassroomApiException ? error.message : null,
+      detail: failure?.message,
+      webVpnEnabled: ClassroomUrlResolver.usesWebVpn,
+    );
+  }
+}
+
+class _ClassroomFailureActions extends StatelessWidget {
+  const _ClassroomFailureActions({
+    required this.accessMode,
+    required this.needsAuthentication,
+    required this.retryingMode,
+    required this.onRetry,
+    required this.onTryDirect,
+  });
+
+  final ClassroomAccessMode accessMode;
+  final bool needsAuthentication;
+  final ClassroomAccessMode? retryingMode;
+  final VoidCallback onRetry;
+  final VoidCallback onTryDirect;
+
+  Widget _icon(ClassroomAccessMode mode, IconData fallback) =>
+      retryingMode == mode
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Icon(fallback, size: 18);
+
+  @override
+  Widget build(BuildContext context) {
+    final busy = retryingMode != null;
+    if (accessMode == ClassroomAccessMode.direct || needsAuthentication) {
+      return FilledButton.icon(
+        onPressed: busy ? null : onRetry,
+        icon: _icon(accessMode, Icons.refresh),
+        label: Text(needsAuthentication ? '恢复WebVPN登录' : '重试'),
+      );
+    }
+    final direct = OutlinedButton.icon(
+      onPressed: busy ? null : onTryDirect,
+      icon: _icon(ClassroomAccessMode.direct, Icons.swap_horiz),
+      label: const Text('尝试直连'),
+    );
+    final retry = FilledButton.icon(
+      onPressed: busy ? null : onRetry,
+      icon: _icon(ClassroomAccessMode.webVpn, Icons.refresh),
+      label: const Text('重试WebVPN'),
+    );
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        LayoutBuilder(builder: (context, constraints) {
+          double buttonWidth(String label) {
+            final painter = TextPainter(
+              text: TextSpan(
+                text: label,
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              textDirection: Directionality.of(context),
+              textScaler: MediaQuery.textScalerOf(context),
+            )..layout();
+            final width = painter.width + 18 + 8 + 48;
+            painter.dispose();
+            return width;
+          }
+
+          final requiredWidth =
+              buttonWidth('尝试直连') + buttonWidth('重试WebVPN') + 12;
+          if (constraints.maxWidth < requiredWidth) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [direct, const SizedBox(height: 10), retry],
+            );
+          }
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [direct, const SizedBox(width: 12), retry],
+          );
+        }),
+        const SizedBox(height: 8),
+        Text(
+          '本次直连不改变全局WebVPN设置',
+          textAlign: TextAlign.center,
+          style: ShuYoTextStyles.meta(
+            color: context.shuyoColors.textSecondary,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -406,6 +740,8 @@ class _SearchControls extends StatelessWidget {
     required this.onCampusChanged,
     required this.onBuildingChanged,
     required this.onRangeChanged,
+    required this.onPreviousRange,
+    required this.onNextRange,
     required this.onDateChanged,
     required this.onKeywordChanged,
   });
@@ -419,6 +755,8 @@ class _SearchControls extends StatelessWidget {
   final ValueChanged<String?> onCampusChanged;
   final ValueChanged<ClassroomBuilding?> onBuildingChanged;
   final ValueChanged<ClassroomSectionRange> onRangeChanged;
+  final VoidCallback onPreviousRange;
+  final VoidCallback onNextRange;
   final ValueChanged<DateTime> onDateChanged;
   final ValueChanged<String> onKeywordChanged;
 
@@ -434,132 +772,434 @@ class _SearchControls extends StatelessWidget {
         border: Border(bottom: BorderSide(color: colors.border)),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        padding: const EdgeInsets.only(top: 8, bottom: 12),
         child: Column(
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    key: ValueKey('campus-$selectedCampus'),
-                    initialValue: selectedCampus,
-                    decoration: const InputDecoration(
-                      labelText: '校区',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    items: [
-                      for (final campus in options.campusNames)
-                        DropdownMenuItem(
-                          value: campus,
-                          child: Text(campus),
-                        ),
-                    ],
-                    onChanged: onCampusChanged,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: DropdownButtonFormField<int>(
-                    key: ValueKey(
-                      'building-$selectedCampus-${selectedBuilding?.id ?? 0}',
-                    ),
-                    initialValue: selectedBuilding?.id ?? 0,
-                    decoration: const InputDecoration(
-                      labelText: '教学楼',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    items: [
-                      const DropdownMenuItem(
-                        value: 0,
-                        child: Text('全部教学楼'),
-                      ),
-                      for (final building in campusBuildings)
-                        DropdownMenuItem(
-                          value: building.id,
-                          child: Text(building.name),
-                        ),
-                    ],
-                    onChanged: (id) => onBuildingChanged(
-                      id == 0 ? null : _buildingById(campusBuildings, id),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                _DateButton(
-                  label: '今天',
-                  selected: _isSameDay(selectedDate, DateTime.now()),
-                  onTap: () => onDateChanged(DateTime.now()),
-                ),
-                const SizedBox(width: 8),
-                _DateButton(
-                  label: '明天',
-                  selected: _isSameDay(
-                    selectedDate,
-                    DateTime.now().add(const Duration(days: 1)),
-                  ),
-                  onTap: () => onDateChanged(
-                    DateTime.now().add(const Duration(days: 1)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () async {
-                      final picked = await showDatePicker(
-                        context: context,
-                        initialDate: selectedDate,
-                        firstDate: DateTime.now().subtract(
-                          const Duration(days: 30),
-                        ),
-                        lastDate: DateTime.now().add(
-                          const Duration(days: 180),
-                        ),
-                      );
-                      if (picked != null) {
-                        onDateChanged(picked);
-                      }
-                    },
-                    icon: const Icon(Icons.calendar_month_outlined, size: 18),
-                    label: Text(_dateLabel(selectedDate)),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 6,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
                 children: [
-                  for (final range in ranges)
-                    FilterChip(
-                      label: Text(range.label),
-                      selected: selectedRange?.start == range.start &&
-                          selectedRange?.end == range.end,
-                      onSelected: (_) => onRangeChanged(range),
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      key: ValueKey('campus-$selectedCampus'),
+                      initialValue: selectedCampus,
+                      decoration: const InputDecoration(
+                        labelText: '校区',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: [
+                        for (final campus in options.campusNames)
+                          DropdownMenuItem(
+                            value: campus,
+                            child: Text(campus),
+                          ),
+                      ],
+                      onChanged: onCampusChanged,
                     ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: DropdownButtonFormField<int>(
+                      key: ValueKey(
+                        'building-$selectedCampus-${selectedBuilding?.id ?? 0}',
+                      ),
+                      initialValue: selectedBuilding?.id ?? 0,
+                      decoration: const InputDecoration(
+                        labelText: '教学楼',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: [
+                        const DropdownMenuItem(
+                          value: 0,
+                          child: Text('全部教学楼'),
+                        ),
+                        for (final building in campusBuildings)
+                          DropdownMenuItem(
+                            value: building.id,
+                            child: Text(building.name),
+                          ),
+                      ],
+                      onChanged: (id) => onBuildingChanged(
+                        id == 0 ? null : _buildingById(campusBuildings, id),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
             const SizedBox(height: 10),
-            TextField(
-              decoration: const InputDecoration(
-                hintText: '搜索课程、教师或教室',
-                prefixIcon: Icon(Icons.search),
-                border: OutlineInputBorder(),
-                isDense: true,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  _DateButton(
+                    label: '今天',
+                    selected: _isSameDay(selectedDate, DateTime.now()),
+                    onTap: () => onDateChanged(DateTime.now()),
+                  ),
+                  const SizedBox(width: 8),
+                  _DateButton(
+                    label: '明天',
+                    selected: _isSameDay(
+                      selectedDate,
+                      DateTime.now().add(const Duration(days: 1)),
+                    ),
+                    onTap: () => onDateChanged(
+                      DateTime.now().add(const Duration(days: 1)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: selectedDate,
+                          firstDate: DateTime.now().subtract(
+                            const Duration(days: 30),
+                          ),
+                          lastDate: DateTime.now().add(
+                            const Duration(days: 180),
+                          ),
+                        );
+                        if (picked != null) {
+                          onDateChanged(picked);
+                        }
+                      },
+                      icon: const Icon(Icons.calendar_month_outlined, size: 18),
+                      label: Text(_dateLabel(selectedDate)),
+                    ),
+                  ),
+                ],
               ),
-              textInputAction: TextInputAction.search,
-              onChanged: onKeywordChanged,
+            ),
+            const SizedBox(height: 10),
+            _SectionRangeSelector(
+              ranges: ranges,
+              selectedRange: selectedRange,
+              onChanged: onRangeChanged,
+              onPrevious: onPreviousRange,
+              onNext: onNextRange,
+            ),
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _ClassroomSearchField(
+                onChanged: onKeywordChanged,
+              ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ClassroomSearchField extends StatefulWidget {
+  const _ClassroomSearchField({required this.onChanged});
+
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_ClassroomSearchField> createState() => _ClassroomSearchFieldState();
+}
+
+class _ClassroomSearchFieldState extends State<_ClassroomSearchField> {
+  final FocusNode _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_onFocusChanged);
+  }
+
+  void _onFocusChanged() => setState(() {});
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_onFocusChanged);
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.shuyoColors;
+    return Container(
+      height: 52,
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: _focusNode.hasFocus ? colors.accent : colors.borderStrong,
+            width: _focusNode.hasFocus ? 1.5 : 1,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: _focusNode.requestFocus,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 8, right: 12),
+              child: Icon(Icons.search, size: 20, color: colors.textSecondary),
+            ),
+          ),
+          Expanded(
+            child: TextField(
+              focusNode: _focusNode,
+              onTapOutside: (_) => _focusNode.unfocus(),
+              decoration: const InputDecoration(
+                hintText: '搜索课程、教师或教室',
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                isCollapsed: true,
+              ),
+              textInputAction: TextInputAction.search,
+              onChanged: widget.onChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionRangeSelector extends StatelessWidget {
+  const _SectionRangeSelector({
+    required this.ranges,
+    required this.selectedRange,
+    required this.onChanged,
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  final List<ClassroomSectionRange> ranges;
+  final ClassroomSectionRange? selectedRange;
+  final ValueChanged<ClassroomSectionRange> onChanged;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedIndex = ranges.indexWhere(
+      (range) =>
+          range.start == selectedRange?.start &&
+          range.end == selectedRange?.end,
+    );
+    final canGoPrevious = selectedIndex > 0;
+    final canGoNext = selectedIndex >= 0 && selectedIndex < ranges.length - 1;
+    final selector = Row(
+      children: [
+        IconButton(
+          tooltip: '上一节',
+          onPressed: canGoPrevious ? onPrevious : null,
+          icon: const Icon(Icons.chevron_left),
+          visualDensity: VisualDensity.compact,
+        ),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              const compactWidth = 18.0;
+              const gap = 6.0;
+              final compactTotal = (ranges.length - 1) * (compactWidth + gap);
+              final selectedWidth = (constraints.maxWidth - compactTotal)
+                  .clamp(72.0, 104.0)
+                  .toDouble();
+              final sideWidth =
+                  ((constraints.maxWidth - selectedWidth - compactTotal) / 2)
+                      .clamp(0.0, double.infinity);
+              return Stack(
+                children: [
+                  // Fill only the blank space beside the range buttons.
+                  Positioned.fill(
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: sideWidth,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            excludeFromSemantics: true,
+                            onTap: canGoPrevious ? onPrevious : null,
+                          ),
+                        ),
+                        const Spacer(),
+                        SizedBox(
+                          width: sideWidth,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            excludeFromSemantics: true,
+                            onTap: canGoNext ? onNext : null,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      for (var index = 0; index < ranges.length; index++) ...[
+                        if (index > 0) const SizedBox(width: gap),
+                        _AnimatedRangeButton(
+                          range: ranges[index],
+                          selected: index == selectedIndex,
+                          selectedWidth: selectedWidth,
+                          onTap: () => onChanged(ranges[index]),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+        IconButton(
+          tooltip: '下一节',
+          onPressed: canGoNext ? onNext : null,
+          icon: const Icon(Icons.chevron_right),
+          visualDensity: VisualDensity.compact,
+        ),
+      ],
+    );
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  excludeFromSemantics: true,
+                  onTap: canGoPrevious ? onPrevious : null,
+                ),
+              ),
+              const Spacer(),
+              SizedBox(
+                width: 16,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  excludeFromSemantics: true,
+                  onTap: canGoNext ? onNext : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: selector,
+        ),
+      ],
+    );
+  }
+}
+
+class _AnimatedRangeButton extends StatefulWidget {
+  const _AnimatedRangeButton({
+    required this.range,
+    required this.selected,
+    required this.selectedWidth,
+    required this.onTap,
+  });
+
+  final ClassroomSectionRange range;
+  final bool selected;
+  final double selectedWidth;
+  final VoidCallback onTap;
+
+  @override
+  State<_AnimatedRangeButton> createState() => _AnimatedRangeButtonState();
+}
+
+class _AnimatedRangeButtonState extends State<_AnimatedRangeButton> {
+  static const _widthDuration = Duration(milliseconds: 500);
+  static const _labelDelay = Duration(milliseconds: 50);
+  Timer? _labelTimer;
+  late bool _showLabel;
+
+  @override
+  void initState() {
+    super.initState();
+    _showLabel = widget.selected;
+  }
+
+  @override
+  void didUpdateWidget(covariant _AnimatedRangeButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selected == widget.selected) {
+      return;
+    }
+    _labelTimer?.cancel();
+    if (widget.selected) {
+      setState(() => _showLabel = false);
+      _labelTimer = Timer(_labelDelay, () {
+        if (mounted && widget.selected) {
+          setState(() => _showLabel = true);
+        }
+      });
+    } else {
+      setState(() => _showLabel = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _labelTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.shuyoColors;
+    return MergeSemantics(
+      child: Semantics(
+        label: widget.range.label,
+        selected: widget.selected,
+        inMutuallyExclusiveGroup: true,
+        child: AnimatedContainer(
+          duration: _widthDuration,
+          curve: Curves.easeOutCubic,
+          width: widget.selected ? widget.selectedWidth : 18,
+          height: 44,
+          decoration: BoxDecoration(
+            color: widget.selected ? colors.accentSoft : colors.surfaceMuted,
+            border: Border.all(
+              color: widget.selected ? colors.accent : colors.borderStrong,
+              width: widget.selected ? 2 : 1,
+            ),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Material(
+            type: MaterialType.transparency,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: widget.onTap,
+              borderRadius: BorderRadius.circular(10),
+              child: Center(
+                child: AnimatedOpacity(
+                  opacity: _showLabel ? 1 : 0,
+                  duration: _showLabel
+                      ? const Duration(milliseconds: 300)
+                      : Duration.zero,
+                  child: Text(
+                    widget.range.label,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: colors.onAccentSoft,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

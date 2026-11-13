@@ -1,9 +1,17 @@
+import 'dart:async';
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/academic_schedule.dart';
+import '../models/academic_schedule_collection.dart';
+import '../services/academic_schedule_collection_store.dart';
+import '../services/academic_account_store.dart';
 import '../services/academic_schedule_api_client.dart';
+
+part 'academic_schedule_collection_repository.dart';
 
 class ScheduleWeekState {
   const ScheduleWeekState({
@@ -13,6 +21,18 @@ class ScheduleWeekState {
 
   final int currentWeek;
   final DateTime anchorMonday;
+
+  /// Returns the unclamped teaching week for the date's calendar fields.
+  ///
+  /// UTC dates are used only for calendar arithmetic, not to convert either
+  /// value's instant or timezone. This keeps whole weeks stable across DST.
+  int weekForDate(DateTime date) {
+    final day = DateTime.utc(date.year, date.month, date.day);
+    final monday = day.subtract(Duration(days: day.weekday - 1));
+    final anchor =
+        DateTime.utc(anchorMonday.year, anchorMonday.month, anchorMonday.day);
+    return currentWeek + monday.difference(anchor).inDays ~/ 7;
+  }
 
   DateTime get firstWeekStart =>
       anchorMonday.subtract(Duration(days: (currentWeek - 1) * 7));
@@ -38,27 +58,60 @@ class AcademicScheduleRepository {
   AcademicScheduleRepository({
     AcademicScheduleApiClient? apiClient,
     Future<SharedPreferences> Function()? preferencesLoader,
-  })  : _apiClient = apiClient ?? AcademicScheduleApiClient(),
+  })  : _apiClient = apiClient,
         _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance;
 
   static const _scheduleKey = 'academic.schedule.cache';
   static const _anchorWeekKey = 'academic.schedule.anchorWeek';
   static const _anchorMondayKey = 'academic.schedule.anchorMonday';
 
-  final AcademicScheduleApiClient _apiClient;
+  AcademicScheduleApiClient? _apiClient;
+  AcademicScheduleApiClient get _client =>
+      _apiClient ??= AcademicScheduleApiClient();
   final Future<SharedPreferences> Function() _preferencesLoader;
+  late final _collection = AcademicScheduleCollectionStore(
+    preferencesLoader: _preferencesLoader,
+  );
+  final discoveryState = ValueNotifier<ScheduleDiscoveryState>(
+    const ScheduleDiscoveryState(),
+  );
+  Future<void>? _discoveryTask;
+  final _termRequests = <String, Future<AcademicSchedule>>{};
+  int _discoveryGeneration = 0;
+  bool _discoveryPaused = false;
+
+  bool get supportsTermDiscovery => true;
+  ValueListenable<int> get collectionChanges => _collection.changes;
 
   Future<AcademicSchedule?> loadCachedSchedule() async {
     final prefs = await _preferencesLoader();
+    final studentId = await AcademicAccountStore(
+      preferencesLoader: _preferencesLoader,
+    ).loadDataStudentId();
+    if (studentId != null) {
+      final primary = await _collection.primaryKey(studentId);
+      if (primary != null) {
+        final record = await _collection.load(studentId, primary);
+        if (record?.schedule != null) {
+          await _mirrorPrimary(record!);
+          final currentOwner = await AcademicAccountStore(
+            preferencesLoader: _preferencesLoader,
+          ).loadDataStudentId();
+          return currentOwner == studentId ? record.schedule : null;
+        }
+      }
+    }
     final raw = prefs.getString(_scheduleKey);
-    if (raw == null || raw.isEmpty) {
-      return null;
-    }
+    if (raw == null || raw.isEmpty) return null;
     final decoded = jsonDecode(raw);
-    if (decoded is! Map<String, dynamic>) {
-      return null;
-    }
-    return AcademicSchedule.fromJson(decoded);
+    if (decoded is! Map<String, dynamic>) return null;
+    final schedule = AcademicSchedule.fromJson(decoded);
+    if (studentId != null && schedule.term.studentId != studentId) return null;
+    await _migrateLegacy(schedule, prefs);
+    final currentOwner = await AcademicAccountStore(
+      preferencesLoader: _preferencesLoader,
+    ).loadDataStudentId();
+    return currentOwner == studentId ? schedule : null;
   }
 
   Future<AcademicScheduleCacheState> loadCachedState({DateTime? now}) async {
@@ -71,21 +124,67 @@ class AcademicScheduleRepository {
   }
 
   Future<AcademicSchedule> refreshSchedule() async {
-    final hadCachedSchedule = await loadCachedSchedule() != null;
-    final schedule = await _apiClient.fetchCurrentSchedule();
-    await saveCachedSchedule(schedule);
+    final generation = _discoveryGeneration;
+    final previousSchedule = await loadCachedSchedule();
+    final hadCachedSchedule = previousSchedule != null;
+    final account = AcademicAccountStore(preferencesLoader: _preferencesLoader);
+    final studentId = await account.loadStudentId();
+    await _checkAccount(studentId, generation);
+    final primary =
+        studentId == null ? null : await _collection.primaryKey(studentId);
+    final record = primary == null || studentId == null
+        ? null
+        : await _collection.load(studentId, primary);
+    final schedule = record == null
+        ? await _client.fetchCurrentSchedule()
+        : await _fetchTerm(_queryFor(record));
+    await _checkAccount(studentId, generation);
+    final empty = schedule.sessions.isEmpty && schedule.untimedCourses.isEmpty;
+    await _acceptRemote(schedule,
+        replaceWorking: !empty,
+        makePrimary: true,
+        protectConcurrentEdits: true,
+        expectedWorking: previousSchedule);
+    if (empty) {
+      throw const AcademicNoScheduleException();
+    }
     if (!hadCachedSchedule) {
-      await setCurrentWeek(1);
+      // Browsing can start at week one, but reminders wait for an explicitly
+      // configured calendar. Historical imports never inherit this anchor.
+      final prefs = await _preferencesLoader();
+      await prefs.setInt(_anchorWeekKey, 1);
+      await prefs.setString(
+          _anchorMondayKey, startOfWeek(DateTime.now()).toIso8601String());
     }
     return schedule;
   }
 
   Future<void> saveCachedSchedule(AcademicSchedule schedule) async {
-    final prefs = await _preferencesLoader();
-    await prefs.setString(_scheduleKey, jsonEncode(schedule.toJson()));
+    final owner = await _dataOwner();
+    if (owner != null && schedule.term.studentId != owner) {
+      throw const AcademicApiException('不能保存其他账号的课表');
+    }
+    final term = schedule.term;
+    final key = academicTermKey(term.yearCode, term.termCode);
+    await _collection.update(term.studentId, key, (previous) async {
+      final base = previous ?? _recordFor(schedule);
+      return base.copyWith(
+        schedule: schedule,
+        locallyEdited: previous == null ||
+            jsonEncode(schedule.toJson()) !=
+                jsonEncode(previous.remoteSchedule?.toJson()),
+      );
+    });
+    if (await _collection.primaryKey(term.studentId) == null) {
+      await _collection.setPrimaryKey(term.studentId, key);
+    }
+    if (await _collection.primaryKey(term.studentId) == key) {
+      await _mirrorPrimary((await _collection.load(term.studentId, key))!);
+    }
   }
 
   Future<ScheduleWeekState> loadWeekState({DateTime? now}) async {
+    await loadCachedSchedule();
     final prefs = await _preferencesLoader();
     final today = now ?? DateTime.now();
     final fallbackMonday = startOfWeek(today);
@@ -105,6 +204,13 @@ class AcademicScheduleRepository {
       _anchorMondayKey,
       startOfWeek(now ?? DateTime.now()).toIso8601String(),
     );
+    final schedule = await loadCachedSchedule();
+    if (schedule != null) {
+      await _saveCalendar(
+          schedule,
+          startOfWeek(now ?? DateTime.now())
+              .subtract(Duration(days: (week - 1) * 7)));
+    }
   }
 
   Future<void> setFirstWeekStart(DateTime date) async {
@@ -114,6 +220,8 @@ class AcademicScheduleRepository {
       _anchorMondayKey,
       startOfWeek(date).toIso8601String(),
     );
+    final schedule = await loadCachedSchedule();
+    if (schedule != null) await _saveCalendar(schedule, startOfWeek(date));
   }
 
   Future<int> activeWeek(AcademicSchedule schedule, {DateTime? now}) async {
@@ -126,9 +234,9 @@ class AcademicScheduleRepository {
     ScheduleWeekState state, {
     DateTime? now,
   }) {
-    final todayMonday = startOfWeek(now ?? DateTime.now());
-    final offset = todayMonday.difference(state.anchorMonday).inDays ~/ 7;
-    return (state.currentWeek + offset).clamp(0, schedule.vacationWeek);
+    return state
+        .weekForDate(now ?? DateTime.now())
+        .clamp(0, schedule.vacationWeek);
   }
 
   DateTime dateForWeekday({
@@ -145,6 +253,9 @@ class AcademicScheduleRepository {
     final schedule = await loadCachedSchedule();
     if (schedule == null) {
       return const ScheduleHomeSummary('点击同步教务课表');
+    }
+    if (!await primaryCalendarConfigured()) {
+      return const ScheduleHomeSummary('请先设置课表开学日期');
     }
     final state = await loadWeekState(now: now);
     final week = activeWeekFromState(schedule, state, now: now);
@@ -176,7 +287,7 @@ class AcademicScheduleRepository {
 
     for (final course in todayCourses) {
       final end = sectionEndTime(course.endSection, now);
-      if (end == null || now.isAfter(end)) {
+      if (end == null || !now.isBefore(end)) {
         continue;
       }
       final start = sectionStartTime(course.startSection, now);

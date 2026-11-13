@@ -1,16 +1,15 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:home_widget/home_widget.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'app/shuyo_app.dart';
-import 'core/shuyo_http_overrides.dart';
 import 'data/services/app_data_migration_service.dart';
 import 'data/services/academic_schedule_widget_service.dart';
 import 'data/services/client_settings_service.dart';
 import 'shared/theme/shuyo_theme.dart';
+import 'shared/theme/custom_background.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,22 +22,14 @@ Future<void> main() async {
       // Widget setup must not prevent the main application from starting.
     }
   }
-  _registerAdditionalLicenses();
-  HttpOverrides.global = ShuYoHttpOverrides();
   final initialThemeSettings = await _loadInitialThemeSettings();
   runApp(
     ShuYoApp(
       initialThemeId: initialThemeSettings.themeId,
       initialFollowSystemTheme: initialThemeSettings.followSystemTheme,
+      initialCustomBackground: initialThemeSettings.customBackground,
     ),
   );
-}
-
-void _registerAdditionalLicenses() {
-  LicenseRegistry.addLicense(() async* {
-    final notice = await rootBundle.loadString('THIRD_PARTY_NOTICES.md');
-    yield LicenseEntryWithLineBreaks(const ['GitHub gemoji'], notice);
-  });
 }
 
 Future<_InitialThemeSettings> _loadInitialThemeSettings() async {
@@ -48,8 +39,9 @@ Future<_InitialThemeSettings> _loadInitialThemeSettings() async {
     await AppDataMigrationService().migrateIfNeeded();
     final settingsService = ClientSettingsService();
     return _InitialThemeSettings(
-      themeId: ShuYoThemes.byId(await settingsService.loadThemeId()).id,
+      themeId: await settingsService.loadThemeId() ?? ShuYoThemes.defaultId,
       followSystemTheme: await settingsService.loadFollowSystemTheme(),
+      customBackground: await settingsService.loadCustomBackground(),
     );
   } on Object {
     // Keep startup recoverable if a platform preference or migration service
@@ -65,8 +57,10 @@ class _InitialThemeSettings {
   const _InitialThemeSettings({
     required this.themeId,
     required this.followSystemTheme,
+    this.customBackground,
   });
 
   final String themeId;
   final bool followSystemTheme;
+  final CustomBackground? customBackground;
 }

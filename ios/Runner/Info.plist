@@ -37,10 +37,20 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>wxwork</string>
+	</array>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>将 ShuYo 中的图片保存到系统相册。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>在校园地图中显示你的位置，帮助查找附近地点。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>选取照片作为应用的自定义背景。</string>
 	<key>NSAlarmKitUsageDescription</key>
 	<string>用于为早课自动设置系统闹钟。</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

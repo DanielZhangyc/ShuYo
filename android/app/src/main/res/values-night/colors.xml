@@ -8,4 +8,14 @@
     <color name="widget_text_secondary">#D0DAE2</color>
     <color name="widget_text_muted">#9AA9B4</color>
     <color name="widget_accent">#41AEF2</color>
+    <color name="alarm_background_start">#102332</color>
+    <color name="alarm_background_end">#172A39</color>
+    <color name="alarm_surface">#203746</color>
+    <color name="alarm_surface_transparent">#26FFFFFF</color>
+    <color name="alarm_detail_background">#294351</color>
+    <color name="alarm_accent">#63B2FF</color>
+    <color name="alarm_accent_soft">#31566F</color>
+    <color name="alarm_text_primary">#F2F7FA</color>
+    <color name="alarm_text_secondary">#C2D3DE</color>
+    <color name="alarm_text_muted">#9BB0BD</color>
 </resources>

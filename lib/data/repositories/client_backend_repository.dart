@@ -8,17 +8,19 @@ import '../../core/client_app_info.dart';
 import '../models/client_backend.dart';
 import '../models/common.dart';
 import '../services/client_backend_api_client.dart';
+import '../services/student_identity_service.dart';
 
 class ClientBackendRepository {
   ClientBackendRepository({
     ClientBackendApiClient? apiClient,
+    StudentIdentityService? studentIdentityService,
     Future<SharedPreferences> Function()? preferencesLoader,
   })  : _apiClient = apiClient ?? ClientBackendApiClient(),
+        _studentIdentityService = studentIdentityService,
         _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance;
 
   static const _feedbackTicketsKey = 'client.backend.feedback.tickets';
   static const _deviceIdKey = 'client.backend.device.id';
-  static const _presenceDayPrefix = 'client.backend.presence.day.';
   static const _lastPromptedBuildKey = 'client.backend.update.last_prompted';
   static const _updateBaselineInitializedKey =
       'client.backend.update.baseline_initialized';
@@ -28,6 +30,28 @@ class ClientBackendRepository {
       'client.backend.announcement.baseline_initialized';
 
   final ClientBackendApiClient _apiClient;
+  final StudentIdentityService? _studentIdentityService;
+  StudentIdentityService? get studentIdentityService => _studentIdentityService;
+  DateTime? _lastPresenceAttempt;
+
+  Future<void> reportPresence() async {
+    final identity = _studentIdentityService;
+    if (identity == null) return;
+    final last = _lastPresenceAttempt;
+    if (last != null &&
+        DateTime.now().difference(last) < const Duration(minutes: 30)) {
+      return;
+    }
+    try {
+      final session = await identity.checkCurrentSession();
+      if (session == null) return;
+      _lastPresenceAttempt = DateTime.now();
+      await _apiClient.reportStudentPresence(session.token);
+    } on Object {
+      // Presence is best effort and must not affect campus or timetable use.
+    }
+  }
+
   final Future<SharedPreferences> Function() _preferencesLoader;
   final Random _random = Random.secure();
 
@@ -124,6 +148,28 @@ class ClientBackendRepository {
   }
 
   Future<List<ClientFeedbackTicket>> loadFeedbackTickets() async {
+    final legacy = await _loadLegacyFeedbackTickets();
+    StudentIdentitySession? session;
+    try {
+      session = await _studentIdentityService?.checkCurrentSession();
+    } on Object {
+      if (legacy.isNotEmpty) return legacy;
+      rethrow;
+    }
+    if (session == null) return legacy;
+    try {
+      final current = await _apiClient.listStudentFeedback(session.token);
+      return _sortedTickets([...current, ...legacy]);
+    } on ClientBackendApiException catch (error) {
+      if (error.statusCode == 401) {
+        return legacy;
+      }
+      if (legacy.isNotEmpty) return legacy;
+      rethrow;
+    }
+  }
+
+  Future<List<ClientFeedbackTicket>> _loadLegacyFeedbackTickets() async {
     final prefs = await _preferencesLoader();
     final raw = prefs.getString(_feedbackTicketsKey);
     if (raw == null || raw.isEmpty) {
@@ -141,10 +187,7 @@ class ClientBackendRepository {
   }
 
   Future<List<ClientFeedbackTicket>> refreshFeedbackTickets() async {
-    final tickets = await loadFeedbackTickets();
-    if (tickets.isEmpty) {
-      return tickets;
-    }
+    final tickets = await _loadLegacyFeedbackTickets();
     final refreshed = <ClientFeedbackTicket>[];
     for (final ticket in tickets) {
       final token = ticket.lookupToken;
@@ -161,18 +204,25 @@ class ClientBackendRepository {
       }
     }
     await _saveFeedbackTickets(refreshed);
-    return refreshed;
+    return loadFeedbackTickets();
   }
 
   Future<ClientFeedbackTicket> refreshFeedbackTicket(
     ClientFeedbackTicket ticket,
   ) async {
+    if (ticket.lookupToken.isEmpty) {
+      final session = await _studentIdentityService?.checkCurrentSession();
+      if (session == null) {
+        throw const StudentIdentityException('请先完成学生身份认证。');
+      }
+      return _apiClient.fetchStudentFeedback(session.token, ticket.id);
+    }
     final token = ticket.lookupToken;
     if (token.isEmpty) {
       return ticket;
     }
     final refreshed = await _apiClient.fetchFeedback(ticket.id, token);
-    final tickets = await loadFeedbackTickets();
+    final tickets = await _loadLegacyFeedbackTickets();
     final nextTickets = [
       refreshed,
       ...tickets.where((item) => item.id != refreshed.id),
@@ -186,6 +236,25 @@ class ClientBackendRepository {
     required String content,
     required String contact,
   }) async {
+    final identity = _studentIdentityService;
+    if (identity != null) {
+      if (!await identity.ensureForProtectedAction()) {
+        throw const StudentIdentityException('请先登录校园账户并完成学生身份认证。');
+      }
+      final session = await identity.loadLocalSession();
+      if (session == null) {
+        throw const StudentIdentityException('请先完成学生身份认证。');
+      }
+      final draft = ClientFeedbackDraft(
+        title: title,
+        content: content,
+        contact: contact,
+        deviceId: '',
+        appVersion: ClientAppInfo.displayVersion,
+        platform: Platform.operatingSystem,
+      );
+      return _apiClient.submitStudentFeedback(session.token, draft);
+    }
     final draft = ClientFeedbackDraft(
       title: title,
       content: content,
@@ -208,29 +277,16 @@ class ClientBackendRepository {
     return ticket;
   }
 
-  /// Records one activity event per forum account and local calendar day.
-  /// This is deliberately best-effort and never part of the login path.
-  Future<void> recordForumDailyActivity({required int userId}) async {
-    if (userId <= 0) return;
-    final prefs = await _preferencesLoader();
-    final now = DateTime.now().toUtc().add(const Duration(hours: 8));
-    final day =
-        '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-    final key = '$_presenceDayPrefix$userId';
-    if (prefs.getString(key) == day) return;
-
-    try {
-      final installationId = await _deviceId();
-      await _apiClient.recordPresence(
-        userId: userId,
-        installationId: installationId,
-        appVersion: ClientAppInfo.displayVersion,
-        platform: Platform.operatingSystem,
-      );
-      await prefs.setString(key, day);
-    } on Object {
-      // Analytics must never affect authentication or app startup.
+  Future<ClientFeedbackTicket> closeFeedback(
+      ClientFeedbackTicket ticket) async {
+    if (ticket.lookupToken.isNotEmpty) {
+      throw const ClientBackendApiException('旧版反馈暂不支持自行关闭。');
     }
+    final session = await _studentIdentityService?.checkCurrentSession();
+    if (session == null) {
+      throw const StudentIdentityException('请先完成学生身份认证。');
+    }
+    return _apiClient.closeStudentFeedback(session.token, ticket.id);
   }
 
   Future<void> _saveFeedbackTickets(
@@ -251,7 +307,7 @@ class ClientBackendRepository {
     }
     final bytes = List<int>.generate(16, (_) => _random.nextInt(256));
     final encoded = base64Url.encode(bytes).replaceAll('=', '');
-    final deviceId = 'lehu-$encoded';
+    final deviceId = 'shuyo-$encoded';
     await prefs.setString(_deviceIdKey, deviceId);
     return deviceId;
   }

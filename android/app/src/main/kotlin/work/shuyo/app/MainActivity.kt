@@ -7,6 +7,7 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.Settings
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import io.flutter.embedding.engine.FlutterEngine
@@ -14,20 +15,11 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
-    private var pendingResult: MethodChannel.Result? = null
+    private var pendingExactAlarmResult: MethodChannel.Result? = null
+    private var pendingAlarmRingtoneResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            "work.shuyo.app/image_picker"
-        ).setMethodCallHandler { call, result ->
-            if (call.method == "pickImage") {
-                pickImage(result)
-            } else {
-                result.notImplemented()
-            }
-        }
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "work.shuyo.app/image_saver"
@@ -43,75 +35,96 @@ class MainActivity : FlutterActivity() {
                 result.notImplemented()
             }
         }
+        getPreferences(MODE_PRIVATE).edit().remove("emoji_recents").apply()
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
-            "work.shuyo.app/emoji_recents"
+            "work.shuyo.app/early_class_alarms"
         ).setMethodCallHandler { call, result ->
             when (call.method) {
-                "getEmojiRecents" -> result.success(loadEmojiRecents())
-                "setEmojiRecents" -> {
-                    saveEmojiRecents(call.argument("shortcodes"))
-                    result.success(null)
+                "isAvailable" -> result.success(EarlyClassAlarmScheduler.isAvailable(this))
+                "requestAuthorization" -> requestExactAlarmAuthorization(result)
+                "getRingtone" -> result.success(EarlyClassAlarmScheduler.getRingtone(this))
+                "pickRingtone" -> pickAlarmRingtone(result)
+                "sync" -> {
+                    val alarms = call.argument<List<Map<String, Any?>>>("alarms") ?: emptyList()
+                    result.success(EarlyClassAlarmScheduler.sync(this, alarms))
                 }
                 else -> result.notImplemented()
             }
         }
     }
 
-    private fun pickImage(result: MethodChannel.Result) {
-        if (pendingResult != null) {
-            result.error("busy", "Image picker is already open", null)
+    override fun onResume() {
+        super.onResume()
+        pendingExactAlarmResult?.let { result ->
+            val manager = getSystemService(android.app.AlarmManager::class.java)
+            val allowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                manager.canScheduleExactAlarms()
+            pendingExactAlarmResult = null
+            result.success(allowed)
+        }
+        EarlyClassAlarmService.activeAlarmIntent(this)?.let(::startActivity)
+    }
+
+    private fun requestExactAlarmAuthorization(result: MethodChannel.Result) {
+        val manager = getSystemService(android.app.AlarmManager::class.java)
+        val allowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            manager.canScheduleExactAlarms()
+        if (allowed) {
+            result.success(true)
             return
         }
-        pendingResult = result
-        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Intent(MediaStore.ACTION_PICK_IMAGES).apply {
-                type = "image/*"
-            }
-        } else {
-            Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI).apply {
-                type = "image/*"
-            }
+        if (pendingExactAlarmResult != null) {
+            result.error("busy", "Exact alarm permission request is already open", null)
+            return
         }
+
+        pendingExactAlarmResult = result
         try {
-            startActivityForResult(intent, REQUEST_PICK_IMAGE)
+            startActivity(
+                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                    data = Uri.parse("package:$packageName")
+                },
+            )
         } catch (error: Exception) {
-            pendingResult = null
-            result.error("picker_unavailable", error.message, null)
+            pendingExactAlarmResult = null
+            result.error("permission_unavailable", error.message, null)
         }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQUEST_PICK_IMAGE) {
-            return
-        }
-        val result = pendingResult ?: return
-        pendingResult = null
-        if (resultCode != Activity.RESULT_OK || data?.data == null) {
-            result.success(null)
-            return
-        }
-        val uri = data.data!!
-        try {
-            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            if (bytes == null || bytes.isEmpty()) {
+        if (requestCode == REQUEST_PICK_ALARM_RINGTONE) {
+            val result = pendingAlarmRingtoneResult ?: return
+            pendingAlarmRingtoneResult = null
+            if (resultCode != Activity.RESULT_OK || data?.data == null) {
                 result.success(null)
                 return
             }
-            result.success(
-                mapOf(
-                    "bytes" to bytes,
-                    "filename" to displayName(uri),
-                    "mimeType" to (contentResolver.getType(uri) ?: "image/jpeg")
-                )
-            )
-        } catch (error: Exception) {
-            result.error("read_failed", error.message, null)
+            val uri = data.data!!
+            try {
+                val takeFlags = data.flags and
+                    (Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                if (takeFlags != 0) {
+                    contentResolver.takePersistableUriPermission(uri, takeFlags)
+                }
+            } catch (_: SecurityException) {
+                // Some document providers do not offer persistable permissions.
+                // The selected URI can still be used for the current installation.
+            }
+            val name = displayName(uri, "自定义铃声")
+            getSharedPreferences(EarlyClassAlarmScheduler.PREFS, MODE_PRIVATE)
+                .edit()
+                .putString(EarlyClassAlarmScheduler.RINGTONE_URI_KEY, uri.toString())
+                .putString(EarlyClassAlarmScheduler.RINGTONE_NAME_KEY, name)
+                .apply()
+            result.success(mapOf("name" to name))
+            return
         }
     }
 
-    private fun displayName(uri: Uri): String {
+    private fun displayName(uri: Uri, fallback: String = "image.jpg"): String {
         var cursor: Cursor? = null
         try {
             cursor = contentResolver.query(uri, null, null, null, null)
@@ -124,7 +137,7 @@ class MainActivity : FlutterActivity() {
         } finally {
             cursor?.close()
         }
-        return "image.jpg"
+        return fallback
     }
 
     private fun saveImage(
@@ -173,26 +186,31 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun loadEmojiRecents(): List<String> {
-        val raw = getPreferences(MODE_PRIVATE).getString(KEY_EMOJI_RECENTS, "") ?: ""
-        if (raw.isBlank()) {
-            return emptyList()
+    private fun pickAlarmRingtone(result: MethodChannel.Result) {
+        if (pendingAlarmRingtoneResult != null) {
+            result.error("busy", "Ringtone picker is already open", null)
+            return
         }
-        return raw.split("\n").filter { it.isNotBlank() }
-    }
-
-    private fun saveEmojiRecents(shortcodes: List<String>?) {
-        val value = shortcodes.orEmpty()
-            .filter { it.isNotBlank() }
-            .joinToString("\n")
-        getPreferences(MODE_PRIVATE)
-            .edit()
-            .putString(KEY_EMOJI_RECENTS, value)
-            .apply()
+        pendingAlarmRingtoneResult = result
+        try {
+            startActivityForResult(
+                Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "audio/*"
+                    addFlags(
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+                    )
+                },
+                REQUEST_PICK_ALARM_RINGTONE,
+            )
+        } catch (error: Exception) {
+            pendingAlarmRingtoneResult = null
+            result.error("picker_unavailable", error.message, null)
+        }
     }
 
     companion object {
-        private const val REQUEST_PICK_IMAGE = 9101
-        private const val KEY_EMOJI_RECENTS = "emoji_recents"
+        private const val REQUEST_PICK_ALARM_RINGTONE = 9102
     }
 }

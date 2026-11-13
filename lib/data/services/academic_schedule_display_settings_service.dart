@@ -6,18 +6,31 @@ class AcademicScheduleDisplaySettings {
   const AcademicScheduleDisplaySettings({
     required this.colorful,
     required this.showTeacher,
+    this.showCredit = false,
+    this.showNote = false,
+    this.showNonCurrentWeekCourses = true,
   });
 
   final bool colorful;
   final bool showTeacher;
+  final bool showCredit;
+  final bool showNote;
+  final bool showNonCurrentWeekCourses;
 
   AcademicScheduleDisplaySettings copyWith({
     bool? colorful,
     bool? showTeacher,
+    bool? showCredit,
+    bool? showNote,
+    bool? showNonCurrentWeekCourses,
   }) {
     return AcademicScheduleDisplaySettings(
       colorful: colorful ?? this.colorful,
       showTeacher: showTeacher ?? this.showTeacher,
+      showCredit: showCredit ?? this.showCredit,
+      showNote: showNote ?? this.showNote,
+      showNonCurrentWeekCourses:
+          showNonCurrentWeekCourses ?? this.showNonCurrentWeekCourses,
     );
   }
 }
@@ -35,10 +48,18 @@ class AcademicScheduleDisplayState {
 class AcademicScheduleDisplaySettingsService {
   AcademicScheduleDisplaySettingsService({
     Future<SharedPreferences> Function()? preferencesLoader,
+    this.scope,
   }) : _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance;
+
+  final String? scope;
+  String _key(String key) => scope == null ? key : '$key.$scope';
 
   static const _colorfulKey = 'academic.schedule.display.colorful';
   static const _showTeacherKey = 'academic.schedule.display.showTeacher';
+  static const _showCreditKey = 'academic.schedule.display.showCredit';
+  static const _showNoteKey = 'academic.schedule.display.showNote';
+  static const _showNonCurrentWeekCoursesKey =
+      'academic.schedule.display.showNonCurrentWeekCourses';
   static const _courseColorsKey = 'academic.schedule.display.courseColors';
 
   final Future<SharedPreferences> Function() _preferencesLoader;
@@ -60,8 +81,12 @@ class AcademicScheduleDisplaySettingsService {
     SharedPreferences prefs,
   ) {
     return AcademicScheduleDisplaySettings(
-      colorful: prefs.getBool(_colorfulKey) ?? false,
-      showTeacher: prefs.getBool(_showTeacherKey) ?? false,
+      colorful: prefs.getBool(_key(_colorfulKey)) ?? true,
+      showTeacher: prefs.getBool(_key(_showTeacherKey)) ?? true,
+      showCredit: prefs.getBool(_key(_showCreditKey)) ?? false,
+      showNote: prefs.getBool(_key(_showNoteKey)) ?? false,
+      showNonCurrentWeekCourses:
+          prefs.getBool(_key(_showNonCurrentWeekCoursesKey)) ?? true,
     );
   }
 
@@ -69,8 +94,14 @@ class AcademicScheduleDisplaySettingsService {
     AcademicScheduleDisplaySettings settings,
   ) async {
     final prefs = await _preferencesLoader();
-    await prefs.setBool(_colorfulKey, settings.colorful);
-    await prefs.setBool(_showTeacherKey, settings.showTeacher);
+    await prefs.setBool(_key(_colorfulKey), settings.colorful);
+    await prefs.setBool(_key(_showTeacherKey), settings.showTeacher);
+    await prefs.setBool(_key(_showCreditKey), settings.showCredit);
+    await prefs.setBool(_key(_showNoteKey), settings.showNote);
+    await prefs.setBool(
+      _key(_showNonCurrentWeekCoursesKey),
+      settings.showNonCurrentWeekCourses,
+    );
     return settings;
   }
 
@@ -80,7 +111,7 @@ class AcademicScheduleDisplaySettingsService {
   }
 
   Map<String, int> _courseColorsFromPreferences(SharedPreferences prefs) {
-    final raw = prefs.getString(_courseColorsKey);
+    final raw = prefs.getString(_key(_courseColorsKey));
     if (raw == null || raw.isEmpty) {
       return <String, int>{};
     }
@@ -103,6 +134,11 @@ class AcademicScheduleDisplaySettingsService {
     final colors = await loadCourseColors();
     colors[key] = colorValue;
     final prefs = await _preferencesLoader();
-    await prefs.setString(_courseColorsKey, jsonEncode(colors));
+    await prefs.setString(_key(_courseColorsKey), jsonEncode(colors));
+  }
+
+  Future<void> saveCourseColors(Map<String, int> colors) async {
+    final prefs = await _preferencesLoader();
+    await prefs.setString(_key(_courseColorsKey), jsonEncode(colors));
   }
 }

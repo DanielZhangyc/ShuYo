@@ -1,26 +1,30 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:home_widget/home_widget.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../core/client_app_info.dart';
+import '../core/app_tab.dart';
 import '../core/classroom_url_resolver.dart';
-import '../core/forum_url_resolver.dart';
+import '../core/otp_url_resolver.dart';
 import '../data/demo/demo_data_bundle.dart';
-import '../data/demo/demo_forum_repository.dart';
 import '../data/demo/demo_repositories.dart';
 import '../data/demo/demo_session.dart';
+import '../data/models/classroom.dart';
 import '../data/repositories/academic_schedule_repository.dart';
-import '../data/repositories/forum_repository.dart';
 import '../data/services/academic_account_store.dart';
+import '../data/services/academic_profile_preferences.dart';
+import '../data/services/academic_auth_service.dart';
 import '../data/services/academic_schedule_display_settings_service.dart';
 import '../data/services/app_data_migration_service.dart';
 import '../data/services/client_settings_service.dart';
+import '../data/services/student_identity_service.dart';
+import '../data/services/unified_account_service.dart';
+import '../data/services/webvpn_session_store.dart';
 import 'app_shell.dart';
 import '../features/onboarding/startup_onboarding.dart';
 import '../shared/theme/shuyo_theme.dart';
+import '../shared/theme/custom_background.dart';
 import '../shared/widgets/shuyo_launch_surface.dart';
 
 class ShuYoApp extends StatefulWidget {
@@ -28,10 +32,12 @@ class ShuYoApp extends StatefulWidget {
     super.key,
     this.initialThemeId,
     this.initialFollowSystemTheme = false,
+    this.initialCustomBackground,
   });
 
   final String? initialThemeId;
   final bool initialFollowSystemTheme;
+  final CustomBackground? initialCustomBackground;
 
   @override
   State<ShuYoApp> createState() => _ShuYoAppState();
@@ -39,16 +45,16 @@ class ShuYoApp extends StatefulWidget {
 
 class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
   final _settingsService = ClientSettingsService();
+  final _studentIdentityService = StudentIdentityService();
   final _dataMigrationService = AppDataMigrationService();
   final _onboardingController = StartupOnboardingController();
   late Future<_StartupData> _startupFuture;
   String _manualThemeId = ShuYoThemes.defaultId;
+  CustomBackground? _customBackground;
   bool _followSystemTheme = false;
   bool _demoMode = false;
   DemoDataBundle? _demoData;
-  ForumRepository? _demoRepository;
   int _academicLoginSignal = 0;
-  int _forumLoginSignal = 0;
   late final Future<bool> _initialScheduleWidgetLaunch;
   bool _initialWidgetLaunchConsumed = false;
   Brightness _systemBrightness =
@@ -57,7 +63,11 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    _manualThemeId = ShuYoThemes.byId(widget.initialThemeId).id;
+    _customBackground = widget.initialCustomBackground;
+    _manualThemeId = widget.initialThemeId == ShuYoThemes.customBackgroundId &&
+            _customBackground != null
+        ? ShuYoThemes.customBackgroundId
+        : ShuYoThemes.byId(widget.initialThemeId).id;
     _followSystemTheme = widget.initialFollowSystemTheme;
     WidgetsBinding.instance.addObserver(this);
     _initialScheduleWidgetLaunch = _loadInitialScheduleWidgetLaunch();
@@ -68,6 +78,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _studentIdentityService.dispose();
     _onboardingController.dispose();
     super.dispose();
   }
@@ -93,12 +104,17 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
       debugShowCheckedModeBanner: false,
       locale: const Locale('zh', 'CN'),
       supportedLocales: const [Locale('zh', 'CN')],
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-      ],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       theme: theme.themeData(),
+      builder: (context, child) {
+        final background = theme.id == ShuYoThemes.customBackgroundId
+            ? _customBackground
+            : null;
+        return CustomBackgroundFrame(
+          settings: background,
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       home: FutureBuilder<_StartupData>(
         future: _startupFuture,
         builder: (context, snapshot) {
@@ -109,43 +125,39 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
             return ShuYoLaunchSurface(theme: theme);
           }
           final data = snapshot.data!;
-          final demo =
-              _demoMode && _demoData != null && _demoRepository != null;
-          final repository = demo ? _demoRepository! : data.repository;
+          final demo = _demoMode && _demoData != null;
           return StartupOnboarding(
             initiallyCompleted: demo || data.onboardingCompleted,
             initialAcademicLoggedIn: demo || data.hasAcademicSession,
-            initialAcademicExpired: !demo && data.academicSessionExpired,
-            initialForumStatus: demo
-                ? ForumAccountStatus.loggedIn
-                : _forumAccountStatus(repository),
+            initialAcademicSessionExpired: !demo && data.academicSessionExpired,
             onAcademicLoginCompleted: () {
               setState(() => _academicLoginSignal++);
             },
-            onForumLoginCompleted: () {
-              setState(() => _forumLoginSignal++);
-            },
             onDemoLogin: _activateDemoMode,
             controller: _onboardingController,
+            studentIdentityService: demo ? null : _studentIdentityService,
             child: AppShell(
-              repository: repository,
               key: ValueKey('app-shell-${demo ? 'demo' : 'normal'}'),
-              reloadRepository: demo
-                  ? () async => repository
-                  : ForumRepositoryFactory.loadOnline,
               initialWebVpnEnabled: demo ? false : data.webVpnEnabled,
+              initialWebVpnPendingRecovery:
+                  demo ? false : data.webVpnPendingRecovery,
+              initialWebVpnSessionReady: demo ? false : data.webVpnSessionReady,
               selectedThemeId: theme.id,
               followSystemTheme: _followSystemTheme,
+              customBackground: _customBackground,
               onThemeChanged: _changeTheme,
               onFollowSystemThemeChanged: _changeFollowSystemTheme,
+              onCustomBackgroundChanged: _changeCustomBackground,
               academicLoginSignal: _academicLoginSignal,
-              forumLoginSignal: _forumLoginSignal,
               initialHasAcademicSession: demo || data.hasAcademicSession,
               initialAcademicSessionExpired:
                   !demo && data.academicSessionExpired,
               initialAcademicStudentId: demo
                   ? data.initialScheduleState?.schedule?.term.studentId
                   : data.academicStudentId,
+              initialNickname: demo ? null : data.nickname,
+              initialPreferredCampus: data.preferredCampus,
+              initialStartupTab: data.startupTab,
               initialOpenSchedule: data.openScheduleFromWidget &&
                   (demo || data.onboardingCompleted),
               initialScheduleState: data.initialScheduleState,
@@ -154,6 +166,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
               isDemo: demo,
               demoData: _demoData,
               onboardingController: _onboardingController,
+              studentIdentityService: demo ? null : _studentIdentityService,
               onExitDemo: demo ? _exitDemoMode : null,
             ),
           );
@@ -166,6 +179,10 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
     final themeId = _followSystemTheme
         ? ShuYoThemes.systemThemeIdFor(_systemBrightness)
         : _manualThemeId;
+    if (themeId == ShuYoThemes.customBackgroundId &&
+        _customBackground != null) {
+      return _customBackground!.theme;
+    }
     return ShuYoThemes.byId(themeId);
   }
 
@@ -186,28 +203,38 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
     }
     await ClientAppInfo.load();
     final networkSettings = await _settingsService.loadNetworkSettings();
-    ForumUrlResolver.configure(
-      useWebVpn: networkSettings.webVpnEnabled,
-    );
+    final startupTab = await _settingsService.loadStartupTab();
     ClassroomUrlResolver.configure(
       useWebVpn: networkSettings.webVpnEnabled,
     );
-    final repository = await ForumRepositoryFactory.loadLocal();
+    OtpUrlResolver.configure(useWebVpn: networkSettings.webVpnEnabled);
     final academicAccountStore = AcademicAccountStore();
+    await academicAccountStore.rememberExistingAccounts();
+    if (await academicAccountStore.hasLegacyExpiredAccount()) {
+      await AcademicAuthService().clearAccount();
+    }
     final academicStudentId = await academicAccountStore.loadStudentId();
-    final academicSessionExpired = academicStudentId != null &&
-        await academicAccountStore.isSessionExpired();
+    final profilePreferences = AcademicProfilePreferences();
+    final nickname = academicStudentId == null
+        ? null
+        : await profilePreferences.loadNickname(academicStudentId);
+    final preferredCampus = await profilePreferences.loadPreferredCampus();
     final onboardingCompleted =
         await _settingsService.loadStartupOnboardingCompleted();
     final initialScheduleLoad = openScheduleFromWidget && onboardingCompleted
         ? await _loadInitialScheduleState(AcademicScheduleRepository())
         : const _InitialScheduleLoad();
     return _StartupData(
-      repository: repository,
       webVpnEnabled: networkSettings.webVpnEnabled,
+      webVpnPendingRecovery:
+          await UnifiedAccountService().isWebVpnPendingRecovery(),
+      webVpnSessionReady: await _hasStoredWebVpnSession(),
       hasAcademicSession: academicStudentId != null,
-      academicSessionExpired: academicSessionExpired,
+      academicSessionExpired: await academicAccountStore.isSessionExpired(),
       academicStudentId: academicStudentId,
+      nickname: nickname,
+      preferredCampus: preferredCampus,
+      startupTab: startupTab,
       onboardingCompleted: onboardingCompleted,
       demoMode: false,
       openScheduleFromWidget: openScheduleFromWidget,
@@ -217,25 +244,30 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
     );
   }
 
+  Future<bool> _hasStoredWebVpnSession() async {
+    try {
+      return await WebVpnSessionStore().hasStoredSession();
+    } on Object {
+      return false;
+    }
+  }
+
   Future<_StartupData> _loadDemoStartup({
     bool openScheduleFromWidget = false,
   }) async {
     final demoData = await DemoDataBundle.load();
-    final demoRepository = await DemoForumRepository.load();
     _demoMode = true;
     _demoData = demoData;
-    _demoRepository = demoRepository;
     final initialScheduleLoad = openScheduleFromWidget
         ? await _loadInitialScheduleState(
             DemoAcademicScheduleRepository(demoData.schedule),
           )
         : const _InitialScheduleLoad();
     return _StartupData(
-      repository: demoRepository,
       webVpnEnabled: false,
       hasAcademicSession: true,
-      academicSessionExpired: false,
       academicStudentId: initialScheduleLoad.state?.schedule?.term.studentId,
+      startupTab: await _settingsService.loadStartupTab(),
       onboardingCompleted: true,
       demoMode: true,
       openScheduleFromWidget: openScheduleFromWidget,
@@ -279,12 +311,10 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
 
   Future<void> _activateDemoMode() async {
     final demoData = await DemoDataBundle.load();
-    final demoRepository = await DemoForumRepository.load();
     if (!mounted) return;
     setState(() {
       _demoMode = true;
       _demoData = demoData;
-      _demoRepository = demoRepository;
     });
   }
 
@@ -295,10 +325,7 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
     setState(() {
       _demoMode = false;
       _demoData = null;
-      _demoRepository = null;
-      // A demo-started app's original startup snapshot contains the demo
-      // repository. Reload it after disabling demo so the normal chain gets a
-      // real repository and fresh authentication state.
+      // Reload the normal startup state after leaving the bundled demo.
       _startupFuture = _loadStartup();
     });
   }
@@ -314,22 +341,43 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
     }
     final themeId = await _settingsService.loadThemeId();
     final followSystemTheme = await _settingsService.loadFollowSystemTheme();
+    final customBackground = await _settingsService.loadCustomBackground();
     if (!mounted) {
       return;
     }
     setState(() {
-      _manualThemeId = ShuYoThemes.byId(themeId).id;
+      _customBackground = customBackground;
+      _manualThemeId =
+          themeId == ShuYoThemes.customBackgroundId && customBackground != null
+              ? ShuYoThemes.customBackgroundId
+              : ShuYoThemes.byId(themeId).id;
       _followSystemTheme = followSystemTheme;
     });
   }
 
   Future<void> _changeTheme(String themeId) async {
-    final theme = ShuYoThemes.byId(themeId);
-    await _settingsService.saveThemeId(theme.id);
+    final selectedId =
+        themeId == ShuYoThemes.customBackgroundId && _customBackground != null
+            ? themeId
+            : ShuYoThemes.byId(themeId).id;
+    await _settingsService.saveThemeId(selectedId);
     await _settingsService.saveFollowSystemTheme(false);
     if (mounted) {
       setState(() {
-        _manualThemeId = theme.id;
+        _manualThemeId = selectedId;
+        _followSystemTheme = false;
+      });
+    }
+  }
+
+  Future<void> _changeCustomBackground(CustomBackground settings) async {
+    await _settingsService.saveThemeId(ShuYoThemes.customBackgroundId);
+    await _settingsService.saveFollowSystemTheme(false);
+    await _settingsService.saveCustomBackground(settings);
+    if (mounted) {
+      setState(() {
+        _customBackground = settings;
+        _manualThemeId = ShuYoThemes.customBackgroundId;
         _followSystemTheme = false;
       });
     }
@@ -356,29 +404,17 @@ class _ShuYoAppState extends State<ShuYoApp> with WidgetsBindingObserver {
   }
 }
 
-ForumAccountStatus _forumAccountStatus(ForumRepository repository) {
-  if (defaultTargetPlatform == TargetPlatform.iOS &&
-      !ForumUrlResolver.usesWebVpn &&
-      !repository.hasLocalAccount) {
-    return ForumAccountStatus.directLoginUnavailable;
-  }
-  return switch (repository.connectionState) {
-    ForumConnectionState.firstUse => ForumAccountStatus.signedOut,
-    ForumConnectionState.cachedOffline =>
-      ForumAccountStatus.connectionUnavailable,
-    ForumConnectionState.reauthenticationRequired =>
-      ForumAccountStatus.reauthenticationRequired,
-    ForumConnectionState.online => ForumAccountStatus.loggedIn,
-  };
-}
-
 class _StartupData {
   const _StartupData({
-    required this.repository,
     required this.webVpnEnabled,
+    this.webVpnPendingRecovery = false,
+    this.webVpnSessionReady = false,
     required this.hasAcademicSession,
-    required this.academicSessionExpired,
+    this.academicSessionExpired = false,
     required this.academicStudentId,
+    this.nickname,
+    this.preferredCampus = ClassroomCampus.defaultName,
+    this.startupTab = AppTab.home,
     required this.onboardingCompleted,
     required this.demoMode,
     required this.openScheduleFromWidget,
@@ -387,11 +423,15 @@ class _StartupData {
     this.initialScheduleLoadError,
   });
 
-  final ForumRepository repository;
   final bool webVpnEnabled;
+  final bool webVpnPendingRecovery;
+  final bool webVpnSessionReady;
   final bool hasAcademicSession;
   final bool academicSessionExpired;
   final String? academicStudentId;
+  final String? nickname;
+  final String preferredCampus;
+  final AppTab startupTab;
   final bool onboardingCompleted;
   final bool demoMode;
   final bool openScheduleFromWidget;

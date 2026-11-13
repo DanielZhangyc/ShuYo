@@ -1,8 +1,6 @@
 import Flutter
 import Photos
-import PhotosUI
 import UIKit
-import UniformTypeIdentifiers
 import UserNotifications
 
 #if canImport(AlarmKit) && !targetEnvironment(macCatalyst)
@@ -13,16 +11,18 @@ import UserNotifications
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var pendingImageSaveResult: FlutterResult?
-  private var pendingImagePickerResult: FlutterResult?
   private var earlyClassAlarmSyncTask: Task<Void, Never>?
+  private let courseLiveActivityController = CourseLiveActivityController()
 
   private static let earlyClassAlarmIdsKey = "early_class_alarm_ids"
+  private static let earlyClassAlarmTitlesKey = "early_class_alarm_titles"
 
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     UNUserNotificationCenter.current().delegate = self as UNUserNotificationCenterDelegate
+    UserDefaults.standard.removeObject(forKey: "emoji_recents")
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -39,36 +39,16 @@ import UserNotifications
       }
     }
     FlutterMethodChannel(
-      name: "work.shuyo.app/emoji_recents",
-      binaryMessenger: engineBridge.applicationRegistrar.messenger()
-    ).setMethodCallHandler { call, result in
-      switch call.method {
-      case "getEmojiRecents":
-        result(UserDefaults.standard.stringArray(forKey: "emoji_recents") ?? [])
-      case "setEmojiRecents":
-        let args = call.arguments as? [String: Any]
-        let shortcodes = args?["shortcodes"] as? [String] ?? []
-        UserDefaults.standard.set(shortcodes, forKey: "emoji_recents")
-        result(nil)
-      default:
-        result(FlutterMethodNotImplemented)
-      }
-    }
-    FlutterMethodChannel(
-      name: "work.shuyo.app/image_picker",
-      binaryMessenger: engineBridge.applicationRegistrar.messenger()
-    ).setMethodCallHandler { [weak self] call, result in
-      if call.method == "pickImage" {
-        self?.pickImage(result: result)
-      } else {
-        result(FlutterMethodNotImplemented)
-      }
-    }
-    FlutterMethodChannel(
       name: "work.shuyo.app/early_class_alarms",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
     ).setMethodCallHandler { [weak self] call, result in
       self?.handleEarlyClassAlarm(call: call, result: result)
+    }
+    FlutterMethodChannel(
+      name: "work.shuyo.app/course_live_activity",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    ).setMethodCallHandler { [weak self] call, result in
+      self?.courseLiveActivityController.handle(call, result: result)
     }
   }
 
@@ -107,6 +87,7 @@ import UserNotifications
         case "sync":
           guard
             let arguments = call.arguments as? [String: Any],
+            let enabled = arguments["enabled"] as? Bool,
             let alarms = arguments["alarms"] as? [[String: Any]]
           else {
             result(
@@ -121,7 +102,7 @@ import UserNotifications
           let previousTask = earlyClassAlarmSyncTask
           earlyClassAlarmSyncTask = Task { @MainActor [weak self] in
             await previousTask?.value
-            await self?.syncEarlyClassAlarms(alarms, result: result)
+            await self?.syncEarlyClassAlarms(alarms, enabled: enabled, result: result)
           }
         default:
           result(FlutterMethodNotImplemented)
@@ -142,33 +123,13 @@ import UserNotifications
   #if canImport(AlarmKit) && !targetEnvironment(macCatalyst)
     @available(iOS 26.0, *)
     @MainActor
-    private func syncEarlyClassAlarms(
+    func syncEarlyClassAlarms(
       _ rawAlarms: [[String: Any]],
+      enabled: Bool,
       result: @escaping FlutterResult
     ) async {
       let manager = AlarmManager.shared
       let defaults = UserDefaults.standard
-      do {
-        let currentIDs = Set(try manager.alarms.map(\.id))
-        for rawID in defaults.stringArray(forKey: Self.earlyClassAlarmIdsKey) ?? [] {
-          guard
-            let id = UUID(uuidString: rawID),
-            currentIDs.contains(id)
-          else { continue }
-          try manager.cancel(id: id)
-        }
-      } catch {
-        result(
-          FlutterError(
-            code: "alarm_cancel_failed",
-            message: error.localizedDescription,
-            details: nil
-          )
-        )
-        return
-      }
-      defaults.removeObject(forKey: Self.earlyClassAlarmIdsKey)
-
       guard manager.authorizationState == .authorized else {
         result(-1)
         return
@@ -184,9 +145,54 @@ import UserNotifications
         let date = Date(timeIntervalSince1970: milliseconds.doubleValue / 1000)
         return date > Date() ? (date, title) : nil
       }
-      var scheduledIDs: [String] = []
+      let ownedIDs = Set(defaults.stringArray(forKey: Self.earlyClassAlarmIdsKey) ?? [])
+      var titles = defaults.dictionary(forKey: Self.earlyClassAlarmTitlesKey) as? [String: String] ?? [:]
+      var scheduledIDs = ownedIDs
+      var pending = enabled ? alarms : []
 
-      for (date, title) in alarms {
+      func persist() {
+        defaults.set(scheduledIDs.sorted(), forKey: Self.earlyClassAlarmIdsKey)
+        defaults.set(titles.filter { scheduledIDs.contains($0.key) }, forKey: Self.earlyClassAlarmTitlesKey)
+      }
+
+      do {
+        let currentAlarms = try manager.alarms.filter { ownedIDs.contains($0.id.uuidString) }
+        scheduledIDs = Set(currentAlarms.map { $0.id.uuidString })
+        for alarm in currentAlarms {
+          let rawID = alarm.id.uuidString
+          if enabled {
+            if case let .fixed(date)? = alarm.schedule {
+              if let index = pending.firstIndex(where: {
+                $0.0 == date && (titles[rawID] == nil || titles[rawID] == $0.1)
+              }) {
+                // The title is absent only when adopting alarms from an older app version.
+                titles[rawID] = pending.remove(at: index).1
+                continue
+              }
+              if date <= Date() { continue }
+            }
+            // Resuming the app must not stop an alarm that is already due or ringing.
+            if alarm.state != .scheduled { continue }
+          }
+          try manager.cancel(id: alarm.id)
+          scheduledIDs.remove(rawID)
+          titles.removeValue(forKey: rawID)
+          persist()
+        }
+      } catch {
+        persist()
+        result(
+          FlutterError(
+            code: "alarm_sync_failed",
+            message: error.localizedDescription,
+            details: nil
+          )
+        )
+        return
+      }
+
+      schedulePendingAlarms: for (date, title) in pending.sorted(by: { $0.0 < $1.0 }) {
+        guard date > Date() else { continue }
         let id = UUID()
         let localizedTitle = LocalizedStringResource(stringLiteral: title)
         let alert: AlarmPresentation.Alert
@@ -212,13 +218,40 @@ import UserNotifications
         )
 
         do {
-          try await manager.schedule(id: id, configuration: configuration)
-          scheduledIDs.append(id.uuidString)
-          defaults.set(scheduledIDs, forKey: Self.earlyClassAlarmIdsKey)
-        } catch AlarmManager.AlarmError.maximumLimitReached {
-          break
+          while date > Date() {
+            do {
+              try await manager.schedule(id: id, configuration: configuration)
+              scheduledIDs.insert(id.uuidString)
+              titles[id.uuidString] = title
+              persist()
+              break
+            } catch AlarmManager.AlarmError.maximumLimitReached {
+              // Refresh after the await: an earlier snapshot may now be alerting.
+              let replacement = try manager.alarms.compactMap { alarm -> (id: UUID, date: Date)? in
+                guard
+                  scheduledIDs.contains(alarm.id.uuidString),
+                  alarm.state == .scheduled,
+                  case let .fixed(scheduledDate)? = alarm.schedule,
+                  scheduledDate > date
+                else { return nil }
+                return (alarm.id, scheduledDate)
+              }.max { $0.date < $1.date }
+
+              // Do not evict anything if this request expired while scheduling.
+              guard date > Date() else { break }
+              // All remaining reservations are earlier, due, or already ringing.
+              guard let replacement else { break schedulePendingAlarms }
+
+              // Free the farthest owned reservation and retry the nearer alarm.
+              // Each retry removes one candidate, so quota retries are bounded.
+              try manager.cancel(id: replacement.id)
+              scheduledIDs.remove(replacement.id.uuidString)
+              titles.removeValue(forKey: replacement.id.uuidString)
+              persist()
+            }
+          }
         } catch {
-          defaults.set(scheduledIDs, forKey: Self.earlyClassAlarmIdsKey)
+          persist()
           result(
             FlutterError(
               code: "alarm_sync_failed",
@@ -230,55 +263,12 @@ import UserNotifications
         }
       }
 
-      defaults.set(scheduledIDs, forKey: Self.earlyClassAlarmIdsKey)
+      persist()
       result(scheduledIDs.count)
     }
 
     private struct ShuYoAlarmMetadata: AlarmMetadata {}
   #endif
-
-  private func pickImage(result: @escaping FlutterResult) {
-    guard pendingImagePickerResult == nil else {
-      result(
-        FlutterError(
-          code: "busy",
-          message: "Image picker is already open",
-          details: nil
-        )
-      )
-      return
-    }
-    guard let presenter = topViewController() else {
-      result(
-        FlutterError(
-          code: "picker_unavailable",
-          message: "Cannot find a view controller to present the image picker",
-          details: nil
-        )
-      )
-      return
-    }
-
-    var configuration = PHPickerConfiguration(photoLibrary: .shared())
-    configuration.filter = .images
-    configuration.selectionLimit = 1
-    let picker = PHPickerViewController(configuration: configuration)
-    picker.delegate = self
-    pendingImagePickerResult = result
-    presenter.present(picker, animated: true)
-  }
-
-  private func topViewController() -> UIViewController? {
-    let windows = UIApplication.shared.connectedScenes
-      .compactMap { $0 as? UIWindowScene }
-      .flatMap { $0.windows }
-    let window = windows.first(where: { $0.isKeyWindow }) ?? windows.first
-    var controller = window?.rootViewController
-    while let presented = controller?.presentedViewController {
-      controller = presented
-    }
-    return controller
-  }
 
   private func saveImage(call: FlutterMethodCall, result: @escaping FlutterResult) {
     guard pendingImageSaveResult == nil else {
@@ -334,53 +324,5 @@ import UserNotifications
       return
     }
     result(true)
-  }
-}
-
-extension AppDelegate: PHPickerViewControllerDelegate {
-  func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-    guard let result = pendingImagePickerResult else {
-      picker.dismiss(animated: true)
-      return
-    }
-    pendingImagePickerResult = nil
-    picker.dismiss(animated: true)
-
-    guard let provider = results.first?.itemProvider else {
-      result(nil)
-      return
-    }
-    let imageTypes = provider.registeredTypeIdentifiers.compactMap { identifier in
-      UTType(identifier)?.conforms(to: .image) == true ? UTType(identifier) : nil
-    }
-    let selectedType = imageTypes.first { $0.preferredFilenameExtension != nil }
-      ?? imageTypes.first
-      ?? UTType.image
-    let typeIdentifier = selectedType.identifier
-    provider.loadDataRepresentation(forTypeIdentifier: typeIdentifier) { data, error in
-      DispatchQueue.main.async {
-        if let error {
-          result(
-            FlutterError(
-              code: "read_failed",
-              message: error.localizedDescription,
-              details: nil
-            )
-          )
-          return
-        }
-        guard let data, !data.isEmpty else {
-          result(nil)
-          return
-        }
-        let mimeType = selectedType.preferredMIMEType ?? "image/jpeg"
-        let extensionName = selectedType.preferredFilenameExtension ?? "jpg"
-        result([
-          "bytes": FlutterStandardTypedData(bytes: data),
-          "filename": "shuyo_\(Int(Date().timeIntervalSince1970)).\(extensionName)",
-          "mimeType": mimeType
-        ])
-      }
-    }
   }
 }

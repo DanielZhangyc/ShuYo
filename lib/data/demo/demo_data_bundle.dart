@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import '../models/academic_schedule.dart';
 import '../models/announcement.dart';
 import '../models/classroom.dart';
-import '../models/course_rating.dart';
 import '../models/common.dart';
 import '../services/classroom_api_client.dart';
 
@@ -21,7 +20,6 @@ class DemoDataBundle {
     required this.announcementDetails,
     required this.classroomOptions,
     required this.classroomSchedule,
-    required this.courseRatings,
   });
 
   final AcademicSchedule schedule;
@@ -29,7 +27,6 @@ class DemoDataBundle {
   final Map<String, AnnouncementDetail> announcementDetails;
   final ClassroomSearchOptions classroomOptions;
   final ClassroomBuildingSchedule classroomSchedule;
-  final CourseRatingLatestResult courseRatings;
 
   static Future<DemoDataBundle> load({AssetBundle? bundle}) async {
     final assets = bundle ?? rootBundle;
@@ -81,15 +78,12 @@ class DemoDataBundle {
       building: building,
     );
 
-    final ratingJson =
-        await _json(assets, 'assets/demo/course_ratings/latest.json');
     return DemoDataBundle(
       schedule: schedule,
       announcements: announcementItems,
       announcementDetails: details,
       classroomOptions: classroomOptions,
       classroomSchedule: classroomSchedule,
-      courseRatings: CourseRatingLatestResult.fromJson(ratingJson),
     );
   }
 

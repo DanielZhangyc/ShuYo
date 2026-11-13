@@ -1,153 +1,224 @@
 import 'dart:math';
 
-import 'package:flutter/material.dart';
 import 'package:lunar/calendar/Lunar.dart';
+import 'package:material_ui/material_ui.dart';
 
-import '../../data/models/user_profile.dart';
-import '../../shared/shuyo_text_styles.dart';
+import '../../data/models/home_layout.dart';
 import '../../shared/theme/shuyo_theme.dart';
+import '../../shared/theme/custom_background.dart';
 
 class HomeDashboardPage extends StatelessWidget {
   const HomeDashboardPage({
     super.key,
-    required this.profile,
-    required this.isOnline,
-    required this.hasLocalAccount,
-    required this.forumRequiresReauthentication,
     required this.hasAcademicAccount,
-    this.academicStudentId,
+    this.academicSessionExpired = false,
+    this.academicDisplayName,
     required this.isAcademicLoginCompleting,
-    required this.isCheckingConnection,
-    required this.isInitialConnectionCheck,
-    required this.isBusy,
     required this.onLogin,
-    required this.onRelogin,
     required this.onOpenAcademicSystem,
     required this.onOpenAnnouncements,
     required this.onOpenEmptyClassroom,
-    required this.onOpenCourseRatings,
+    this.onOpenLibraryBooking,
+    this.onOpenCampusCard,
+    this.onRefreshCampusCard,
+    this.isCampusCardRefreshing = false,
+    this.campusCardContent = '查询余额和消费记录',
+    this.onOpenCampusMap,
+    required this.onOpenOtp,
     required this.todayCourseContent,
     required this.announcementContent,
+    this.layout,
     this.isDemo = false,
   });
 
-  final UserProfile profile;
-  final bool isOnline;
-  final bool hasLocalAccount;
-  final bool forumRequiresReauthentication;
   final bool hasAcademicAccount;
-  final String? academicStudentId;
+  final bool academicSessionExpired;
+  final String? academicDisplayName;
   final bool isAcademicLoginCompleting;
-  final bool isCheckingConnection;
-  final bool isInitialConnectionCheck;
-  final bool isBusy;
   final VoidCallback onLogin;
-  final VoidCallback onRelogin;
   final VoidCallback onOpenAcademicSystem;
   final VoidCallback onOpenAnnouncements;
   final VoidCallback onOpenEmptyClassroom;
-  final VoidCallback onOpenCourseRatings;
+  final VoidCallback? onOpenLibraryBooking;
+  final VoidCallback? onOpenCampusCard;
+  final VoidCallback? onRefreshCampusCard;
+  final bool isCampusCardRefreshing;
+  final String campusCardContent;
+  final VoidCallback? onOpenCampusMap;
+  final VoidCallback onOpenOtp;
   final String todayCourseContent;
   final String announcementContent;
+  final HomeLayout? layout;
   final bool isDemo;
 
   static String? _sessionGreetingText;
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
-      children: [
-        if (isDemo) ...[
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(
-              color: context.shuyoColors.surfaceAlt,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: context.shuyoColors.border),
-            ),
-            child: Text(
-              '演示模式 · 本地静态数据，操作不会上传',
-              style: TextStyle(
-                color: context.shuyoColors.textSecondary,
-                fontSize: 13,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-        ],
-        _HomeRow(
-          title: hasLocalAccount
-              ? '欢迎回来，${profile.username}'
-              : isAcademicLoginCompleting
-                  ? '正在完成校园登录'
-                  : hasAcademicAccount
-                      ? academicStudentId?.isNotEmpty == true
-                          ? '你好，$academicStudentId！'
-                          : '你好！'
-                      : '立即登录',
-          content: !hasLocalAccount
-              ? isAcademicLoginCompleting
-                  ? '正在获取课表...'
-                  : hasAcademicAccount
-                      ? '点此登录乐乎论坛'
-                      : '登录后同步个人数据'
-              : isCheckingConnection && !isInitialConnectionCheck
-                  ? '正在连接论坛...'
-                  : isOnline
-                      ? _greeting()
-                      : isInitialConnectionCheck
-                          ? _greeting()
-                          : forumRequiresReauthentication
-                              ? '论坛登录已失效，请重新登录'
-                              : '无法连接乐乎论坛，请稍后重试',
-          trailing: isAcademicLoginCompleting && !hasLocalAccount
+    final colors = context.shuyoColors;
+    final customBackground = CustomBackgroundScope.maybeOf(context) != null;
+    final background =
+        customBackground ? Colors.transparent : colors.background;
+    final groups = (layout ?? HomeLayout.defaults()).visibleGroups;
+    final accountRow = _HomeRow(
+      title: isAcademicLoginCompleting
+          ? '正在完成校园登录'
+          : hasAcademicAccount
+              ? academicDisplayName?.isNotEmpty == true
+                  ? '你好，$academicDisplayName！'
+                  : '你好！'
+              : academicSessionExpired
+                  ? '重新登录'
+                  : '立即登录',
+      content: isAcademicLoginCompleting
+          ? '正在获取课表...'
+          : hasAcademicAccount
+              ? _greeting()
+              : academicSessionExpired
+                  ? '登录已失效，请重新登录'
+                  : '登录后同步个人数据',
+      trailing: SizedBox(
+        width: kMinInteractiveDimension,
+        height: kMinInteractiveDimension,
+        child: Center(
+          child: isAcademicLoginCompleting
               ? const SizedBox(
                   width: 20,
                   height: 20,
                   child: CircularProgressIndicator(strokeWidth: 3),
                 )
-              : hasLocalAccount
-                  ? IconButton(
-                      tooltip: '刷新论坛连接',
-                      onPressed: isBusy ? null : onRelogin,
-                      icon: isBusy && !isInitialConnectionCheck
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 3),
-                            )
-                          : const Icon(Icons.refresh),
-                    )
-                  : const Icon(Icons.login),
-          onTap: isAcademicLoginCompleting ? null : onLogin,
+              : const Icon(Icons.account_circle_outlined),
         ),
-        _HomeRow(
+      ),
+      onTap: isAcademicLoginCompleting ? null : onLogin,
+    );
+    return ColoredBox(
+      key: const ValueKey('home-background'),
+      color: background,
+      child: ListView(
+        key: const PageStorageKey('home-dashboard'),
+        padding: const EdgeInsets.only(top: 6, bottom: 16),
+        children: [
+          if (isDemo) ...[
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              decoration: BoxDecoration(
+                color: context.shuyoColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: context.shuyoColors.border),
+              ),
+              child: Text(
+                '演示模式 · 本地静态数据，操作不会上传',
+                style: TextStyle(
+                  color: context.shuyoColors.textSecondary,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          if (groups.isEmpty)
+            _HomeCard(
+              key: const ValueKey('home-account'),
+              children: [accountRow],
+            ),
+          for (var index = 0; index < groups.length; index++)
+            _HomeCard(
+              key: ValueKey('home-card:${groups[index].id}'),
+              children: [
+                if (index == 0) accountRow,
+                for (final entry in groups[index].entries)
+                  if (entry.isDivider)
+                    Divider(
+                      key: ValueKey(entry.key),
+                      color: colors.borderStrong,
+                      height: 1,
+                      thickness: 0.2,
+                      indent: 0,
+                      endIndent: 0,
+                    )
+                  else
+                    _moduleRow(entry.module!),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _moduleRow(HomeModule module) {
+    final key = ValueKey('home-module:${module.id}');
+    return switch (module) {
+      HomeModule.todayCourse => _HomeRow(
+          key: key,
           icon: Icons.event,
-          title: '今日课程',
+          title: module.title,
           content: todayCourseContent,
           onTap: onOpenAcademicSystem,
         ),
-        _HomeRow(
+      HomeModule.campusCard => _HomeRow(
+          key: key,
+          icon: Icons.account_balance_wallet_outlined,
+          title: module.title,
+          content: campusCardContent,
+          onTap: onOpenCampusCard,
+          disableRipple: true,
+          trailing: IconButton(
+            tooltip: isCampusCardRefreshing ? '正在刷新校园卡余额' : '刷新校园卡余额',
+            onPressed: isCampusCardRefreshing ? null : onRefreshCampusCard,
+            style: const ButtonStyle(
+              splashFactory: NoSplash.splashFactory,
+              overlayColor: WidgetStatePropertyAll(Colors.transparent),
+            ),
+            icon: isCampusCardRefreshing
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      semanticsLabel: '正在刷新校园卡余额',
+                    ),
+                  )
+                : const Icon(Icons.refresh, size: 22),
+          ),
+        ),
+      HomeModule.announcements => _HomeRow(
+          key: key,
           icon: Icons.developer_board,
-          title: '通知公告',
+          title: module.title,
           content: announcementContent,
           onTap: onOpenAnnouncements,
         ),
-        _HomeRow(
+      HomeModule.emptyClassroom => _HomeRow(
+          key: key,
           icon: Icons.location_on,
-          title: '空教室查询',
-          content: '选择校区、教学楼和节次后查询',
+          title: module.title,
+          content: '查看可用教室',
           onTap: onOpenEmptyClassroom,
         ),
-        _HomeRow(
-          icon: Icons.egg_alt,
-          title: '课程评价',
-          content: '搜索课程、课程号或教师',
-          onTap: onOpenCourseRatings,
+      HomeModule.libraryBooking => _HomeRow(
+          key: key,
+          icon: Icons.local_library_outlined,
+          title: module.title,
+          content: '预约场馆座位',
+          onTap: onOpenLibraryBooking,
         ),
-      ],
-    );
+      HomeModule.campusMap => _HomeRow(
+          key: key,
+          icon: Icons.map_outlined,
+          title: module.title,
+          content: '查找校园地点',
+          onTap: onOpenCampusMap,
+        ),
+      HomeModule.otp => _HomeRow(
+          key: key,
+          icon: Icons.password,
+          title: module.title,
+          content: '查看并复制 OTP 令牌',
+          onTap: onOpenOtp,
+        ),
+    };
   }
 
   String _greeting() {
@@ -218,7 +289,7 @@ class HomeDashboardPage extends StatelessWidget {
       '5-1': ['劳动节快乐，愿努力都有收获！'],
       '6-1': ['儿童节快乐，愿你永远保有童心！'],
       '9-10': ['教师节快乐，为老师送上一份祝福吧！'],
-      '10-1': ['盛世华诞，举国同庆，给自己放个大假！'],
+      '10-1': ['盛世华诞，举国同庆'],
     };
     final greetings = specialGreetings[key];
     return greetings == null ? null : _pick(greetings);
@@ -277,13 +348,48 @@ class HomeDashboardPage extends StatelessWidget {
   }
 }
 
+class _HomeCard extends StatelessWidget {
+  const _HomeCard({super.key, required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.shuyoColors;
+    final customBackground = CustomBackgroundScope.maybeOf(context);
+    final lightCard =
+        customBackground == null && colors.brightness == Brightness.light;
+    final surface = customBackground != null
+        ? customBackground.moduleSurface
+        : lightCard
+            ? const Color(0xFFFFFEFC)
+            : colors.surface;
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      color: surface,
+      elevation: lightCard ? 0.5 : 0,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
+      ),
+    );
+  }
+}
+
 class _HomeRow extends StatelessWidget {
   const _HomeRow({
+    super.key,
     required this.title,
     required this.content,
     this.icon,
     this.trailing,
     this.onTap,
+    this.disableRipple = false,
   });
 
   final String title;
@@ -291,65 +397,61 @@ class _HomeRow extends StatelessWidget {
   final IconData? icon;
   final Widget? trailing;
   final VoidCallback? onTap;
+  final bool disableRipple;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.shuyoColors;
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 68),
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: colors.border)),
-        ),
-        child: Row(
-          children: [
-            if (icon != null) ...[
-              SizedBox(
-                width: 40,
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Icon(
-                    icon,
-                    color: colors.textSecondary,
-                    size: 22,
-                  ),
-                ),
-              ),
-            ],
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: ShuYoTextStyles.title(
-                      color: colors.textPrimary,
-                      size: 16,
-                      weight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    content,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: colors.textTertiary,
-                      fontSize: 13.5,
-                      height: 1.46,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            trailing ?? const Icon(Icons.chevron_right),
-          ],
+    final customBackground = CustomBackgroundScope.maybeOf(context) != null;
+    final tile = ListTile(
+      contentPadding: EdgeInsetsDirectional.only(
+        start: 16,
+        end: trailing == null ? 24 : 10,
+      ),
+      minVerticalPadding: 8,
+      minLeadingWidth: 24,
+      horizontalTitleGap: 16,
+      leading: icon == null
+          ? null
+          : Icon(icon, size: 24, color: colors.textSecondary),
+      titleTextStyle: TextStyle(
+        color: colors.textPrimary,
+        fontSize: 15.5,
+        fontWeight: FontWeight.w500,
+        height: 1.5,
+        letterSpacing: 0.5,
+      ),
+      title: Text(
+        title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Text(
+        content,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: customBackground
+              ? colors.textTertiary
+              : Color.lerp(colors.textSecondary, colors.textTertiary, 0.7),
+          fontSize: 14,
+          fontWeight: FontWeight.w400,
+          height: 1.43,
+          letterSpacing: 0.25,
         ),
       ),
+      trailing: trailing,
+      onTap: onTap,
+    );
+    if (!customBackground && !disableRipple) return tile;
+    return Theme(
+      data: Theme.of(context).copyWith(
+        splashFactory: NoSplash.splashFactory,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        hoverColor: Colors.transparent,
+      ),
+      child: tile,
     );
   }
 }

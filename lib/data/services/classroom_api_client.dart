@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -13,10 +14,46 @@ import 'academic_auth_service.dart';
 import 'http_timeout.dart';
 
 class ClassroomApiException implements Exception {
-  const ClassroomApiException(this.message, {this.statusCode});
+  const ClassroomApiException(
+    this.message, {
+    this.statusCode,
+    this.accessMode,
+    this.cause,
+  });
 
   final String message;
   final int? statusCode;
+  final ClassroomAccessMode? accessMode;
+  final Object? cause;
+
+  static ClassroomApiException forRequest(
+    Object error, {
+    required ClassroomAccessMode accessMode,
+  }) {
+    if (error is ClassroomApiException) {
+      if (error.accessMode != null) return error;
+      return ClassroomApiException(
+        error.message,
+        statusCode: error.statusCode,
+        accessMode: accessMode,
+        cause: error,
+      );
+    }
+    final message = switch (error) {
+      TimeoutException() => '请求超时，请稍后重试',
+      SocketException() ||
+      TlsException() ||
+      HttpException() ||
+      http.ClientException() =>
+        '网络连接异常，请稍后重试',
+      _ => '空教室加载失败，请稍后重试',
+    };
+    return ClassroomApiException(
+      message,
+      accessMode: accessMode,
+      cause: error,
+    );
+  }
 
   @override
   String toString() {
@@ -29,31 +66,42 @@ class ClassroomApiException implements Exception {
 }
 
 class ClassroomWebVpnAuthException extends ClassroomApiException {
-  const ClassroomWebVpnAuthException() : super('WebVPN已失效，需要重新登录');
+  const ClassroomWebVpnAuthException()
+      : super('WebVPN登录已失效，需要重新登录', accessMode: ClassroomAccessMode.webVpn);
 }
 
 class ClassroomApiClient {
   ClassroomApiClient({
     ClassroomAuthService? authService,
     http.Client? httpClient,
-  })  : _authService = authService ?? ClassroomAuthService(),
+    Future<WebVpnSessionStatus> Function()? webVpnSessionValidator,
+  })  : _webVpnSessionValidator = webVpnSessionValidator ??
+            (() => AcademicAuthService().validateWebVpnSession()),
+        _authService = authService ?? ClassroomAuthService(),
         _httpClient = httpClient ?? IOClient(HttpClient());
 
   final ClassroomAuthService _authService;
   final http.Client _httpClient;
+  final Future<WebVpnSessionStatus> Function() _webVpnSessionValidator;
 
-  Future<ClassroomSearchOptions> fetchSearchOptions() async {
-    final form = await _postJson('/build/findSearchRoomSearchForm');
-    final section = await _postJson('/course/findSection');
+  Future<ClassroomSearchOptions> fetchSearchOptions({
+    ClassroomAccessMode? accessMode,
+  }) async {
+    final mode = accessMode ?? ClassroomUrlResolver.accessMode;
+    final form =
+        await _postJson('/build/findSearchRoomSearchForm', accessMode: mode);
+    final section = await _postJson('/course/findSection', accessMode: mode);
     return parseSearchOptions(form, section);
   }
 
   Future<ClassroomBuildingSchedule> fetchBuildingSchedule({
     required ClassroomBuilding building,
     required DateTime date,
+    ClassroomAccessMode? accessMode,
   }) async {
     final json = await _postJson(
       '/build/findBuildRoomType',
+      accessMode: accessMode ?? ClassroomUrlResolver.accessMode,
       body: {
         'buildId': building.id.toString(),
         'courseDate': _dateParam(date),
@@ -105,12 +153,18 @@ class ClassroomApiClient {
   Future<JsonMap> _postJson(
     String path, {
     Map<String, String>? body,
+    required ClassroomAccessMode accessMode,
   }) async {
+    // Keep the destination and authentication in the same access mode even
+    // if settings change while session cookies are being read.
+    final useWebVpn = accessMode == ClassroomAccessMode.webVpn;
+    final accessRevision = ClassroomUrlResolver.revision;
+    final uri = ClassroomUrlResolver.uri(path, accessMode: accessMode);
     try {
-      final headers = await _headers();
+      final headers = await _headers(uri, useWebVpn: useWebVpn);
       final response = await HttpTimeout.request(
         _httpClient.post(
-          ClassroomUrlResolver.uri(path),
+          uri,
           headers: headers,
           body: body,
         ),
@@ -133,26 +187,38 @@ class ClassroomApiClient {
       return decoded;
     } on ClassroomWebVpnAuthException {
       rethrow;
-    } on Object {
-      if (ClassroomUrlResolver.usesWebVpn) {
-        final status = await AcademicAuthService().validateWebVpnSession();
-        if (status == WebVpnSessionStatus.loginRequired) {
+    } catch (error, stackTrace) {
+      if (useWebVpn && accessRevision == ClassroomUrlResolver.revision) {
+        var status = WebVpnSessionStatus.unavailable;
+        try {
+          status = await _webVpnSessionValidator();
+        } on Object {
+          // A failed probe does not establish that the login has expired.
+        }
+        if (accessRevision == ClassroomUrlResolver.revision &&
+            status == WebVpnSessionStatus.loginRequired) {
           throw const ClassroomWebVpnAuthException();
         }
       }
-      rethrow;
+      Error.throwWithStackTrace(
+        ClassroomApiException.forRequest(error, accessMode: accessMode),
+        stackTrace,
+      );
     }
   }
 
-  Future<Map<String, String>> _headers() async {
+  Future<Map<String, String>> _headers(
+    Uri uri, {
+    required bool useWebVpn,
+  }) async {
     final headers = <String, String>{
       'accept': 'application/json, text/javascript, */*; q=0.01',
-      'referer': ClassroomUrlResolver.baseUrl,
+      'referer': uri.origin,
       'user-agent': ClientUserAgent.mobileBrowser,
       'x-requested-with': 'XMLHttpRequest',
     };
-    if (ClassroomUrlResolver.usesWebVpn) {
-      final cookie = await _authService.cookieHeader();
+    if (useWebVpn) {
+      final cookie = await _authService.cookieHeader(targetUri: uri);
       if (cookie == null || cookie.isEmpty) {
         throw const ClassroomWebVpnAuthException();
       }

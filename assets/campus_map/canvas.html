@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>校园地图</title>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+    body { background: #eaeadf; overscroll-behavior: none; }
+    #map { position: relative; width: 100%; height: 100%; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+    #map-base { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+    #map-base > svg { display: block; width: 100%; height: 100%; overflow: hidden; }
+    #map-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    [data-place-id] { cursor: pointer; }
+    .shuyo-selected:is(path, polygon, rect, circle, ellipse),
+    .shuyo-selected :is(path, polygon, rect, circle, ellipse) {
+      fill: var(--selected-fill, #b1cff7) !important;
+      stroke: var(--accent, #3478d4) !important;
+      stroke-width: 2px !important;
+      vector-effect: non-scaling-stroke;
+    }
+    .shuyo-pin { fill: var(--accent, #3478d4); stroke: white; stroke-width: 2px; vector-effect: non-scaling-stroke; pointer-events: all; }
+    .shuyo-location { fill: #2678f2; stroke: white; stroke-width: 3px; vector-effect: non-scaling-stroke; }
+    .shuyo-accuracy { fill: #2678f2; fill-opacity: .12; stroke: #2678f2; stroke-opacity: .3; stroke-width: 1px; vector-effect: non-scaling-stroke; }
+  </style>
+</head>
+<body>
+  <div id="map" role="img" aria-label="校园地图"></div>
+  <script>
+    'use strict';
+    (() => {
+      const host = document.getElementById('map');
+      const ns = 'http://www.w3.org/2000/svg';
+      // Each campus supplies its own initialView from map_data.json.
+      let initialView = null;
+      let campusId = null;
+      let debugView = false;
+      let active = true;
+      let reportTimer = null;
+      let svg = null;
+      let baseLayer = null;
+      let overlay = null;
+      let selectionLayer = null;
+      let cachedGestures = true;
+      let cachedView = null;
+      let cachedViewport = null;
+      let cacheAnchor = null;
+      let cacheMoving = false;
+      let bounds = {x: 0, y: 0, width: 1, height: 1};
+      let view = {...bounds};
+      let base = {...bounds};
+      let bottomInset = 0;
+      let places = new Map();
+      let featureElements = new Map();
+      let featureBounds = new Map();
+      let pointMarkers = new Map();
+      let selectedId = null;
+      let location = null;
+      let markerLayer = null;
+      let locationLayer = null;
+      let selectedMarker = null;
+      let locationMarker = null;
+      let accuracyMarker = null;
+      let markerUnit = null;
+      let paintedView = null;
+      let viewport = {width: 1, height: 1, left: 0, top: 0};
+      let pointers = new Map();
+      let gesture = null;
+      let gestureDirty = false;
+      let panSamples = [];
+      let wheelInput = null;
+      let moved = false;
+      let lastTap = null;
+      let paintFrame = 0;
+      let motion = null;
+      let focusTarget = null;
+      let isDefaultView = true;
+
+      const notify = (value) => {
+        if (window.ShuyoMap) window.ShuyoMap.postMessage(JSON.stringify(value));
+      };
+      // Read layout only when the viewport changes or a gesture starts.
+      const size = () => viewport;
+      const readViewport = () => {
+        const rect = host.getBoundingClientRect();
+        viewport = {width: Math.max(1, rect.width), height: Math.max(1, rect.height), left: rect.left, top: rect.top};
+      };
+      const fillWidth = () => {
+        const s = size();
+        return Math.min(bounds.width, bounds.height * s.width / s.height);
+      };
+      const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+      const finitePoint = (point) => point && Number.isFinite(point.x) && Number.isFinite(point.y);
+      const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+      const middle = (a, b) => ({x: (a.x + b.x) / 2, y: (a.y + b.y) / 2});
+      const localPoint = (event) => ({x: event.clientX - viewport.left, y: event.clientY - viewport.top});
+      const worldPoint = (point, box = view) => {
+        const s = size();
+        return {x: box.x + point.x / s.width * box.width, y: box.y + point.y / s.height * box.height};
+      };
+      const circle = (className, point, radius) => {
+        const element = document.createElementNS(ns, 'circle');
+        element.setAttribute('class', className);
+        element.setAttribute('cx', point.x);
+        element.setAttribute('cy', point.y);
+        element.setAttribute('r', radius);
+        return element;
+      };
+
+      function updateBase() {
+        const s = size();
+        const visibleHeight = Math.max(s.height * .25, s.height - bottomInset);
+        const width = Math.max(bounds.width * 1.08, bounds.height * 1.08 * s.width / visibleHeight);
+        const height = width * s.height / s.width;
+        base = {
+          x: bounds.x + bounds.width / 2 - width / 2,
+          y: bounds.y + bounds.height / 2 - height * visibleHeight / s.height / 2,
+          width, height,
+        };
+      }
+
+      function defaultView() {
+        isDefaultView = true;
+        updateBase();
+        const s = size();
+        // Fill the visible area, with a little extra zoom for readable labels.
+        const initialWidth = fillWidth() / initialView.zoom;
+        const initialHeight = initialWidth * s.height / s.width;
+        view = {
+          x: initialView.center.x - initialWidth / 2,
+          y: initialView.center.y - initialHeight / 2,
+          width: initialWidth, height: initialHeight,
+        };
+        draw();
+      }
+
+      function stopMotion() {
+        motion = null;
+      }
+
+      function cancelFocus() {
+        focusTarget = null;
+        stopMotion();
+      }
+
+      function setActive(next) {
+        if (active === next) return;
+        active = next;
+        if (!active) {
+          // Flutter can cover this WebView without changing document.hidden.
+          // Stop work behind search and discard input; keep the loaded SVG and
+          // camera so returning to the map does not reload or resume a fling.
+          cancelFocus();
+          pointers.clear(); gesture = null; gestureDirty = false;
+          panSamples = []; wheelInput = null; lastTap = null;
+          if (paintFrame) cancelAnimationFrame(paintFrame);
+          paintFrame = 0;
+          if (reportTimer !== null) clearTimeout(reportTimer);
+          reportTimer = null;
+        }
+      }
+
+      function moveTo(target, duration = 360) {
+        stopMotion();
+        if (duration <= 0 || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+          view = target;
+        } else {
+          const started = performance.now();
+          motion = {kind: 'focus', start: {...view}, target, started, deadline: started + duration};
+        }
+        draw();
+      }
+
+      function constrain() {
+        // Keep some space around the campus while allowing every edge to be reached.
+        const s = size();
+        const minWidth = Math.max(bounds.width, bounds.height * s.width / s.height) / 18;
+        const maxWidth = Math.max(base.width, bounds.width * 1.2);
+        const width = clamp(view.width, minWidth, maxWidth);
+        const center = {x: view.x + view.width / 2, y: view.y + view.height / 2};
+        view.width = width;
+        view.height = width * s.height / s.width;
+        const padX = view.width * .35;
+        const padY = view.height * .35;
+        const x = clamp(center.x, bounds.x - padX, bounds.x + bounds.width + padX);
+        const y = clamp(center.y, bounds.y - padY, bounds.y + bounds.height + padY);
+        view.x = x - view.width / 2;
+        view.y = y - view.height / 2;
+      }
+
+      const sameView = (a, b) => a && b &&
+        a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+
+      function paintBaseMap() {
+        const s = size();
+        if (!cachedGestures) {
+          baseLayer.style.width = `${s.width}px`;
+          baseLayer.style.height = `${s.height}px`;
+          if (!sameView(cacheAnchor, view)) {
+            svg.setAttribute('viewBox', `${view.x} ${view.y} ${view.width} ${view.height}`);
+            cacheAnchor = {...view};
+          }
+          return;
+        }
+        const moving = pointers.size > 0 || motion !== null;
+        const scale = cachedView ? cacheAnchor.width / view.width : 1;
+        const covered = cachedView && view.x >= cachedView.x && view.y >= cachedView.y &&
+          view.x + view.width <= cachedView.x + cachedView.width &&
+          view.y + view.height <= cachedView.y + cachedView.height;
+        if (!covered || cachedViewport.width !== s.width || cachedViewport.height !== s.height ||
+            scale < .67 || scale > 1.5 || (!moving && (cacheMoving || !sameView(cacheAnchor, view)))) {
+          // A modest overscan keeps short drags on the compositor without
+          // allocating a texture for the whole campus at the current zoom.
+          const padX = Math.min(s.width * .25, 128);
+          const padY = Math.min(s.height * .25, 192);
+          const unit = view.width / s.width;
+          cachedView = {
+            x: view.x - padX * unit, y: view.y - padY * unit,
+            width: view.width + 2 * padX * unit,
+            height: view.height + 2 * padY * unit,
+          };
+          cachedViewport = {width: s.width, height: s.height};
+          cacheAnchor = {...view};
+          baseLayer.style.width = `${s.width + 2 * padX}px`;
+          baseLayer.style.height = `${s.height + 2 * padY}px`;
+          svg.setAttribute('viewBox', `${cachedView.x} ${cachedView.y} ${cachedView.width} ${cachedView.height}`);
+        }
+        const currentScale = cacheAnchor.width / view.width;
+        const x = (cachedView.x - view.x) * s.width / view.width;
+        const y = (cachedView.y - view.y) * s.height / view.height;
+        baseLayer.style.transform = `matrix(${currentScale}, 0, 0, ${currentScale}, ${x}, ${y})`;
+        cacheMoving = moving;
+      }
+
+      function draw() {
+        if (!active || paintFrame) return;
+        paintFrame = requestAnimationFrame((now) => {
+          paintFrame = 0;
+          if (!svg || !active) return;
+          applyInputs();
+          advanceMotion(now);
+          const value = `${view.x} ${view.y} ${view.width} ${view.height}`;
+          if (value !== paintedView) {
+            overlay.setAttribute('viewBox', value);
+            paintedView = value;
+          }
+          paintBaseMap();
+          const unit = view.width / size().width;
+          // Retain marker nodes; panning does not change their geometry.
+          if (unit !== markerUnit) {
+            for (const [id, marker] of pointMarkers) {
+              marker.setAttribute('r', unit * (id === selectedId ? 7 : 4));
+            }
+            selectedMarker.setAttribute('r', unit * 7);
+            locationMarker.setAttribute('r', unit * 6);
+            markerUnit = unit;
+          }
+          if (debugView && reportTimer === null) {
+            reportTimer = setTimeout(() => {
+              reportTimer = null;
+              notify({type: 'viewport', campusId, view: {
+                zoom: fillWidth() / view.width,
+                center: {x: view.x + view.width / 2, y: view.y + view.height / 2},
+              }});
+            }, 100);
+          }
+          if (motion) draw();
+        });
+      }
+
+      function measureBox(elements) {
+        const boxes = elements.flatMap((element) => {
+          try {
+            const box = element.getBBox();
+            // Source footprints use viewBox coordinates without transforms.
+            return box.width > 0 && box.height > 0 ? [box] : [];
+          } catch (_) { return []; }
+        });
+        if (!boxes.length) return null;
+        const left = Math.min(...boxes.map(box => box.x));
+        const top = Math.min(...boxes.map(box => box.y));
+        return {
+          x: left, y: top,
+          width: Math.max(...boxes.map(box => box.x + box.width)) - left,
+          height: Math.max(...boxes.map(box => box.y + box.height)) - top,
+        };
+      }
+
+      const boxFor = (id) => featureBounds.get(id) || null;
+
+      function pointFor(id) {
+        const box = boxFor(id);
+        if (box) return {x: box.x + box.width / 2, y: box.y + box.height / 2};
+        const point = places.get(id)?.point;
+        return finitePoint(point) ? point : null;
+      }
+
+      function focusView() {
+        const {point, box} = focusTarget;
+        const s = size();
+        const ratio = s.width / s.height;
+        const visibleHeight = Math.max(s.height * .25, s.height - bottomInset);
+        const width = clamp(Math.max(base.width / 5,
+          box ? box.width * 2 : 0,
+          box ? box.height * 2 * s.width / visibleHeight : 0),
+          Math.max(bounds.width, bounds.height * ratio) / 18,
+          Math.max(base.width, bounds.width * 1.2));
+        const height = width / ratio;
+        // Clamp the zoom before positioning, so edge buildings also stay centered.
+        return {x: point.x - width / 2,
+          y: point.y - height * visibleHeight / s.height / 2,
+          width, height};
+      }
+
+      function focus(point, box = null) {
+        if (!finitePoint(point)) return;
+        isDefaultView = false;
+        focusTarget = {point: {...point}, box};
+        moveTo(focusView());
+      }
+
+      function refocus() {
+        if (!focusTarget) return;
+        // Layout updates keep the original deadline instead of starting another
+        // 360 ms animation. Once settled, follow panel resizing directly.
+        const remaining = motion ? Math.max(0, motion.deadline - performance.now()) : 0;
+        moveTo(focusView(), remaining);
+      }
+
+      function updateSelectedMarker() {
+        selectionLayer.replaceChildren();
+        for (const element of featureElements.get(selectedId) || []) {
+          const clone = element.cloneNode(true);
+          // IDs belong to the immutable bottom map. Overlay copies must not
+          // participate in feature lookup or intercept building/label taps.
+          for (const child of [clone, ...clone.querySelectorAll('*')]) {
+            child.removeAttribute('id');
+            child.removeAttribute('data-place-id');
+          }
+          selectionLayer.appendChild(clone);
+        }
+        const point = pointFor(selectedId);
+        selectedMarker.style.display = point && !pointMarkers.has(selectedId) ? '' : 'none';
+        if (point) {
+          selectedMarker.setAttribute('cx', point.x);
+          selectedMarker.setAttribute('cy', point.y);
+          selectedMarker.dataset.placeId = selectedId;
+        }
+        markerUnit = null;
+      }
+
+      function updateLocation(next) {
+        const point = finitePoint(next) ? next : null;
+        if (location?.x === point?.x && location?.y === point?.y && location?.accuracy === point?.accuracy) return;
+        location = point;
+        locationMarker.style.display = point ? '' : 'none';
+        const accuracy = point && Number.isFinite(point.accuracy) && point.accuracy > 0;
+        accuracyMarker.style.display = accuracy ? '' : 'none';
+        if (point) {
+          for (const marker of [locationMarker, accuracyMarker]) {
+            marker.setAttribute('cx', point.x);
+            marker.setAttribute('cy', point.y);
+          }
+          if (accuracy) accuracyMarker.setAttribute('r', Math.min(point.accuracy, bounds.width));
+        }
+      }
+
+      function zoom(factor, point, schedule = true) {
+        isDefaultView = false;
+        cancelFocus();
+        const anchor = worldPoint(point);
+        const s = size();
+        const width = clamp(view.width / factor, Math.max(bounds.width, bounds.height * s.width / s.height) / 18, base.width);
+        const height = width * s.height / s.width;
+        view = {x: anchor.x - point.x / s.width * width,
+          y: anchor.y - point.y / s.height * height, width, height};
+        constrain();
+        if (schedule) draw();
+      }
+
+      function startGesture(time = performance.now()) {
+        const current = [...pointers.values()];
+        gestureDirty = false;
+        panSamples = current.length === 1 ? [{...current[0], time}] : [];
+        gesture = current.length >= 2
+          ? {view: {...view}, midpoint: middle(current[0], current[1]), distance: Math.max(1, distance(current[0], current[1]))}
+          : current.length === 1 ? {view: {...view}, point: current[0]} : null;
+      }
+
+      function samplePan(point, time) {
+        if (!gesture?.point || pointers.size !== 1) return;
+        const previous = panSamples[panSamples.length - 1];
+        if (previous && time < previous.time) return;
+        if (previous && time === previous.time) panSamples.pop();
+        panSamples.push({...point, time});
+        while (panSamples.length > 2 && time - panSamples[0].time > 80) panSamples.shift();
+        if (panSamples.length > 12) panSamples.shift();
+      }
+
+      function updatePointer(event) {
+        const point = localPoint(event);
+        pointers.set(event.pointerId, point);
+        if (gesture?.point && distance(point, gesture.point) > 3) moved = true;
+        samplePan(point, event.timeStamp);
+        gestureDirty = true;
+      }
+
+      function applyInputs() {
+        if (gestureDirty && gesture) {
+          gestureDirty = false;
+          const current = [...pointers.values()];
+          const s = size();
+          if (current.length >= 2 && gesture.midpoint) {
+            const midpoint = middle(current[0], current[1]);
+            const scale = distance(current[0], current[1]) / gesture.distance;
+            const anchor = worldPoint(gesture.midpoint, gesture.view);
+            const width = clamp(gesture.view.width / Math.max(.1, scale), Math.max(bounds.width, bounds.height * s.width / s.height) / 18, base.width);
+            const height = width * s.height / s.width;
+            view = {x: anchor.x - midpoint.x / s.width * width,
+              y: anchor.y - midpoint.y / s.height * height, width, height};
+          } else if (current.length === 1 && gesture.point && moved) {
+            const point = current[0];
+            view = {...gesture.view,
+              x: gesture.view.x - (point.x - gesture.point.x) / s.width * gesture.view.width,
+              y: gesture.view.y - (point.y - gesture.point.y) / s.height * gesture.view.height};
+          }
+          if (moved) constrain();
+        }
+        if (wheelInput) {
+          const input = wheelInput;
+          wheelInput = null;
+          zoom(Math.exp(clamp(input.delta, -4, 4)), input.point, false);
+        }
+      }
+
+      function startInertia(time) {
+        if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+        const samples = panSamples.filter(sample => time - sample.time <= 80);
+        if (samples.length < 2) return;
+        const first = samples[0], last = samples[samples.length - 1];
+        const elapsed = last.time - first.time;
+        if (elapsed < 8) return;
+        const vx = (last.x - first.x) / elapsed, vy = (last.y - first.y) / elapsed;
+        const speed = Math.hypot(vx, vy);
+        if (speed < .08) return;
+        const unit = view.width / size().width;
+        const factor = Math.min(1, 3 / speed) * -unit;
+        motion = {kind: 'inertia', start: {...view}, started: performance.now(),
+          vx: vx * factor, vy: vy * factor,
+          duration: Math.min(1200, 240 * Math.log(Math.min(speed, 3) / .02))};
+      }
+
+      function advanceMotion(now) {
+        if (!motion) return;
+        if (motion.kind === 'inertia') {
+          // Integrate exponential friction in time, so 60/90/120 Hz displays
+          // travel the same distance. A held finger contributes no stale fling.
+          const elapsed = clamp(now - motion.started, 0, motion.duration);
+          const decay = Math.exp(-elapsed / 240);
+          const travel = 240 * (1 - decay);
+          const {start, vx, vy} = motion;
+          const x = start.x + vx * travel, y = start.y + vy * travel;
+          view = {...start, x, y};
+          constrain();
+          if (Math.abs(view.x - x) > 1e-6) { motion.vx = 0; motion.start.x = view.x; }
+          if (Math.abs(view.y - y) > 1e-6) { motion.vy = 0; motion.start.y = view.y; }
+          if (elapsed >= motion.duration || (motion.vx === 0 && motion.vy === 0)) stopMotion();
+          return;
+        }
+        const progress = clamp((now - motion.started) / (motion.deadline - motion.started), 0, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const {start, target} = motion;
+        view = {
+          x: start.x + (target.x - start.x) * eased,
+          y: start.y + (target.y - start.y) * eased,
+          width: start.width + (target.width - start.width) * eased,
+          height: start.height + (target.height - start.height) * eased,
+        };
+        if (progress === 1) { view = {...target}; motion = null; }
+      }
+
+      host.addEventListener('pointerdown', (event) => {
+        if (!svg || !active) return;
+        applyInputs();
+        readViewport();
+        const interrupted = motion?.kind === 'inertia';
+        cancelFocus();
+        isDefaultView = false;
+        event.preventDefault();
+        host.setPointerCapture(event.pointerId);
+        if (pointers.size === 0) moved = interrupted;
+        pointers.set(event.pointerId, localPoint(event));
+        if (pointers.size > 1) { moved = true; lastTap = null; }
+        startGesture(event.timeStamp);
+      });
+
+      host.addEventListener('pointermove', (event) => {
+        if (!pointers.has(event.pointerId) || !gesture) return;
+        event.preventDefault();
+        // Pointer dispatch can be much faster than the display. Keep the last
+        // positions and a short velocity history, then solve the camera once.
+        updatePointer(event);
+        draw();
+      });
+
+      function endPointer(event, cancelled) {
+        if (!pointers.has(event.pointerId)) return;
+        const single = pointers.size === 1;
+        const point = localPoint(event);
+        if (!cancelled) updatePointer(event);
+        applyInputs();
+        pointers.delete(event.pointerId);
+        if (!cancelled && single && moved && gesture?.point) startInertia(event.timeStamp);
+        if (!cancelled && single && !moved) {
+          const now = Date.now();
+          const id = document.elementsFromPoint(event.clientX, event.clientY)
+            .map(target => target.closest('[data-place-id]')?.dataset.placeId)
+            .find(id => places.has(id));
+          if (lastTap && lastTap.id === id && now - lastTap.time < 280 && distance(lastTap.point, point) < 24) {
+            zoom(2, point);
+            lastTap = null;
+          } else {
+            lastTap = {time: now, point, id};
+            // Labels and road strokes can sit above a building footprint.
+            // Look through the SVG stack so tapping its name still selects it.
+            if (id && places.has(id)) notify({type: 'place', id});
+            else notify({type: 'background'});
+          }
+        }
+        startGesture(event.timeStamp);
+        draw();
+      }
+      host.addEventListener('pointerup', event => endPointer(event, false));
+      host.addEventListener('pointercancel', event => endPointer(event, true));
+      host.addEventListener('lostpointercapture', event => {
+        if (pointers.has(event.pointerId)) {
+          applyInputs();
+          pointers.delete(event.pointerId);
+          moved = true;
+          startGesture();
+          draw();
+        }
+      });
+      host.addEventListener('wheel', (event) => {
+        event.preventDefault();
+        if (svg && active) {
+          if (!wheelInput) readViewport();
+          cancelFocus();
+          isDefaultView = false;
+          wheelInput = {delta: (wheelInput?.delta || 0) - event.deltaY * .002, point: localPoint(event)};
+          draw();
+        }
+      }, {passive: false});
+
+      new ResizeObserver(() => {
+        applyInputs();
+        const previousViewport = viewport;
+        readViewport();
+        if (!svg) return;
+        updateBase();
+        if (isDefaultView) {
+          defaultView();
+          return;
+        }
+        const s = size();
+        const center = {x: view.x + view.width / 2, y: view.y + view.height / 2};
+        view.height = view.width * s.height / s.width;
+        view.y = center.y - view.height / 2;
+        if (focusTarget) refocus();
+        else {
+          stopMotion();
+          constrain();
+          draw();
+        }
+        if (pointers.size) {
+          for (const [id, point] of pointers) pointers.set(id, {
+            x: point.x + previousViewport.left - viewport.left,
+            y: point.y + previousViewport.top - viewport.top,
+          });
+          startGesture();
+        }
+      }).observe(host);
+
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) return;
+        pointers.clear(); gesture = null; gestureDirty = false; panSamples = []; wheelInput = null; lastTap = null;
+        if (focusTarget) view = focusView();
+        stopMotion();
+        draw();
+      });
+
+      window.campusMap = {
+        load(data) {
+          try {
+            readViewport();
+            if (reportTimer !== null) clearTimeout(reportTimer);
+            reportTimer = null;
+            campusId = data.campusId;
+            debugView = data.debug === true;
+            active = data.active !== false;
+            initialView = data.initialView;
+            if (!finitePoint(initialView?.center) || !Number.isFinite(initialView.zoom) || initialView.zoom <= 0) {
+              throw new Error('Invalid initial map view');
+            }
+            document.body.style.background = data.backgroundColor;
+            cancelFocus();
+            if (paintFrame) cancelAnimationFrame(paintFrame);
+            paintFrame = 0;
+            paintedView = null;
+            markerUnit = null;
+            cachedGestures = data.cachedGestures !== false;
+            cachedView = null; cachedViewport = null; cacheAnchor = null; cacheMoving = false;
+            pointers.clear(); gesture = null; lastTap = null;
+            gestureDirty = false; panSamples = []; wheelInput = null;
+            const documentSvg = new DOMParser().parseFromString(data.svg, 'image/svg+xml');
+            const source = documentSvg.documentElement;
+            if (source.localName !== 'svg' || source.querySelector('parsererror')) throw new Error('Invalid SVG');
+            // Defence in depth for offline assets. The document never loads network resources.
+            source.querySelectorAll('script, foreignObject, image, a').forEach(element => element.remove());
+            source.querySelectorAll('*').forEach(element => {
+              for (const attribute of [...element.attributes]) {
+                if (/^on/i.test(attribute.name) || /^(?:https?:|javascript:|data:text)/i.test(attribute.value.trim())) {
+                  element.removeAttribute(attribute.name);
+                }
+              }
+            });
+            svg = document.importNode(source, true);
+            svg.removeAttribute('width'); svg.removeAttribute('height');
+            svg.setAttribute('preserveAspectRatio', 'none');
+            baseLayer = document.createElement('div');
+            baseLayer.id = 'map-base';
+            baseLayer.style.width = `${size().width}px`;
+            baseLayer.style.height = `${size().height}px`;
+            if (cachedGestures) baseLayer.style.willChange = 'transform';
+            baseLayer.appendChild(svg);
+            overlay = document.createElementNS(ns, 'svg');
+            overlay.id = 'map-overlay';
+            overlay.setAttribute('preserveAspectRatio', 'none');
+            overlay.setAttribute('aria-hidden', 'true');
+            host.replaceChildren(baseLayer, overlay);
+            const [x, y, width, height] = data.viewBox;
+            bounds = {x, y, width, height};
+            bottomInset = Math.max(0, data.bottomInset || 0);
+            places = new Map(data.places.map(place => [place.id, place]));
+            featureElements = new Map();
+            const byId = new Map([...svg.querySelectorAll('[id]')].map(element => [element.id, element]));
+            for (const place of places.values()) {
+              const elements = place.featureIds.map(id => byId.get(id)).filter(Boolean);
+              featureElements.set(place.id, elements);
+              for (const element of elements) element.dataset.placeId = place.id;
+            }
+            // Batch geometry reads after inserting the SVG, before marker writes.
+            featureBounds = new Map([...featureElements].map(([id, elements]) => [id, measureBox(elements)]));
+            markerLayer = document.createElementNS(ns, 'g');
+            locationLayer = document.createElementNS(ns, 'g');
+            selectionLayer = document.createElementNS(ns, 'g');
+            selectionLayer.setAttribute('class', 'shuyo-selected');
+            locationLayer.setAttribute('pointer-events', 'none');
+            pointMarkers = new Map();
+            for (const place of places.values()) {
+              if (featureElements.get(place.id).length || !finitePoint(place.point)) continue;
+              const marker = circle('shuyo-pin', place.point, 0);
+              marker.dataset.placeId = place.id;
+              markerLayer.appendChild(marker);
+              pointMarkers.set(place.id, marker);
+            }
+            selectedMarker = circle('shuyo-pin', {x: 0, y: 0}, 0);
+            locationMarker = circle('shuyo-location', {x: 0, y: 0}, 0);
+            accuracyMarker = circle('shuyo-accuracy', {x: 0, y: 0}, 0);
+            for (const marker of [selectedMarker, locationMarker, accuracyMarker]) marker.style.display = 'none';
+            markerLayer.appendChild(selectedMarker);
+            locationLayer.append(accuracyMarker, locationMarker);
+            overlay.append(selectionLayer, markerLayer, locationLayer);
+            selectedId = null; location = null;
+            defaultView();
+          } catch (_) { notify({type: 'error'}); }
+        },
+        update(data) {
+          if (!svg) return;
+          setActive(data.active !== false);
+          const previousInset = bottomInset;
+          bottomInset = Math.max(0, data.bottomInset || 0);
+          if (document.documentElement.style.getPropertyValue('--accent') !== data.accent) {
+            document.documentElement.style.setProperty('--accent', data.accent);
+            document.documentElement.style.setProperty('--selected-fill', data.accent + '70');
+          }
+          if (selectedId !== data.selectedId) {
+            cancelFocus();
+            selectedId = places.has(data.selectedId) ? data.selectedId : null;
+            updateSelectedMarker();
+          }
+          updateLocation(data.location);
+          const insetChanged = previousInset !== bottomInset;
+          if (insetChanged) updateBase();
+          if (data.focus) {
+            if (finitePoint(data.focusPoint)) focus(data.focusPoint);
+            else if (selectedId) {
+              focus(pointFor(selectedId), boxFor(selectedId));
+            }
+          } else if (insetChanged) refocus();
+          draw();
+        },
+      };
+      notify({type: 'ready'});
+    })();
+  </script>
+</body>
+</html>
