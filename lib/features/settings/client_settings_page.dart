@@ -31,6 +31,8 @@ import 'privacy_data_page.dart';
 import 'third_party_licenses_page.dart';
 import '../onboarding/startup_onboarding.dart';
 
+const _airFeedbackChannel = MethodChannel('work.shuyo.app/feedback');
+
 class ClientSettingsPage extends StatelessWidget {
   const ClientSettingsPage({
     super.key,
@@ -81,6 +83,10 @@ class ClientSettingsPage extends StatelessWidget {
       appBar: AppBar(title: const Text('设置')),
       body: ListView(
         children: [
+          _SettingsRow(
+            title: '发送匿名问题报告',
+            onTap: () => _openAirFeedback(context),
+          ),
           _SettingsRow(
             title: '主题切换',
             onTap: () => Navigator.of(context).push<void>(
@@ -171,6 +177,24 @@ class ClientSettingsPage extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _openAirFeedback(BuildContext context) async {
+    try {
+      await _airFeedbackChannel.invokeMethod<void>('present');
+    } on PlatformException catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('反馈功能暂不可用：${error.message ?? error.code}')),
+        );
+      }
+    } on MissingPluginException {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('反馈功能暂不可用')),
+        );
+      }
+    }
   }
 
   Future<void> _exitDemo(BuildContext context) async {
