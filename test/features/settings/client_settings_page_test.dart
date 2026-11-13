@@ -53,6 +53,20 @@ void main() {
     expect(find.text('验证身份并继续'), findsOneWidget);
   });
 
+  testWidgets('feedback entry is limited to iOS', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      await _pumpSettings(tester);
+      expect(find.text('发送匿名问题报告'), findsNothing);
+
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      await _pumpSettings(tester);
+      expect(find.text('发送匿名问题报告'), findsOneWidget);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
   testWidgets('custom theme opens without a photo and disables opacity',
       (tester) async {
     CustomBackground? saved;

@@ -1,11 +1,11 @@
 import Flutter
 import Photos
+import SwiftUI
 import UIKit
 import UserNotifications
 
 #if canImport(AlarmKit) && !targetEnvironment(macCatalyst)
   import AlarmKit
-  import SwiftUI
 #endif
 
 @main
@@ -22,12 +22,42 @@ import UserNotifications
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     UNUserNotificationCenter.current().delegate = self as UNUserNotificationCenterDelegate
+    AirCrashReports.start(
+      apiKey: "ak_production_jdSzo3xlhYz1sMiJ3mxI6VFdq13OYClx97IS4HLPJ3s",
+      endpoint: "https://apps.air.build/v1/ingest/crashes",
+      teamID: "8GW73845S8"
+    )
     UserDefaults.standard.removeObject(forKey: "emoji_recents")
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    FlutterMethodChannel(
+      name: "work.shuyo.app/feedback",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    ).setMethodCallHandler { [weak self] call, result in
+      switch call.method {
+      case "present":
+        DispatchQueue.main.async {
+          self?.presentFeedback(result: result)
+        }
+      case "send":
+        if #available(iOS 15.0, *) {
+          self?.sendFeedback(call: call, result: result)
+        } else {
+          result(
+            FlutterError(
+              code: "feedback_unavailable",
+              message: "AirFeedback requires iOS 15 or later.",
+              details: nil
+            )
+          )
+        }
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
     FlutterMethodChannel(
       name: "work.shuyo.app/image_saver",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
@@ -49,6 +79,67 @@ import UserNotifications
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
     ).setMethodCallHandler { [weak self] call, result in
       self?.courseLiveActivityController.handle(call, result: result)
+    }
+  }
+
+  @available(iOS 15.0, *)
+  private func presentFeedback(result: @escaping FlutterResult) {
+    let rootViewController = window?.rootViewController
+      ?? UIApplication.shared.connectedScenes
+        .compactMap { $0 as? UIWindowScene }
+        .flatMap { $0.windows }
+        .first(where: { $0.isKeyWindow })?.rootViewController
+    guard let rootViewController else {
+      result(
+        FlutterError(
+          code: "feedback_unavailable",
+          message: "The app interface is not ready.",
+          details: nil
+        )
+      )
+      return
+    }
+
+    var presenter = rootViewController
+    while let presented = presenter.presentedViewController {
+      presenter = presented
+    }
+    let controller = UIHostingController(rootView: FeedbackView())
+    controller.modalPresentationStyle = .pageSheet
+    presenter.present(controller, animated: true)
+    result(nil)
+  }
+
+  @available(iOS 15.0, *)
+  private func sendFeedback(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard
+      let arguments = call.arguments as? [String: Any],
+      let message = arguments["message"] as? String,
+      !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
+      result(
+        FlutterError(
+          code: "invalid_feedback",
+          message: "Expected a non-empty feedback message.",
+          details: nil
+        )
+      )
+      return
+    }
+
+    Task { @MainActor in
+      do {
+        try await FeedbackClient.send(message: message, images: [])
+        result(nil)
+      } catch {
+        result(
+          FlutterError(
+            code: "feedback_send_failed",
+            message: error.localizedDescription,
+            details: nil
+          )
+        )
+      }
     }
   }
 
