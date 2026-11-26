@@ -46,8 +46,10 @@
       let cachedGestures = true;
       let cachedView = null;
       let cachedViewport = null;
+      let cachedLayerSize = {width: 0, height: 0};
       let cacheAnchor = null;
       let cacheMoving = false;
+      let overlayVisible = false;
       let bounds = {x: 0, y: 0, width: 1, height: 1};
       let view = {...bounds};
       let base = {...bounds};
@@ -193,11 +195,49 @@
       const sameView = (a, b) => a && b &&
         a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 
+      function overlayHasContent() {
+        return selectedId !== null || location !== null || pointMarkers.size > 0;
+      }
+
+      function cacheNeedsRefresh(s, moving, scale) {
+        if (!cachedView || !cachedViewport || !cacheAnchor) return true;
+        if (cachedViewport.width !== s.width || cachedViewport.height !== s.height) return true;
+        if (scale < .67 || scale > 1.5) return true;
+        const eps = 1e-6;
+        const covered =
+          view.x >= cachedView.x - eps &&
+          view.y >= cachedView.y - eps &&
+          view.x + view.width <= cachedView.x + cachedView.width + eps &&
+          view.y + view.height <= cachedView.y + cachedView.height + eps;
+        if (!covered) return true;
+        if (!moving) {
+          if (Math.abs(scale - 1) > 1e-3) return true;
+          // Pure pans stay at exact 1:1 resolution. Only recenter the overscan
+          // after settling close to an edge so the next drag keeps headroom.
+          if (cacheMoving || !sameView(cacheAnchor, view)) {
+            const unit = view.width / s.width;
+            const minMarginX = Math.min(s.width * .25, 112) * unit;
+            const minMarginY = Math.min(s.height * .25, 128) * unit;
+            const left = view.x - cachedView.x;
+            const right = cachedView.x + cachedView.width - (view.x + view.width);
+            const top = view.y - cachedView.y;
+            const bottom = cachedView.y + cachedView.height - (view.y + view.height);
+            if (left < minMarginX || right < minMarginX || top < minMarginY || bottom < minMarginY) {
+              return true;
+            }
+          }
+        }
+        return false;
+      }
+
       function paintBaseMap() {
         const s = size();
         if (!cachedGestures) {
-          baseLayer.style.width = `${s.width}px`;
-          baseLayer.style.height = `${s.height}px`;
+          if (cachedLayerSize.width !== s.width || cachedLayerSize.height !== s.height) {
+            baseLayer.style.width = `${s.width}px`;
+            baseLayer.style.height = `${s.height}px`;
+            cachedLayerSize = {width: s.width, height: s.height};
+          }
           if (!sameView(cacheAnchor, view)) {
             svg.setAttribute('viewBox', `${view.x} ${view.y} ${view.width} ${view.height}`);
             cacheAnchor = {...view};
@@ -206,25 +246,38 @@
         }
         const moving = pointers.size > 0 || motion !== null;
         const scale = cachedView ? cacheAnchor.width / view.width : 1;
-        const covered = cachedView && view.x >= cachedView.x && view.y >= cachedView.y &&
-          view.x + view.width <= cachedView.x + cachedView.width &&
-          view.y + view.height <= cachedView.y + cachedView.height;
-        if (!covered || cachedViewport.width !== s.width || cachedViewport.height !== s.height ||
-            scale < .67 || scale > 1.5 || (!moving && (cacheMoving || !sameView(cacheAnchor, view)))) {
-          // A modest overscan keeps short drags on the compositor without
-          // allocating a texture for the whole campus at the current zoom.
-          const padX = Math.min(s.width * .25, 128);
-          const padY = Math.min(s.height * .25, 192);
+        if (cacheNeedsRefresh(s, moving, scale)) {
+          // Keep a fixed overscan box per viewport so normal pans/flings stay on
+          // the compositor without resizing the layer; bias overscan ahead when
+          // refreshing mid-pan to extend travel distance without extra texture.
+          const totalPadX = Math.min(s.width * 1.3, 512);
+          const totalPadY = Math.min(s.height * .9, 512);
+          let leftRatio = .5;
+          let topRatio = .5;
+          if (moving && cacheAnchor && Math.abs(scale - 1) <= 1e-3) {
+            const dx = view.x - cacheAnchor.x;
+            const dy = view.y - cacheAnchor.y;
+            if (Math.abs(dx) > 1e-6) leftRatio = dx > 0 ? .25 : .75;
+            if (Math.abs(dy) > 1e-6) topRatio = dy > 0 ? .25 : .75;
+          }
+          const padLeft = totalPadX * leftRatio;
+          const padTop = totalPadY * topRatio;
           const unit = view.width / s.width;
           cachedView = {
-            x: view.x - padX * unit, y: view.y - padY * unit,
-            width: view.width + 2 * padX * unit,
-            height: view.height + 2 * padY * unit,
+            x: view.x - padLeft * unit,
+            y: view.y - padTop * unit,
+            width: view.width + totalPadX * unit,
+            height: view.height + totalPadY * unit,
           };
           cachedViewport = {width: s.width, height: s.height};
           cacheAnchor = {...view};
-          baseLayer.style.width = `${s.width + 2 * padX}px`;
-          baseLayer.style.height = `${s.height + 2 * padY}px`;
+          const layerWidth = s.width + totalPadX;
+          const layerHeight = s.height + totalPadY;
+          if (cachedLayerSize.width !== layerWidth || cachedLayerSize.height !== layerHeight) {
+            baseLayer.style.width = `${layerWidth}px`;
+            baseLayer.style.height = `${layerHeight}px`;
+            cachedLayerSize = {width: layerWidth, height: layerHeight};
+          }
           svg.setAttribute('viewBox', `${cachedView.x} ${cachedView.y} ${cachedView.width} ${cachedView.height}`);
         }
         const currentScale = cacheAnchor.width / view.width;
@@ -241,21 +294,31 @@
           if (!svg || !active) return;
           applyInputs();
           advanceMotion(now);
-          const value = `${view.x} ${view.y} ${view.width} ${view.height}`;
-          if (value !== paintedView) {
-            overlay.setAttribute('viewBox', value);
-            paintedView = value;
+          const showOverlay = overlayHasContent();
+          if (showOverlay !== overlayVisible) {
+            overlayVisible = showOverlay;
+            overlay.style.display = showOverlay ? '' : 'none';
+            if (!showOverlay) paintedView = null;
+          }
+          if (showOverlay) {
+            const value = `${view.x} ${view.y} ${view.width} ${view.height}`;
+            if (value !== paintedView) {
+              overlay.setAttribute('viewBox', value);
+              paintedView = value;
+            }
           }
           paintBaseMap();
-          const unit = view.width / size().width;
-          // Retain marker nodes; panning does not change their geometry.
-          if (unit !== markerUnit) {
-            for (const [id, marker] of pointMarkers) {
-              marker.setAttribute('r', unit * (id === selectedId ? 7 : 4));
+          if (showOverlay) {
+            const unit = view.width / size().width;
+            // Retain marker nodes; panning does not change their geometry.
+            if (unit !== markerUnit) {
+              for (const [id, marker] of pointMarkers) {
+                marker.setAttribute('r', unit * (id === selectedId ? 7 : 4));
+              }
+              selectedMarker.setAttribute('r', unit * 7);
+              locationMarker.setAttribute('r', unit * 6);
+              markerUnit = unit;
             }
-            selectedMarker.setAttribute('r', unit * 7);
-            locationMarker.setAttribute('r', unit * 6);
-            markerUnit = unit;
           }
           if (debugView && reportTimer === null) {
             reportTimer = setTimeout(() => {
@@ -611,7 +674,8 @@
             paintedView = null;
             markerUnit = null;
             cachedGestures = data.cachedGestures !== false;
-            cachedView = null; cachedViewport = null; cacheAnchor = null; cacheMoving = false;
+            cachedView = null; cachedViewport = null; cachedLayerSize = {width: 0, height: 0}; cacheAnchor = null; cacheMoving = false;
+            overlayVisible = false;
             pointers.clear(); gesture = null; lastTap = null;
             gestureDirty = false; panSamples = []; wheelInput = null;
             const documentSvg = new DOMParser().parseFromString(data.svg, 'image/svg+xml');
@@ -639,6 +703,7 @@
             overlay.id = 'map-overlay';
             overlay.setAttribute('preserveAspectRatio', 'none');
             overlay.setAttribute('aria-hidden', 'true');
+            overlay.style.display = 'none';
             host.replaceChildren(baseLayer, overlay);
             const [x, y, width, height] = data.viewBox;
             bounds = {x, y, width, height};

@@ -109,7 +109,7 @@ function canvas(options = {}) {
 
   const config = {campusId: 'test', svg: '<svg/>', viewBox: [0, 0, 1000, 1000],
     initialView: {center: {x: 200, y: 200}, zoom: 2}, backgroundColor: '#eaeadf', debug: false,
-    places: [{id: 'building', featureIds: ['building'], point: {x: 200, y: 195}},
+    places: options.places ?? [{id: 'building', featureIds: ['building'], point: {x: 200, y: 195}},
       {id: 'point', featureIds: [], point: {x: 250, y: 250}}], bottomInset: 0,
     cachedGestures: options.cachedGestures !== false, active: options.active !== false};
   function tick(ms = 1000 / 60) {
@@ -182,10 +182,56 @@ test('short drags transform the retained base and keep overlay coordinates align
   c.pointer('pointerup', 210, 358); c.settle(); c.checkAlignment();
 });
 
-test('long drags refresh overscan before the viewport leaves the cached map', () => {
+test('medium drags stay cached and long drags refresh overscan ahead of travel', () => {
   const c = canvas(); const map = c.base().children[0]; const initial = map.getAttribute('viewBox');
-  c.pointer('pointerdown', 100, 350); c.pointer('pointermove', 300, 350); c.tick();
-  assert.notEqual(map.getAttribute('viewBox'), initial); c.checkAlignment();
+  const layerWidth = c.base().style.width;
+  const layerHeight = c.base().style.height;
+  c.pointer('pointerdown', 50, 350); c.pointer('pointermove', 250, 350); c.tick();
+  assert.equal(map.getAttribute('viewBox'), initial); c.checkAlignment();
+  c.pointer('pointermove', 350, 350); c.tick();
+  const refreshed = map.getAttribute('viewBox');
+  assert.notEqual(refreshed, initial);
+  assert.equal(c.base().style.width, layerWidth);
+  assert.equal(c.base().style.height, layerHeight);
+  // Directional bias allocates more overscan in the direction of camera travel.
+  const cacheBox = c.box(map);
+  const viewBox = c.box(c.overlay());
+  assert.ok(viewBox.x - cacheBox.x > (cacheBox.x + cacheBox.width) - (viewBox.x + viewBox.width));
+  c.checkAlignment();
+});
+
+test('pure pans with ample margin do not re-rasterize on release while zooms refresh crisply', () => {
+  const c = canvas(); const map = c.base().children[0]; const initial = map.getAttribute('viewBox');
+  c.pointer('pointerdown', 190, 350); c.pointer('pointermove', 230, 360); c.tick();
+  c.pointer('pointerup', 230, 360); c.settle();
+  assert.equal(map.getAttribute('viewBox'), initial);
+  c.checkAlignment();
+
+  c.pointer('pointerdown', 150, 350, 1); c.pointer('pointerdown', 230, 350, 2);
+  c.pointer('pointermove', 140, 350, 1); c.pointer('pointermove', 240, 350, 2); c.tick();
+  assert.equal(map.getAttribute('viewBox'), initial);
+  c.pointer('pointerup', 140, 350, 1); c.pointer('pointerup', 240, 350, 2); c.settle();
+  assert.notEqual(map.getAttribute('viewBox'), initial);
+  c.checkAlignment();
+});
+
+test('empty overlay stays hidden during pans and syncs immediately when content appears', () => {
+  const c = canvas({places: [{id: 'building', featureIds: ['building'], point: {x: 200, y: 195}}]});
+  assert.equal(c.overlay().style.display, 'none');
+  const overlayWrites = () => c.writes.filter(w => w.element === c.overlay() && w.name === 'viewBox').length;
+  assert.equal(overlayWrites(), 0);
+  c.pointer('pointerdown', 190, 350); c.pointer('pointermove', 240, 370); c.tick();
+  c.pointer('pointerup', 240, 370); c.settle();
+  assert.equal(c.overlay().style.display, 'none');
+  assert.equal(overlayWrites(), 0);
+
+  c.update({selectedId: 'building'}); c.tick();
+  assert.equal(c.overlay().style.display, '');
+  assert.ok(overlayWrites() > 0);
+  c.checkAlignment();
+
+  c.update({selectedId: null}); c.tick();
+  assert.equal(c.overlay().style.display, 'none');
 });
 
 test('pinch zoom keeps the midpoint anchored and refreshes excessive cache scaling', () => {
