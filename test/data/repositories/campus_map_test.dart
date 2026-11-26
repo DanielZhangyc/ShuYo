@@ -6,6 +6,7 @@ import 'package:shuyo/data/models/campus_map.dart';
 import 'package:shuyo/data/repositories/campus_map_repository.dart';
 import 'package:shuyo/data/services/campus_map_location_service.dart';
 import 'package:shuyo/data/services/campus_map_navigation_service.dart';
+import 'package:shuyo/features/campus_map/campus_map_svg.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -31,23 +32,24 @@ void main() {
           svg, contains('viewBox="${campus.viewBox.map(_compact).join(' ')}"'));
       expect(svg, isNot(contains('<script')));
       expect(svg, isNot(contains('<image')));
-      expect(svg.toLowerCase(),
-          contains('fill: ${campus.backgroundColor.toLowerCase()}'));
+      expect(
+          svg.toLowerCase(),
+          matches(RegExp(
+              'fill:\\s*${RegExp.escape(campus.backgroundColor.toLowerCase())}')));
+      final parsed = CampusMapSvgDocument.parse(svg);
+      expect(parsed.drawOpCount, greaterThan(0));
       for (final place
           in data.places.where((place) => place.campusId == campus.id)) {
         expect(place.featureIds.isNotEmpty || place.point != null, isTrue,
             reason: '${place.name} must be visible on the map');
         for (final id in place.featureIds) {
           expect(ids, contains(id), reason: '${place.name}: $id');
+          expect(parsed.featurePathsById[id], isNotEmpty,
+              reason: '${place.name}: $id must produce native vector paths');
         }
         expect(place.facts.any((fact) => fact.value.contains('测试')), isFalse);
       }
     }
-    final html = File('assets/campus_map/canvas.html').readAsStringSync();
-    expect(html, contains("connect-src 'none'"));
-    expect(html, isNot(contains('fetch(')));
-    expect(html, isNot(contains('XMLHttpRequest')));
-    expect(html, isNot(contains('<script src=')));
   });
 
   test('each campus supports an independent initial center and zoom', () {

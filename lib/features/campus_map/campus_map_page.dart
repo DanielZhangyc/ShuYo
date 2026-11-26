@@ -514,7 +514,11 @@ class _CampusMapPageState extends State<CampusMapPage>
                 else
                   _canvas(campus, sheetHeight),
                 if (!_searching) ...[
-                  Positioned(
+                  AnimatedPositioned(
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? Duration.zero
+                        : const Duration(milliseconds: 240),
+                    curve: Curves.easeOutCubic,
                     right: 16,
                     bottom:
                         ((_selected == null ? bottomPadding : sheetHeight) + 16)
@@ -531,29 +535,79 @@ class _CampusMapPageState extends State<CampusMapPage>
                   ),
                 ],
                 if (_searching) _searchResults(),
-                if (_selected != null)
-                  Align(
-                    alignment: Alignment.bottomCenter,
-                    child: CampusMapPlaceDetails(
-                      place: _selected!,
-                      campusName: data.campusById[_selected!.campusId]!.name,
-                      maxHeight: constraints.maxHeight * .72,
-                      onClose: _closeDetail,
-                      onNavigate: () => unawaited(_openNavigation(_selected!)),
-                      onHeightChanged: (height) {
-                        if (mounted &&
-                            _selected != null &&
-                            (height - _detailHeight).abs() > .5) {
-                          setState(() => _detailHeight = height);
-                        }
-                      },
-                    ),
-                  ),
+                _detailOverlay(
+                  context: context,
+                  data: data,
+                  constraints: constraints,
+                ),
               ],
             );
           }),
         ),
       ],
+    );
+  }
+
+  Widget _detailOverlay({
+    required BuildContext context,
+    required CampusMapData data,
+    required BoxConstraints constraints,
+  }) {
+    final disableAnimations = MediaQuery.disableAnimationsOf(context);
+    final selected = _selected;
+    final child = selected == null
+        ? const SizedBox.shrink(key: ValueKey('campus-map-detail-empty'))
+        : Align(
+            key: const ValueKey('campus-map-detail-sheet-host'),
+            alignment: Alignment.bottomCenter,
+            child: CampusMapPlaceDetails(
+              place: selected,
+              campusName: data.campusById[selected.campusId]!.name,
+              maxHeight: constraints.maxHeight * .72,
+              onClose: _closeDetail,
+              onNavigate: () => unawaited(_openNavigation(selected)),
+              onHeightChanged: (height) {
+                if (mounted &&
+                    _selected != null &&
+                    (height - _detailHeight).abs() > .5) {
+                  setState(() => _detailHeight = height);
+                }
+              },
+            ),
+          );
+    return Positioned.fill(
+      child: AnimatedSwitcher(
+        duration: disableAnimations
+            ? Duration.zero
+            : const Duration(milliseconds: 260),
+        reverseDuration: disableAnimations
+            ? Duration.zero
+            : const Duration(milliseconds: 180),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        layoutBuilder: (currentChild, previousChildren) => Stack(
+          fit: StackFit.expand,
+          children: [
+            for (final previous in previousChildren)
+              IgnorePointer(child: previous),
+            if (currentChild != null) currentChild,
+          ],
+        ),
+        transitionBuilder: (child, animation) {
+          if (child.key == const ValueKey('campus-map-detail-empty')) {
+            return child;
+          }
+          final slide = Tween<Offset>(
+            begin: const Offset(0, 0.25),
+            end: Offset.zero,
+          ).animate(animation);
+          return FadeTransition(
+            opacity: animation,
+            child: SlideTransition(position: slide, child: child),
+          );
+        },
+        child: child,
+      ),
     );
   }
 
