@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../data/models/course_review.dart';
 import '../../data/repositories/course_review_repository.dart';
 import '../../shared/shuyo_text_styles.dart';
+import '../../shared/theme/custom_background.dart';
 import '../../shared/theme/shuyo_theme.dart';
 import 'rate_navigation.dart';
 import 'rate_widgets.dart';
@@ -172,7 +173,7 @@ class _RateHomePageState extends State<RateHomePage> {
               ),
               IconButton(
                 tooltip: '个人中心',
-                onPressed: () => openRateProfile(context, _repo),
+                onPressed: () => _browse(openRateProfile(context, _repo)),
                 icon: const Icon(Icons.person_outline),
               ),
               const SizedBox(width: 4),
@@ -202,7 +203,7 @@ class _RateHomePageState extends State<RateHomePage> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: RateSearchField(
               readOnly: true,
-              onTap: () => openRateSearch(context, _repo),
+              onTap: () => _browse(openRateSearch(context, _repo)),
             ),
           ),
           if (_matches.isNotEmpty) ...[
@@ -215,7 +216,7 @@ class _RateHomePageState extends State<RateHomePage> {
             _RecentReviewsRow(
               units: home.recent,
               active: widget.active,
-              onTap: (unit) => openRateUnit(context, _repo, unit.id),
+              onTap: (unit) => _browse(openRateUnit(context, _repo, unit.id)),
             ),
           ],
           for (final ranking in home.rankings) ...[
@@ -223,13 +224,13 @@ class _RateHomePageState extends State<RateHomePage> {
             _section(
               ranking.title,
               action: RateMoreButton(
-                onPressed: () =>
-                    openRateRanking(context, _repo, ranking.key, ranking.title),
+                onPressed: () => _browse(openRateRanking(
+                    context, _repo, ranking.key, ranking.title)),
               ),
             ),
             _RankingRow(
               ranking: ranking,
-              onTap: (unit) => openRateUnit(context, _repo, unit.id),
+              onTap: (unit) => _browse(openRateUnit(context, _repo, unit.id)),
             ),
           ],
           if (home.colleges.isNotEmpty) ...[
@@ -237,7 +238,8 @@ class _RateHomePageState extends State<RateHomePage> {
             _section('按学院浏览'),
             _CollegeRow(
               colleges: home.colleges,
-              onTap: (college) => openRateCollege(context, _repo, college.name),
+              onTap: (college) =>
+                  _browse(openRateCollege(context, _repo, college.name)),
             ),
           ],
         ],
@@ -308,7 +310,9 @@ class _RateHomePageState extends State<RateHomePage> {
           ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _ScheduleGrid(matches: _matches, onTap: _openMatch),
+            child: _ScheduleGrid(
+                matches: _matches,
+                onTap: (match) => _browse(_openMatch(match))),
           ),
         ),
       ],
@@ -319,6 +323,11 @@ class _RateHomePageState extends State<RateHomePage> {
         padding: const EdgeInsets.fromLTRB(16, 0, 8, 6),
         child: RateSectionTitle(title: title, action: action),
       );
+
+  Future<void> _browse(Future<void> route) async {
+    await route;
+    if (mounted && _repo.isDemo) await _load();
+  }
 
   Future<void> _openMatch(RateScheduleMatch match) async {
     final result = match.result;
@@ -392,6 +401,7 @@ class _ScheduleCourseCard extends StatelessWidget {
     final hasScore =
         result.status == RateLookupStatus.unit && unit!.average != null;
     return RateCard(
+      color: CustomBackgroundScope.photoModuleSurfaceOf(context),
       onTap: onTap,
       padding: const EdgeInsets.all(12),
       child: Column(
@@ -667,6 +677,7 @@ class _HomeUnitCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.shuyoColors;
     return RateCard(
+      color: CustomBackgroundScope.photoModuleSurfaceOf(context),
       width: width,
       onTap: onTap,
       padding: const EdgeInsets.all(12),

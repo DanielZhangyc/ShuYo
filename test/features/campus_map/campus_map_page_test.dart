@@ -8,6 +8,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:shuyo/data/models/campus_map.dart';
 import 'package:shuyo/data/repositories/campus_map_repository.dart';
 import 'package:shuyo/data/services/campus_map_location_service.dart';
+import 'package:shuyo/data/services/campus_map_navigation_service.dart';
 import 'package:shuyo/features/campus_map/campus_map_canvas.dart';
 import 'package:shuyo/features/campus_map/campus_map_page.dart';
 import 'package:shuyo/features/campus_map/campus_map_place_details.dart';
@@ -39,10 +40,12 @@ class _LocationService extends CampusMapLocationService {
   int calls = 0;
   int watches = 0;
   CampusMapLocationException? failure;
+  Completer<CampusMapLocation>? pendingLocate;
 
   @override
   Future<CampusMapLocation> locate() async {
     calls++;
+    if (pendingLocate != null) return pendingLocate!.future;
     if (failure != null) throw failure!;
     return const CampusMapLocation(
         longitude: 121.3915, latitude: 31.3162, accuracy: 15);
@@ -74,10 +77,15 @@ void main() {
 
   tearDown(() async => location.controller.close());
 
-  Widget map({String initialCampus = '宝山校区'}) => CampusMapPage(
+  Widget map({
+    String initialCampus = '宝山校区',
+    CampusMapNavigationService? navigationService,
+  }) =>
+      CampusMapPage(
         initialCampus: initialCampus,
         repository: repository,
         locationService: location,
+        navigationService: navigationService,
         canvasBuilder: (context, configuration, onPlace, onBackground) {
           canvas = configuration;
           canvasUpdates.add(configuration);
@@ -709,6 +717,42 @@ void main() {
     expect(location.controller.hasListener, isFalse);
   });
 
+  testWidgets(
+      'location result and error arriving during inactive permission sheet are not dropped',
+      (tester) async {
+    location.pendingLocate = Completer<CampusMapLocation>();
+    await tester.pumpWidget(MaterialApp(home: map(initialCampus: '嘉定校区')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('定位到我的位置'));
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    location.pendingLocate!.complete(
+      const CampusMapLocation(
+          longitude: 121.3915, latitude: 31.3162, accuracy: 15),
+    );
+    await tester.pumpAndSettle();
+    expect(canvas.campus.id, 'baoshan');
+    expect(canvas.location, isNotNull);
+    expect(location.controller.hasListener, isFalse);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(location.controller.hasListener, isTrue);
+
+    location.pendingLocate = Completer<CampusMapLocation>();
+    await tester.tap(find.byTooltip('定位到我的位置'));
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    location.pendingLocate!.completeError(
+      const CampusMapLocationException('未获得定位权限，仍可浏览和搜索地图'),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('未获得定位权限，仍可浏览和搜索地图'), findsOneWidget);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('back closes search and keyboard together before leaving the map',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
@@ -735,5 +779,59 @@ void main() {
     await tester.tap(find.byTooltip('返回'));
     await tester.pumpAndSettle();
     expect(find.byType(CampusMapPage), findsNothing);
+  });
+
+  testWidgets('navigation sheet shows only installed map apps and launches',
+      (tester) async {
+    final launched = <Uri>[];
+    final nav = CampusMapNavigationService(
+      isIOS: true,
+      canLaunch: (uri) async =>
+          uri.scheme == 'maps' ||
+          uri.scheme == 'iosamap' ||
+          uri.scheme == 'comgooglemaps',
+      launcher: (uri) async {
+        launched.add(uri);
+        return true;
+      },
+    );
+    await tester.pumpWidget(MaterialApp(home: map(navigationService: nav)));
+    await tester.pumpAndSettle();
+    selectOnMap('place_baoshan_building-a');
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, '导航到这里'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('导航至 A 楼'), findsNothing);
+    expect(find.text('苹果地图'), findsOneWidget);
+    expect(find.text('高德地图'), findsOneWidget);
+    expect(find.text('Google 地图'), findsOneWidget);
+    expect(find.text('百度地图'), findsNothing);
+    expect(find.text('腾讯地图'), findsNothing);
+
+    await tester.tap(find.text('苹果地图'));
+    await tester.pumpAndSettle();
+    expect(launched, hasLength(1));
+    expect(launched.single.scheme, 'maps');
+    expect(launched.single.queryParameters['dirflg'], 'w');
+  });
+
+  testWidgets('navigation notifies when no supported map apps are installed',
+      (tester) async {
+    final nav = CampusMapNavigationService(
+      isIOS: false,
+      canLaunch: (_) async => false,
+    );
+    await tester.pumpWidget(MaterialApp(home: map(navigationService: nav)));
+    await tester.pumpAndSettle();
+    selectOnMap('place_baoshan_building-a');
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, '导航到这里'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('高德地图'), findsNothing);
+    expect(find.text('未检测到已安装的地图应用'), findsOneWidget);
   });
 }

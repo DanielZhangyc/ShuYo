@@ -50,7 +50,24 @@ class ThereBookingException implements Exception {
   String toString() => message;
 }
 
-class ThereBookingClient {
+abstract interface class LibraryBookingVenueData {
+  Future<Map<String, dynamic>> profile();
+  Future<List<Map<String, dynamic>>> recent();
+  Future<Map<String, dynamic>> overview(String day);
+  Future<List<Map<String, dynamic>>> areas(String day);
+  Future<Map<String, dynamic>> area(String areaId, String begin, String end);
+  Future<Map<String, dynamic>> detail(String bookingId);
+  Future<String> create({
+    required String areaId,
+    required String roomId,
+    required String day,
+    required String start,
+    required String end,
+  });
+  Future<void> cancel(String bookingId);
+}
+
+class ThereBookingClient implements LibraryBookingVenueData {
   ThereBookingClient({
     HttpClient? httpClient,
     SessionCookieJar? cookieJar,
@@ -83,6 +100,7 @@ class ThereBookingClient {
   AcademicSessionCookieStore _cookies = AcademicSessionCookieStore();
   bool _browserCookiesLoaded = false;
   String? _portalWebVpnToken;
+  String? _oauthState;
   bool _oauthCompleted = false;
   BookingVenue? _venue;
   String? _sessionId;
@@ -90,7 +108,9 @@ class ThereBookingClient {
   bool _submitting = false;
 
   BookingVenue? get venue => _venue;
-  bool get hasBusinessSession => _sessionId?.isNotEmpty == true;
+  // A parsed empty sessionId selects cookie authentication on newer pages.
+  // null means that no mobile entry has been initialized.
+  bool get hasBusinessSession => _sessionId != null;
 
   void dispose() => _http.close(force: true);
 
@@ -98,6 +118,7 @@ class ThereBookingClient {
     _cookies = AcademicSessionCookieStore();
     _browserCookiesLoaded = false;
     _portalWebVpnToken = null;
+    _oauthState = null;
     _oauthCompleted = false;
     _sessionId = null;
     _venue = null;
@@ -175,6 +196,12 @@ class ThereBookingClient {
       );
     }
     _requirePage(response);
+    if (RegExp(r'''["']isAnonymous["']\s*:\s*true''').hasMatch(response.body)) {
+      throw const ThereBookingException(
+        ThereFailureKind.loginRequired,
+        '图书馆预约需要登录',
+      );
+    }
     final match = RegExp(
           r'''\bsessionId\s*[=:]\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')''',
         ).firstMatch(response.body) ??
@@ -196,19 +223,27 @@ class ThereBookingClient {
     } on Object {
       session = null;
     }
-    if (session == null || session.isEmpty || session.contains('\n')) {
+    if (session == null ||
+        session.contains('\n') ||
+        session.contains('\r') ||
+        (session.isNotEmpty && session.trim().isEmpty)) {
       throw const ThereBookingException(
         ThereFailureKind.uncertain,
         '图书馆预约页面会话无效，请稍后重试',
       );
     }
-    if (RegExp(r'''["']isAnonymous["']\s*:\s*true''').hasMatch(response.body)) {
-      throw const ThereBookingException(
-        ThereFailureKind.loginRequired,
-        '图书馆预约需要登录',
+    // Current pages leave sessionId empty and authenticate API requests with
+    // SPHYS_SESSION. Keep legacy header authentication when a token is present;
+    // profile() still verifies the authenticated account in either mode.
+    _sessionId = session;
+    if (kDebugMode) {
+      debugPrint(
+        '[THERE_BOOKING] mobile-session '
+        'venue=${venue.roomType} '
+        'transport=${useWebVpn ? 'webvpn' : 'direct'} '
+        'mode=${session.isEmpty ? 'cookie' : 'header'}',
       );
     }
-    _sessionId = session;
   }
 
   Future<void> refreshVenue(BookingVenue venue) async {
@@ -216,6 +251,7 @@ class ThereBookingClient {
     await selectVenue(venue);
   }
 
+  @override
   Future<Map<String, dynamic>> profile() async {
     final data = object((await _api('GET', '/api/v3/my/profile'))['data']);
     if (data == null ||
@@ -230,18 +266,22 @@ class ThereBookingClient {
     return data;
   }
 
+  @override
   Future<List<Map<String, dynamic>>> recent() async =>
       objects((await _api('GET', '/api/v3/my/bookings/recent'))['data']);
 
+  @override
   Future<Map<String, dynamic>> overview(String day) async =>
       object((await _api('GET', '/api/v3/booking-status/overview',
           query: {'day': day}))['data']) ??
       const {};
 
+  @override
   Future<List<Map<String, dynamic>>> areas(String day) async =>
       objects((await _api('GET', '/api/v3/booking-status/areas',
           query: {'begin': day, 'end': day}))['data']);
 
+  @override
   Future<Map<String, dynamic>> area(
           String areaId, String begin, String end) async =>
       object((await _api(
@@ -251,6 +291,7 @@ class ThereBookingClient {
       ))['data']) ??
       const {};
 
+  @override
   Future<Map<String, dynamic>> detail(String bookingId) async {
     final data = object((await _api(
       'GET',
@@ -267,6 +308,7 @@ class ThereBookingClient {
   }
 
   /// Refreshes the selected interval immediately before creating a booking.
+  @override
   Future<String> create({
     required String areaId,
     required String roomId,
@@ -352,6 +394,7 @@ class ThereBookingClient {
     }
   }
 
+  @override
   Future<void> cancel(String bookingId) async {
     final current = await detail(bookingId);
     if (!strings(current['abilities']).contains('cancel')) {
@@ -376,15 +419,22 @@ class ThereBookingClient {
         'PUT', '/api/v3/bookings/${Uri.encodeComponent(bookingId)}/finish');
   }
 
-  /// Begins the service-specific exchange without changing the SSO cookie.
-  Future<void> prepareOAuth() async {
+  /// Returns the server's state paired with the initialized booking cookie.
+  Future<String> prepareOAuth() async {
+    _oauthState = null;
     final response = await _request('GET', '/login', query: {'from': 'web'});
-    if (response.status < 300 || response.status >= 400) {
+    final states = response.location?.queryParametersAll['state'];
+    if (response.status < 300 ||
+        response.status >= 400 ||
+        states == null ||
+        states.length != 1 ||
+        states.single.isEmpty) {
       throw const ThereBookingException(
         ThereFailureKind.uncertain,
         '图书馆预约暂时无法启动登录，请稍后重试',
       );
     }
+    return _oauthState = states.single;
   }
 
   Future<void> completeOAuth(
@@ -398,6 +448,16 @@ class ThereBookingClient {
       throw const ThereBookingException(
         ThereFailureKind.uncertain,
         '图书馆预约授权回调无效',
+      );
+    }
+    final states = callback.queryParametersAll['state'];
+    if (_oauthState == null ||
+        states == null ||
+        states.length != 1 ||
+        states.single != _oauthState) {
+      throw const ThereBookingException(
+        ThereFailureKind.uncertain,
+        '图书馆预约授权状态校验失败，请重新登录',
       );
     }
     await _loadBrowserCookies();
@@ -447,6 +507,7 @@ class ThereBookingClient {
         '图书馆预约登录跳转次数过多，请稍后重试',
       );
     }
+    _oauthState = null;
     _oauthCompleted = true;
     await selectVenue(BookingVenue.library);
   }
@@ -530,7 +591,7 @@ class ThereBookingClient {
       );
     }
     final headers = <String, String>{
-      'x-hys-session': _sessionId!,
+      if (_sessionId!.isNotEmpty) 'x-hys-session': _sessionId!,
       'x-room-type': venue.roomType,
       'x-hys-platform': 'UNDEFINE',
       'x-lang': 'zh',
@@ -567,6 +628,17 @@ class ThereBookingClient {
           string(json['noticeMessage']) ??
           '图书馆预约服务拒绝了本次操作';
       throw ThereBookingException(ThereFailureKind.business, message);
+    }
+    if (kDebugMode && path.startsWith('/api/v3/booking-status/areas/')) {
+      final rooms = object(json['data'])?['rooms'];
+      if (rooms is List) {
+        debugPrint(
+          '[THERE_BOOKING] seats '
+          'venue=${venue.roomType} '
+          'transport=${useWebVpn ? 'webvpn' : 'direct'} '
+          'query=${_queryShape(query)} count=${rooms.length}',
+        );
+      }
     }
     return json;
   }

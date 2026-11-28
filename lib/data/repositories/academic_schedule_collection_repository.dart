@@ -2,10 +2,9 @@ part of 'academic_schedule_repository.dart';
 
 extension AcademicScheduleCollection on AcademicScheduleRepository {
   Future<String?> _dataOwner() async {
-    final owner = await AcademicAccountStore(
-      preferencesLoader: _preferencesLoader,
-    ).loadDataStudentId();
-    if (owner != null) return owner;
+    if (await _account.loadSystem() != campusSystem) return null;
+    final owner = await _account.loadDataStudentId(system: campusSystem);
+    if (owner != null || _isGraduate) return owner;
     final raw = (await _preferencesLoader())
         .getString(AcademicScheduleRepository._scheduleKey);
     if (raw == null) return null;
@@ -66,7 +65,7 @@ extension AcademicScheduleCollection on AcademicScheduleRepository {
 
   Future<void> _mirrorPrimary(AcademicScheduleRecord record,
       {bool force = false}) async {
-    if (record.schedule == null) return;
+    if (_isGraduate || record.schedule == null) return;
     final owner = await _dataOwner();
     if (owner != null && owner != record.studentId) return;
     final prefs = await _preferencesLoader();
@@ -95,24 +94,6 @@ extension AcademicScheduleCollection on AcademicScheduleRepository {
         await prefs.remove(AcademicScheduleRepository._anchorMondayKey);
       }
     }
-  }
-
-  Future<List<AcademicScheduleRecord>> loadSavedSchedules() async {
-    final legacy = await loadCachedSchedule();
-    final owner = await _dataOwner() ?? legacy?.term.studentId;
-    return owner == null
-        ? <AcademicScheduleRecord>[]
-        : await _collection.list(owner);
-  }
-
-  Future<String?> loadPrimaryTermKey() async {
-    final owner = await _dataOwner();
-    return owner == null ? null : _collection.primaryKey(owner);
-  }
-
-  Future<AcademicScheduleRecord?> loadTermRecord(String key) async {
-    final owner = await _dataOwner();
-    return owner == null ? null : _collection.load(owner, key);
   }
 
   Future<ScheduleWeekState> loadTermWeekState(String key,
@@ -168,19 +149,22 @@ extension AcademicScheduleCollection on AcademicScheduleRepository {
   }
 
   Future<void> _checkAccount(String? studentId, int generation) async {
-    final current = await AcademicAccountStore(
-      preferencesLoader: _preferencesLoader,
-    ).loadStudentId();
-    if (current != studentId || generation != _discoveryGeneration) {
+    final current = await _account.loadStudentId(system: campusSystem);
+    if (await _account.loadSystem() != campusSystem ||
+        current != studentId ||
+        generation != _discoveryGeneration) {
       throw const AcademicApiException('账号或应用状态已变化，已停止课表同步');
     }
   }
 
-  Future<AcademicSchedule> _fetchTerm(AcademicTermQuery query) {
-    final requestKey = '$_discoveryGeneration:${query.key}';
+  Future<AcademicSchedule> _fetchTerm(AcademicTermQuery query,
+      {required String? studentId}) {
+    final requestKey = '$_discoveryGeneration:$studentId:${query.key}';
     final pending = _termRequests[requestKey];
     if (pending != null) return pending;
-    final task = _client.fetchScheduleForTerm(query);
+    final task = _isGraduate
+        ? _graduateClient.fetchScheduleForTerm(query, studentId: studentId!)
+        : _client.fetchScheduleForTerm(query);
     _termRequests[requestKey] = task;
     // Attach both branches so a failed request never creates an unhandled
     // error from an ignored whenComplete future.
@@ -201,7 +185,7 @@ extension AcademicScheduleCollection on AcademicScheduleRepository {
   }) async {
     final term = schedule.term;
     final owner = await _dataOwner();
-    if (owner != null && owner != term.studentId) {
+    if ((_isGraduate || owner != null) && owner != term.studentId) {
       throw const AcademicApiException('教务返回的课表与当前账号不匹配');
     }
     final key = academicTermKey(term.yearCode, term.termCode);
@@ -257,12 +241,11 @@ extension AcademicScheduleCollection on AcademicScheduleRepository {
     if (record.locallyEdited && !replaceEdited) {
       throw const AcademicApiException('该学期有本地修改，请确认覆盖后更新');
     }
-    final studentId = await AcademicAccountStore(
-      preferencesLoader: _preferencesLoader,
-    ).loadStudentId();
+    final studentId = await _account.loadStudentId(system: campusSystem);
     if (studentId == null) throw const AcademicAuthException();
     final generation = _discoveryGeneration;
-    final schedule = await _fetchTerm(_queryFor(record));
+    await _checkAccount(studentId, generation);
+    final schedule = await _fetchTerm(_queryFor(record), studentId: studentId);
     await _checkAccount(studentId, generation);
     if (schedule.term.studentId != studentId) {
       throw const AcademicApiException('教务返回的课表与当前账号不匹配');
@@ -275,6 +258,44 @@ extension AcademicScheduleCollection on AcademicScheduleRepository {
         expectedWorking: record.schedule);
     if (empty && !acceptEmpty) throw const AcademicNoScheduleException();
     return schedule;
+  }
+
+  Future<AcademicTermCatalog> loadSelectableTerms() async {
+    final generation = _discoveryGeneration;
+    final studentId = await _requireGraduateAccount(generation);
+    final catalog =
+        await _graduateClient.fetchTermCatalog(studentId: studentId);
+    await _checkAccount(studentId, generation);
+    return catalog;
+  }
+
+  /// Save only the semester the user picked. Historical schedules do not
+  /// replace the primary or inherit its teaching calendar.
+  Future<String> importSelectedTerm(AcademicTermQuery query,
+      {required bool isCurrent}) async {
+    final generation = _discoveryGeneration;
+    final studentId = await _requireGraduateAccount(generation);
+    final saved = await _collection.load(studentId, query.key);
+    await _checkAccount(studentId, generation);
+    if (saved?.hasSavedSchedule == true) return query.key;
+
+    final schedule = await _fetchTerm(query, studentId: studentId);
+    await _checkAccount(studentId, generation);
+    await _acceptRemote(schedule, makePrimary: isCurrent);
+    if (schedule.sessions.isEmpty && schedule.untimedCourses.isEmpty) {
+      throw const AcademicNoScheduleException();
+    }
+    return query.key;
+  }
+
+  Future<String> _requireGraduateAccount(int generation) async {
+    if (!_isGraduate) {
+      throw StateError('Only YJS supports direct term selection');
+    }
+    final studentId = await _account.loadStudentId(system: campusSystem);
+    await _checkAccount(studentId, generation);
+    if (studentId == null) throw const AcademicAuthException('请先登录研究生系统');
+    return studentId;
   }
 
   Future<void> acceptEmptyTerm(String key) async {
@@ -309,6 +330,34 @@ extension AcademicScheduleCollection on AcademicScheduleRepository {
         lastError: error is AcademicApiException ? error.message : '请求失败，请稍后重试',
       );
     });
+  }
+
+  Future<void> _initializeDiscoveredPrimary(String studentId, int generation,
+      {List<AcademicScheduleRecord>? records}) async {
+    if (await _collection.primaryKey(studentId) != null) return;
+    // The portal default and the order in which terms were checked need not
+    // reflect the newest term with courses.
+    const termOrder = {'3': 0, '12': 1, '16': 2, '32': 3};
+    final candidates = (records ?? await _collection.list(studentId))
+        .where((record) =>
+            record.availability == ScheduleAvailability.available &&
+            record.courseCount > 0)
+        .toList()
+      ..sort((a, b) {
+        final year = (int.tryParse(b.yearCode) ?? 0)
+            .compareTo(int.tryParse(a.yearCode) ?? 0);
+        return year != 0
+            ? year
+            : (termOrder[b.termCode] ?? -1)
+                .compareTo(termOrder[a.termCode] ?? -1);
+      });
+    if (candidates.isEmpty) return;
+    final newest = candidates.first;
+    await _checkAccount(studentId, generation);
+    await _collection.setPrimaryKey(studentId, newest.key, onlyIfAbsent: true);
+    if (await _collection.primaryKey(studentId) == newest.key) {
+      await _mirrorPrimary(newest);
+    }
   }
 
   void pauseDiscovery() {
@@ -366,37 +415,42 @@ extension AcademicScheduleCollection on AcademicScheduleRepository {
   }) async {
     if (!supportsTermDiscovery) return;
     final generation = _discoveryGeneration;
-    final studentId = await AcademicAccountStore(
-      preferencesLoader: _preferencesLoader,
-    ).loadStudentId();
+    if (await _account.loadSystem() != campusSystem) return;
+    final studentId = await _account.loadStudentId(system: campusSystem);
     if (studentId == null) {
       discoveryState.value = const ScheduleDiscoveryState(
           requiresLogin: true, message: '请先登录校园账户再查找课表');
       return;
     }
     if (generation != _discoveryGeneration) return;
-    if (!force) {
-      final last = DateTime.tryParse(
-          await _collection.metadata(studentId, 'discoveryAttempt') ?? '');
-      final completed = DateTime.tryParse(
-          await _collection.metadata(studentId, 'discoveryCompleted') ?? '');
-      if (last != null && now.difference(last) < const Duration(minutes: 5)) {
-        return;
-      }
-      if (completed != null &&
-          (last == null || !completed.isBefore(last)) &&
-          now.difference(completed) < const Duration(hours: 24)) {
-        return;
-      }
-    }
-    await _collection.setMetadata(
-        studentId, 'discoveryAttempt', now.toIso8601String());
-    discoveryState.value =
-        const ScheduleDiscoveryState(running: true, message: '正在读取学年和学期选项…');
     var checked = 0;
     var total = 0;
     var failures = 0;
     try {
+      if (!force) {
+        final last = DateTime.tryParse(
+            await _collection.metadata(studentId, 'discoveryAttempt') ?? '');
+        final completed = DateTime.tryParse(
+            await _collection.metadata(studentId, 'discoveryCompleted') ?? '');
+        if (completed != null &&
+            (last == null || !completed.isBefore(last)) &&
+            now.difference(completed) < const Duration(hours: 24)) {
+          // Older versions could complete discovery without setting a primary.
+          if (await _collection.primaryKey(studentId) == null) {
+            await loadCachedSchedule();
+            await _initializeDiscoveredPrimary(studentId, generation);
+          }
+          return;
+        }
+        if (last != null && now.difference(last) < const Duration(minutes: 5)) {
+          return;
+        }
+      }
+      await _checkAccount(studentId, generation);
+      await _collection.setMetadata(
+          studentId, 'discoveryAttempt', now.toIso8601String());
+      discoveryState.value =
+          const ScheduleDiscoveryState(running: true, message: '正在读取学年和学期选项…');
       await loadCachedSchedule(); // Migrate the old cache before discovery.
       await _checkAccount(studentId, generation);
       final catalog = await _client.fetchTermCatalog();
@@ -411,9 +465,10 @@ extension AcademicScheduleCollection on AcademicScheduleRepository {
       if (admissionYear == null && !retryFailuresOnly) {
         probedDefault = true;
         try {
-          final schedule = await _fetchTerm(catalog.currentTerm);
+          final schedule =
+              await _fetchTerm(catalog.currentTerm, studentId: studentId);
           await _checkAccount(studentId, generation);
-          await _acceptRemote(schedule, makePrimary: true);
+          await _acceptRemote(schedule);
           admissionYear = int.tryParse(schedule.term.admissionYearCode);
         } on AcademicAuthException {
           rethrow;
@@ -473,10 +528,9 @@ extension AcademicScheduleCollection on AcademicScheduleRepository {
         if (probedDefault && query.key == catalog.currentTerm.key) skip = true;
         if (!skip) {
           try {
-            final schedule = await _fetchTerm(query);
+            final schedule = await _fetchTerm(query, studentId: studentId);
             await _checkAccount(studentId, generation);
-            await _acceptRemote(schedule,
-                makePrimary: query.key == catalog.currentTerm.key);
+            await _acceptRemote(schedule);
             consecutiveFailures = 0;
           } on AcademicAuthException {
             rethrow;
@@ -490,26 +544,30 @@ extension AcademicScheduleCollection on AcademicScheduleRepository {
         checked++;
         final updated = await _collection.load(studentId, query.key);
         if (updated?.hasSavedSchedule == true) savedKeys.add(query.key);
+        if (consecutiveFailures >= 3) break;
         discoveryState.value = ScheduleDiscoveryState(
-          running: consecutiveFailures < 3,
+          running: true,
           checked: checked,
           total: total,
           saved: savedKeys.length,
           failed: failures,
-          message: consecutiveFailures >= 3 ? '连续多个学期请求失败，查找已暂停，可稍后重试' : null,
         );
-        if (consecutiveFailures >= 3) return;
       }
       await _checkAccount(studentId, generation);
+      final updatedRecords = await _collection.list(studentId);
+      await _initializeDiscoveredPrimary(studentId, generation,
+          records: updatedRecords);
       if (failures == 0) {
         await _collection.setMetadata(
             studentId, 'discoveryCompleted', now.toIso8601String());
       }
-      final saved = (await _collection.list(studentId))
-          .where((record) => record.hasSavedSchedule)
-          .length;
       discoveryState.value = ScheduleDiscoveryState(
-          checked: checked, total: total, saved: saved, failed: failures);
+        checked: checked,
+        total: total,
+        saved: updatedRecords.where((record) => record.hasSavedSchedule).length,
+        failed: failures,
+        message: consecutiveFailures >= 3 ? '连续多个学期请求失败，查找已暂停，可稍后重试' : null,
+      );
     } on AcademicAuthException {
       discoveryState.value = ScheduleDiscoveryState(
         checked: checked,

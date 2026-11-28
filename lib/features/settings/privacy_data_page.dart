@@ -1,25 +1,36 @@
 import 'package:material_ui/material_ui.dart';
+import '../../core/campus_system.dart';
 import '../../data/services/student_identity_service.dart';
 import '../../shared/navigation/shuyo_route.dart';
 import '../auth/native_login_page.dart';
 
 class PrivacyDataPage extends StatelessWidget {
-  const PrivacyDataPage({super.key, required this.identityService});
+  const PrivacyDataPage({
+    super.key,
+    required this.identityService,
+    required this.campusSystem,
+    this.isDemo = false,
+  }) : assert(isDemo || identityService != null);
 
-  final StudentIdentityService identityService;
+  final StudentIdentityService? identityService;
+  final CampusSystem campusSystem;
+  final bool isDemo;
 
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('隐私与数据')),
         body: ListView(
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 20, 20, 12),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
               child: Text(
-                'ShuYo 通过核实学号来确认你的上海大学学生身份。撤销设备认证后，服务器会保留你使用反馈、课表分享等功能产生的数据。',
+                isDemo
+                    ? '当前为演示模式，所有演示数据仅保存在本地设备，不会在 ShuYo 服务器存储个人数据。登录真实校园账户后，可在此管理并删除服务器保存的数据。'
+                    : 'ShuYo 向学校核实当前登录账号的学号。撤销设备认证后，服务器会保留你使用反馈、课表分享等功能产生的数据。',
               ),
             ),
             ListTile(
+              key: const ValueKey('privacy-delete-data'),
               title: Text(
                 '删除 ShuYo 数据',
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
@@ -29,6 +40,8 @@ class PrivacyDataPage extends StatelessWidget {
                 shuyoRoute(
                   builder: (_) => _DeleteShuYoDataPage(
                     identityService: identityService,
+                    campusSystem: campusSystem,
+                    isDemo: isDemo,
                   ),
                 ),
               ),
@@ -39,9 +52,15 @@ class PrivacyDataPage extends StatelessWidget {
 }
 
 class _DeleteShuYoDataPage extends StatefulWidget {
-  const _DeleteShuYoDataPage({required this.identityService});
+  const _DeleteShuYoDataPage({
+    required this.identityService,
+    required this.campusSystem,
+    this.isDemo = false,
+  }) : assert(isDemo || identityService != null);
 
-  final StudentIdentityService identityService;
+  final StudentIdentityService? identityService;
+  final CampusSystem campusSystem;
+  final bool isDemo;
 
   @override
   State<_DeleteShuYoDataPage> createState() => _DeleteShuYoDataPageState();
@@ -53,10 +72,13 @@ class _DeleteShuYoDataPageState extends State<_DeleteShuYoDataPage> {
   String? _message;
 
   Future<void> _verifyAndDelete() async {
+    final identityService = widget.identityService;
+    if (widget.isDemo || identityService == null) return;
     final grant = await Navigator.of(context).push<StudentDataDeletionGrant>(
       shuyoRoute(
         builder: (_) => NativeLoginPage.dataDeletion(
-          studentIdentityService: widget.identityService,
+          studentIdentityService: identityService,
+          deletionSystem: widget.campusSystem,
         ),
       ),
     );
@@ -90,7 +112,7 @@ class _DeleteShuYoDataPageState extends State<_DeleteShuYoDataPage> {
       _message = null;
     });
     try {
-      await widget.identityService.completeDataDeletion(grant);
+      await identityService.completeDataDeletion(grant);
       if (mounted) setState(() => _deleted = true);
     } on StudentIdentityException catch (error) {
       if (mounted) setState(() => _message = error.message);
@@ -115,18 +137,21 @@ class _DeleteShuYoDataPageState extends State<_DeleteShuYoDataPage> {
                 child: const Text('返回'),
               ),
             ] else ...[
-              const Text(
-                '删除后，你的设备认证将全部失效；服务器当前保存的学号认证记录、反馈、活跃记录、课表分享码将被清除。',
+              Text(
+                widget.isDemo
+                    ? '当前为演示模式，未在 ShuYo 服务器保存个人数据。登录真实校园账户后，可在此验证学校身份并清除服务器保存的学号认证记录、反馈、活跃记录、课表分享码。'
+                    : '删除后，你的设备认证将全部失效；服务器当前保存的学号认证记录、反馈、活跃记录、课表分享码将被清除。',
               ),
               const SizedBox(height: 20),
               FilledButton(
-                onPressed: _busy ? null : _verifyAndDelete,
+                key: const ValueKey('privacy-verify-deletion'),
+                onPressed: widget.isDemo || _busy ? null : _verifyAndDelete,
                 child: _busy
                     ? const SizedBox.square(
                         dimension: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('验证身份并继续'),
+                    : Text(widget.isDemo ? '演示模式无云端数据' : '验证身份并继续'),
               ),
               if (_message != null) ...[
                 const SizedBox(height: 16),

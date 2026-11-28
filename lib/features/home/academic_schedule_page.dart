@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../core/confirmation_window.dart';
 import '../../data/models/academic_schedule.dart';
 import '../../data/models/academic_schedule_collection.dart';
 import '../../data/repositories/academic_schedule_repository.dart';
@@ -17,14 +18,18 @@ import '../../data/services/academic_schedule_widget_service.dart';
 import '../../data/services/student_identity_service.dart';
 import '../../data/services/schedule_share_service.dart';
 import '../../data/services/schedule_comparison.dart';
-import '../../shared/shuyo_text_styles.dart';
+import '../../shared/layout/adaptive_layout.dart';
 import '../../shared/navigation/shuyo_route.dart';
+import '../../shared/shuyo_text_styles.dart';
 import '../../shared/theme/shuyo_theme.dart';
 import '../../shared/widgets/empty_state.dart';
 import 'academic_schedule_editor_page.dart';
 import 'academic_schedule_collection_page.dart';
 import 'schedule_share_page.dart';
 
+const _scheduleTimeColumnWidth = 68.0;
+const _scheduleDayHeaderHeight = 54.0;
+const _scheduleSectionHeight = 68.0;
 const _scheduleCellInset = 2.5;
 const _scheduleCourseInset = 2.5;
 const _scheduleCellRadius = 4.0;
@@ -32,6 +37,7 @@ const _scheduleCourseRadius = 5.0;
 const _nonCurrentWeekCourseFill = Color(0xFFBDBDBD);
 const _nonCurrentWeekCourseText = Color(0xFFFFFFFF);
 const _nonCurrentWeekCourseMetaText = Color(0xD9FFFFFF);
+const _randomizeConfirmWindow = Duration(minutes: 5);
 
 class AcademicSchedulePage extends StatefulWidget {
   const AcademicSchedulePage({
@@ -47,6 +53,7 @@ class AcademicSchedulePage extends StatefulWidget {
     this.initialLoadError,
     this.onPrimaryScheduleChanged,
     this.onViewedScheduleChanged,
+    this.isDemo = false,
   });
 
   final AcademicScheduleRepository repository;
@@ -59,6 +66,7 @@ class AcademicSchedulePage extends StatefulWidget {
   final AcademicScheduleDisplayState? initialDisplayState;
   final String? initialLoadError;
   final Future<void> Function()? onPrimaryScheduleChanged;
+  final bool isDemo;
 
   /// Reports the applied view, including local edits, after it is displayed.
   final ValueChanged<AcademicSchedule?>? onViewedScheduleChanged;
@@ -76,11 +84,19 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
   bool _refreshing = false;
   bool _followsCurrentWeek = true;
   Timer? _weekTimer;
-  final _displaySettingsService = AcademicScheduleDisplaySettingsService();
+  late final _displaySettingsService = AcademicScheduleDisplaySettingsService(
+    scope: widget.isDemo
+        ? 'demo'
+        : widget.repository.supportsTermSelection
+            ? widget.repository.campusSystem.name
+            : null,
+  );
   AcademicScheduleDisplaySettings _displaySettings =
       const AcademicScheduleDisplaySettings(
           colorful: true, showTeacher: true, showCredit: false);
   Map<String, int> _courseColorValues = const {};
+
+  final _colorsConfirmedAtByTerm = <(String, String), DateTime>{};
   late bool _usingInitialState;
   String? _initialLoadError;
   String? _viewedTermKey;
@@ -93,6 +109,14 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
   bool get _viewingPrimary =>
       _viewedTermKey == null || _viewedTermKey == _primaryTermKey;
 
+  (String, String) _termIdentity(AcademicTerm term) =>
+      (term.studentId, academicTermKey(term.yearCode, term.termCode));
+
+  bool _isViewingTerm(AcademicTerm term) {
+    final viewed = _schedule?.term;
+    return viewed != null && _termIdentity(viewed) == _termIdentity(term);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -102,9 +126,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     _initialLoadError = widget.initialLoadError;
     if (initialState != null) {
       _applyCachedState(initialState.schedule, initialState.weekState);
-      unawaited(
-        widget.widgetService.syncFromCache(),
-      );
+      _syncWidget();
     }
     final initialDisplayState = widget.initialDisplayState;
     if (initialDisplayState != null) {
@@ -113,10 +135,12 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     _loadFuture = _usingInitialState ? Future<void>.value() : _loadCached();
     widget.repository.discoveryState.addListener(_discoveryChanged);
     if (_usingInitialState) unawaited(_loadInitialCollectionMetadata());
-    _weekTimer = Timer.periodic(
-      const Duration(minutes: 1),
-      (_) => _refreshDisplayedWeekIfNeeded(),
-    );
+    if (!widget.isDemo) {
+      _weekTimer = Timer.periodic(
+        const Duration(minutes: 1),
+        (_) => _refreshDisplayedWeekIfNeeded(),
+      );
+    }
   }
 
   @override
@@ -133,7 +157,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
                 splashFactory: NoSplash.splashFactory,
                 highlightColor: Colors.transparent,
                 borderRadius: BorderRadius.circular(4),
-                onTap: widget.repository.supportsTermDiscovery
+                onTap: widget.repository.supportsScheduleManagement
                     ? _openTermPicker
                     : null,
                 child: Padding(
@@ -142,7 +166,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
                     Flexible(
                         child: Text(_schedule?.term.displayName ?? '课表',
                             maxLines: 1, overflow: TextOverflow.ellipsis)),
-                    if (widget.repository.supportsTermDiscovery)
+                    if (widget.repository.supportsScheduleManagement)
                       const Icon(Icons.arrow_drop_down, size: 20),
                   ]),
                 ),
@@ -168,17 +192,19 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: '分享与导入',
-            onPressed: _openShareHub,
-            icon: const Icon(Icons.people_outlined),
-          ),
+          if (!widget.isDemo)
+            IconButton(
+              tooltip: '分享与导入',
+              onPressed: _openShareHub,
+              icon: const Icon(Icons.people_outlined),
+            ),
           IconButton(
             tooltip: '设置开学日期',
             onPressed: _schedule == null ? null : _setFirstWeekStartDate,
             icon: const Icon(Icons.edit_calendar_outlined),
           ),
           IconButton(
+            key: const ValueKey('schedule-more-menu'),
             tooltip: '更多',
             onPressed: _openMoreMenu,
             icon: const Icon(Icons.more_horiz),
@@ -246,15 +272,30 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     final schedule = _schedule;
     final weekState = _weekState;
     if (schedule == null || weekState == null) {
+      final selectTerm = widget.repository.supportsTermSelection;
+      final sync = FilledButton.icon(
+        onPressed: _refreshSchedule,
+        icon: const Icon(Icons.refresh),
+        label: const Text('同步课表'),
+      );
       return EmptyState(
         icon: Icons.calendar_month_outlined,
         title: '还没有课表',
-        message: '登录教务后刷新一次，就可以在本地显示课表。',
-        action: FilledButton.icon(
-          onPressed: _refreshSchedule,
-          icon: const Icon(Icons.refresh),
-          label: const Text('同步课表'),
-        ),
+        message:
+            selectTerm ? '同步研究生系统的当前课表，或选择其他学期导入。' : '登录教务后刷新一次，就可以在本地显示课表。',
+        action: selectTerm
+            ? Wrap(
+                spacing: 8,
+                alignment: WrapAlignment.center,
+                children: [
+                  sync,
+                  TextButton(
+                    onPressed: _openScheduleManager,
+                    child: const Text('选择学期'),
+                  ),
+                ],
+              )
+            : sync,
       );
     }
     return _ScheduleBody(
@@ -299,10 +340,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
   }
 
   Future<void> _loadCached() async {
-    final cachedStateFuture = widget.repository.loadCachedState();
-    final displayStateFuture = _displaySettingsService.loadState();
-    final cachedState = await cachedStateFuture;
-    final displayState = await displayStateFuture;
+    final cachedState = await widget.repository.loadCachedState();
     final records = await widget.repository.loadSavedSchedules();
     final primary = await widget.repository.loadPrimaryTermKey();
     AcademicScheduleRecord? viewed;
@@ -335,6 +373,8 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
         : key == null || key == primary
             ? cachedState.weekState
             : await widget.repository.loadTermWeekState(key);
+    final displayState =
+        await _displaySettingsService.loadState(term: schedule?.term);
     if (!mounted) return;
     setState(() {
       _viewedTermKey = key;
@@ -343,7 +383,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
       _applyCachedState(schedule, weekState);
       _applyDisplayState(displayState);
     });
-    unawaited(widget.widgetService.syncFromCache());
+    _syncWidget();
   }
 
   Future<void> _loadInitialCollectionMetadata() async {
@@ -352,8 +392,12 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     final key = academicTermKey(schedule.term.yearCode, schedule.term.termCode);
     final primary = await widget.repository.loadPrimaryTermKey();
     final record = await widget.repository.loadTermRecord(key);
-    if (!mounted) return;
+    final displayState = widget.initialDisplayState == null
+        ? await _displaySettingsService.loadState(term: schedule.term)
+        : null;
+    if (!mounted || !_isViewingTerm(schedule.term)) return;
     setState(() {
+      if (displayState != null) _applyDisplayState(displayState);
       _viewedTermKey = key;
       _primaryTermKey = primary ?? key;
       _calendarConfigured = record == null || record.firstWeekStart != null;
@@ -401,8 +445,10 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
   }
 
   Future<void> _primaryChanged() async {
-    unawaited(widget.widgetService.syncFromCache());
-    await widget.notificationService.syncScheduleReminders();
+    _syncWidget();
+    if (!widget.isDemo) {
+      await widget.notificationService.syncScheduleReminders();
+    }
     await widget.onPrimaryScheduleChanged?.call();
   }
 
@@ -420,10 +466,20 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     await _loadCached();
   }
 
+  void _syncWidget() {
+    if (!widget.isDemo) unawaited(widget.widgetService.syncFromCache());
+  }
+
   Future<int> _syncReminders({bool requestPermission = false}) async {
-    if (!_viewingPrimary) return 0;
+    if (widget.isDemo || !_viewingPrimary) return 0;
     return widget.notificationService
         .syncScheduleReminders(requestPermission: requestPermission);
+  }
+
+  void _scheduleEdited() {
+    _syncWidget();
+    unawaited(_syncReminders());
+    if (widget.isDemo) unawaited(widget.onPrimaryScheduleChanged?.call());
   }
 
   void _applyDisplayState(AcademicScheduleDisplayState state) {
@@ -488,6 +544,10 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
         final weekState = targetIsPrimary
             ? await widget.repository.loadWeekState()
             : await widget.repository.loadTermWeekState(targetKey);
+        final displayState =
+            _viewedTermKey == targetKey && !_isViewingTerm(schedule.term)
+                ? await _displaySettingsService.loadState(term: schedule.term)
+                : null;
         if (!mounted) {
           return;
         }
@@ -496,6 +556,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
         if (_viewedTermKey == targetKey) {
           setState(() {
             _setViewedSchedule(schedule);
+            if (displayState != null) _applyDisplayState(displayState);
             _weekState = weekState;
             _displayedWeek = _displayableWeek(
               widget.repository.activeWeekFromState(schedule, weekState),
@@ -504,10 +565,8 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
             _followsCurrentWeek = true;
           });
         }
-        unawaited(
-          widget.widgetService.syncFromCache(),
-        );
-        final reminderCount = targetIsPrimary
+        _syncWidget();
+        final reminderCount = !widget.isDemo && targetIsPrimary
             ? await widget.notificationService.syncScheduleReminders(
                 requestPermission: true,
               )
@@ -517,17 +576,25 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
         }
         await _loadCached();
         if (targetIsPrimary) await widget.onPrimaryScheduleChanged?.call();
-        _showScheduleReminderSnack('课表已同步', reminderCount);
+        if (widget.isDemo) {
+          _showSnack('已恢复演示课表');
+        } else {
+          _showScheduleReminderSnack('课表已同步', reminderCount);
+        }
       } on AcademicNoScheduleException {
         if (!mounted) return;
         final key = targetKey;
         if (key == null) {
-          _showSnack('当前学期暂无课表，可在管理页查找其他学期');
+          _showSnack(widget.repository.supportsTermSelection
+              ? '当前学期暂无课表，可以选择其他学期导入'
+              : '当前学期暂无课表，可在管理页查找其他学期');
         } else {
           final confirmed = await showDialog<bool>(
             context: context,
             builder: (context) => AlertDialog(
-              title: const Text('教务返回空课表'),
+              title: Text(widget.repository.supportsTermSelection
+                  ? '研究生系统返回空课表'
+                  : '教务返回空课表'),
               content: Text('是否将 $targetName 替换为空课表？'),
               actions: [
                 TextButton(
@@ -558,7 +625,9 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
       }
       await _showErrorDialog(
         title: '课表刷新失败',
-        message: '教务登录恢复后仍无法同步，请稍后重试',
+        message: widget.repository.supportsTermSelection
+            ? '研究生系统登录恢复后仍无法同步，请重新登录后再试'
+            : '教务登录恢复后仍无法同步，请稍后重试',
       );
     } on Object catch (error, stackTrace) {
       if (kDebugMode) {
@@ -583,14 +652,19 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('确认更新'),
-        content: const Text('点击确定后将更新正在查看的这一学期，不会保留本地编辑。'),
+        key: const ValueKey('schedule-refresh-dialog'),
+        title: Text(widget.isDemo ? '恢复演示课表' : '确认更新'),
+        content: Text(
+          widget.isDemo ? '恢复演示课程与开学日期。' : '点击确定后将更新正在查看的这一学期，不会保留本地编辑。',
+        ),
         actions: [
           TextButton(
+            key: const ValueKey('schedule-refresh-cancel'),
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('取消'),
           ),
           FilledButton(
+            key: const ValueKey('schedule-refresh-confirm'),
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('确定'),
           ),
@@ -600,30 +674,75 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     if (confirmed == true && mounted) await _refreshSchedule();
   }
 
+  /// Confirms before overwriting the colors of the term on screen.
+  Future<bool> _confirmRandomizeColors(List<String> keys) async {
+    final overwritesManual = keys.any(_courseColorValues.containsKey);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          key: const ValueKey('schedule-random-colors-dialog'),
+          title: const Text('确认随机颜色'),
+          content: Text(
+            '点击确定后将为当前课表所有课程随机分配颜色。'
+            '${overwritesManual ? '已手动设置的颜色会被覆盖。' : ''}'
+            '${_displaySettings.colorful ? '' : '将同时打开多彩显示。'}',
+          ),
+          actions: [
+            TextButton(
+              key: const ValueKey('schedule-random-colors-cancel'),
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              key: const ValueKey('schedule-random-colors-confirm'),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('确定'),
+            ),
+          ],
+        );
+      },
+    );
+    return confirmed ?? false;
+  }
+
   Future<void> _randomizeColors() async {
     final schedule = _schedule;
     if (schedule == null || schedule.sessions.isEmpty) {
       _showSnack('暂无课程');
       return;
     }
-    final palette = context.shuyoColors.schedulePalette;
-    final random = Random();
     final keys = schedule.sessions
         .map(_courseColorSeed)
         .where((key) => key.isNotEmpty)
         .toSet()
         .toList()
       ..sort();
-    final next = <String, int>{};
+    final term = schedule.term;
+    final identity = _termIdentity(term);
+    final alreadyConfirmed = isConfirmationFresh(
+      confirmedAt: _colorsConfirmedAtByTerm[identity],
+      now: DateTime.now(),
+      window: _randomizeConfirmWindow,
+    );
+    if (!alreadyConfirmed && !await _confirmRandomizeColors(keys)) {
+      return;
+    }
+    if (!mounted || !_isViewingTerm(term)) {
+      return;
+    }
+    if (!alreadyConfirmed) _colorsConfirmedAtByTerm[identity] = DateTime.now();
+    final palette = context.shuyoColors.schedulePalette;
+    final random = Random();
+    final next = <String, int>{..._courseColorValues};
     for (final key in keys) {
-      final current =
-          _courseColorValues[key] ?? _courseColor(context, key).toARGB32();
+      final current = next[key] ?? _courseColor(context, key).toARGB32();
       final choices =
           palette.where((color) => color.toARGB32() != current).toList();
       final available = choices.isNotEmpty ? choices : palette;
       next[key] = available[random.nextInt(available.length)].toARGB32();
     }
-    await _displaySettingsService.saveCourseColors(next);
+    await _displaySettingsService.saveCourseColors(term, next);
     AcademicScheduleDisplaySettings settings = _displaySettings;
     if (!settings.colorful) {
       settings = await _displaySettingsService.saveSettings(
@@ -631,11 +750,12 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
       );
     }
     if (!mounted) return;
+    final viewingTerm = _isViewingTerm(term);
     setState(() {
-      _courseColorValues = next;
+      if (viewingTerm) _courseColorValues = next;
       _displaySettings = settings;
     });
-    _showSnack('已随机分配颜色');
+    if (viewingTerm) _showSnack('已随机分配颜色');
   }
 
   Future<bool> _recoverSession() async {
@@ -679,10 +799,12 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     final weekState = _viewedTermKey == null
         ? await widget.repository.loadWeekState()
         : await widget.repository.loadTermWeekState(_viewedTermKey!);
-    await TermCalendarStore().save(
-      '${schedule.term.yearCode}:${schedule.term.termCode}',
-      weekState.firstWeekStart,
-    );
+    if (!widget.isDemo) {
+      await TermCalendarStore().save(
+        '${schedule.term.yearCode}:${schedule.term.termCode}',
+        weekState.firstWeekStart,
+      );
+    }
     if (!mounted) {
       return;
     }
@@ -696,9 +818,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
       _followsCurrentWeek = true;
       _selectedManualSlot = null;
     });
-    unawaited(
-      widget.widgetService.syncFromCache(),
-    );
+    _syncWidget();
     await _syncReminders(
       requestPermission: true,
     );
@@ -755,31 +875,13 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     final next = schedule.copyWith(
       sessions: [...schedule.sessions, ...sessions],
     );
-    await widget.repository.saveWorkingSchedule(next);
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _setViewedSchedule(next);
-      _selectedManualSlot = null;
-    });
-    if (result.colorValue != null) {
-      final colorKey = _courseColorSeed(sessions.first);
-      await _displaySettingsService.saveCourseColor(
-        colorKey,
-        result.colorValue!,
-      );
-      if (mounted) {
-        setState(() => _courseColorValues = {
-              ..._courseColorValues,
-              colorKey: result.colorValue!,
-            });
-      }
-    }
-    unawaited(
-      widget.widgetService.syncFromCache(),
+    final color = result.colorValue;
+    await _persistSessions(
+      next,
+      color: color == null
+          ? null
+          : (key: _courseColorSeed(sessions.first), value: color),
     );
-    unawaited(_syncReminders());
   }
 
   Future<void> _handleDayHeaderTap(int weekday) async {
@@ -1031,19 +1133,29 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
         '已从${_weekdayName(sourceWeekday)}复制 ${sourceSessions.length} 门课');
   }
 
-  Future<void> _persistSessions(AcademicSchedule next) async {
+  Future<void> _persistSessions(
+    AcademicSchedule next, {
+    ({String key, int value})? color,
+  }) async {
     await widget.repository.saveWorkingSchedule(next);
-    if (!mounted) {
-      return;
+    if (color != null) {
+      await _displaySettingsService.saveCourseColor(
+        next.term,
+        color.key,
+        color.value,
+      );
     }
-    setState(() {
-      _setViewedSchedule(next);
-      _selectedManualSlot = null;
-    });
-    unawaited(
-      widget.widgetService.syncFromCache(),
-    );
-    unawaited(_syncReminders());
+    if (!mounted) return;
+    if (_isViewingTerm(next.term)) {
+      setState(() {
+        _setViewedSchedule(next);
+        _selectedManualSlot = null;
+        if (color != null) {
+          _courseColorValues = {..._courseColorValues, color.key: color.value};
+        }
+      });
+    }
+    _scheduleEdited();
   }
 
   Future<void> _handleCourseTap(CourseSession session) async {
@@ -1131,30 +1243,12 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     // color when renaming instead of generating another color from the new name.
     final nextColorValue = result.colorValue ??
         (nextColorKey != colorKey ? previousColorValue : null);
-    await widget.repository.saveWorkingSchedule(next);
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _setViewedSchedule(next);
-      _selectedManualSlot = null;
-      if (nextColorValue != null) {
-        _courseColorValues = {
-          ..._courseColorValues,
-          nextColorKey: nextColorValue,
-        };
-      }
-    });
-    if (nextColorValue != null) {
-      await _displaySettingsService.saveCourseColor(
-        nextColorKey,
-        nextColorValue,
-      );
-    }
-    unawaited(
-      widget.widgetService.syncFromCache(),
+    await _persistSessions(
+      next,
+      color: nextColorValue == null
+          ? null
+          : (key: nextColorKey, value: nextColorValue),
     );
-    unawaited(_syncReminders());
   }
 
   Future<void> _deleteCourse(
@@ -1203,19 +1297,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
     if (!changed) {
       return;
     }
-    final next = schedule.copyWith(sessions: nextSessions);
-    await widget.repository.saveWorkingSchedule(next);
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _setViewedSchedule(next);
-      _selectedManualSlot = null;
-    });
-    unawaited(
-      widget.widgetService.syncFromCache(),
-    );
-    unawaited(_syncReminders());
+    await _persistSessions(schedule.copyWith(sessions: nextSessions));
   }
 
   Future<_CourseDeleteScope?> _openDeleteScopeMenu(
@@ -1423,6 +1505,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   ListTile(
+                    key: const ValueKey('schedule-refresh-action'),
                     leading: _refreshing
                         ? const SizedBox(
                             width: 22,
@@ -1430,12 +1513,12 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
                             child: CircularProgressIndicator(strokeWidth: 3),
                           )
                         : const Icon(Icons.refresh),
-                    title: const Text('更新课表'),
+                    title: Text(widget.isDemo ? '恢复演示课表' : '更新课表'),
                     enabled: !_refreshing,
                     onTap: () => Navigator.of(context)
                         .pop(_ScheduleMenuAction.updateSchedule),
                   ),
-                  if (widget.repository.supportsTermDiscovery)
+                  if (widget.repository.supportsScheduleManagement)
                     ListTile(
                       leading: const Icon(Icons.folder_outlined),
                       title: const Text('管理课表'),
@@ -1443,18 +1526,20 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
                           .pop(_ScheduleMenuAction.manageSchedules),
                     ),
                   ListTile(
+                    key: const ValueKey('schedule-random-colors-action'),
                     leading: const Icon(Icons.shuffle_outlined),
                     title: const Text('随机颜色'),
                     enabled: _schedule?.sessions.isNotEmpty ?? false,
                     onTap: () => Navigator.of(context)
                         .pop(_ScheduleMenuAction.randomColors),
                   ),
-                  ListTile(
-                    leading: const Icon(Icons.notifications_none),
-                    title: const Text('通知设置'),
-                    onTap: () =>
-                        Navigator.of(context).pop(_ScheduleMenuAction.settings),
-                  ),
+                  if (!widget.isDemo)
+                    ListTile(
+                      leading: const Icon(Icons.notifications_none),
+                      title: const Text('通知设置'),
+                      onTap: () => Navigator.of(context)
+                          .pop(_ScheduleMenuAction.settings),
+                    ),
                   ListTile(
                     leading: const Icon(Icons.palette_outlined),
                     title: const Text('显示设置'),
@@ -1568,7 +1653,9 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
       builder: (context) => AlertDialog(
         title: const Text('课表信息说明'),
         content: Text(
-          '应用每次获取的课表信息为当时教务系统中数据，并非实时更新\n\n因此当发生课程变更、教室变更等情况，需手动进行刷新\n\n$syncText',
+          widget.isDemo
+              ? '课表使用随应用提供的演示课程。课程和开学日期的编辑仅保留在本次运行中。'
+              : '应用每次获取的课表信息为当时教务系统中数据，并非实时更新\n\n因此当发生课程变更、教室变更等情况，需手动进行刷新\n\n$syncText',
         ),
         actions: [
           TextButton(
@@ -1713,9 +1800,7 @@ class _AcademicSchedulePageState extends State<AcademicSchedulePage> {
       _displayedWeek = displayedWeek;
       _selectedManualSlot = null;
     });
-    unawaited(
-      widget.widgetService.syncFromCache(),
-    );
+    _syncWidget();
   }
 
   @override
@@ -2926,51 +3011,108 @@ class _ScheduleBody extends StatelessWidget {
     final untimed = schedule.untimedForWeek(displayedWeek);
     const weekdays = [1, 2, 3, 4, 5, 6, 7];
 
+    final expanded = usesExpandedLayout(context);
+    final textScale = expanded
+        ? max(1.0, MediaQuery.textScalerOf(context).scale(12.5) / 12.5)
+        : 1.0;
+    final expandedHeaderHeight = _scheduleDayHeaderHeight * textScale;
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        final weekdayWidth =
-            (constraints.maxWidth - _ScheduleGrid.leftWidth) / 5;
-        final gridWidth =
-            _ScheduleGrid.leftWidth + weekdays.length * weekdayWidth;
+        const wideInsets = EdgeInsets.symmetric(horizontal: 12);
+        const minDayWidth = 78.0;
+        final paddedWidth = constraints.maxWidth - wideInsets.horizontal;
+        // Check local height too: the pinned header must leave room to scroll.
+        final fullWeek = expanded &&
+            constraints.maxHeight >= expandedHeaderHeight + 120 &&
+            paddedWidth >=
+                _scheduleTimeColumnWidth + weekdays.length * minDayWidth;
+        // Keep the existing five-day viewport on compact screens. The weekend
+        // remains reachable by scrolling the dates and course rows together.
+        final dayWidth = fullWeek
+            ? (paddedWidth - _scheduleTimeColumnWidth) / weekdays.length
+            : (constraints.maxWidth - _scheduleTimeColumnWidth) / 5;
+        final gridWidth = _scheduleTimeColumnWidth + weekdays.length * dayWidth;
+        const verticalScrollKey =
+            PageStorageKey('academic-schedule-vertical-scroll');
+        final weekSwitcher = _WeekSwitcher(
+          week: displayedWeek,
+          maxWeek: schedule.maxWeek,
+          onPrevious: onPreviousWeek,
+          onNext: onNextWeek,
+          onQuickWeekSelected: onQuickWeekSelected,
+          pinnedHeaderHeight: fullWeek ? expandedHeaderHeight : 0,
+        );
+        final dayHeaders = _ScheduleDayHeaders(
+          weekdays: weekdays,
+          dayWidth: dayWidth,
+          height: fullWeek ? expandedHeaderHeight : _scheduleDayHeaderHeight,
+          fitLabels: fullWeek,
+          monday: weekState.anchorMonday.add(
+            Duration(days: (displayedWeek - weekState.currentWeek) * 7),
+          ),
+          onDayHeaderTap: onDayHeaderTap,
+        );
+        final grid = _ScheduleGrid(
+          sessions: sessions,
+          weekdays: weekdays,
+          dayWidth: dayWidth,
+          rowHeight: _scheduleSectionHeight * (fullWeek ? textScale : 1.0),
+          displayedWeek: displayedWeek,
+          displaySettings: displaySettings,
+          courseColorValues: courseColorValues,
+          selectedManualSlot: selectedManualSlot,
+          canAddCourse: canAddCourse,
+          onEmptySlotTap: onEmptySlotTap,
+          onCourseTap: onCourseTap,
+          freeSlots: freeSlots,
+          sectionCount: sectionCount ?? _gridSectionCount(schedule),
+        );
+        final footer = [
+          if (untimed.isNotEmpty) _UntimedCourseList(courses: untimed),
+          const SizedBox(height: 24),
+        ];
+        if (fullWeek) {
+          return Padding(
+            padding: wideInsets,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 460),
+                    child: weekSwitcher,
+                  ),
+                ),
+                dayHeaders,
+                Expanded(
+                  child: SingleChildScrollView(
+                    key: verticalScrollKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [grid, ...footer],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
         return SingleChildScrollView(
-          key: const PageStorageKey('academic-schedule-vertical-scroll'),
+          key: verticalScrollKey,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _WeekSwitcher(
-                week: displayedWeek,
-                maxWeek: schedule.maxWeek,
-                onPrevious: onPreviousWeek,
-                onNext: onNextWeek,
-                onQuickWeekSelected: onQuickWeekSelected,
-              ),
+              weekSwitcher,
               SingleChildScrollView(
+                key:
+                    const PageStorageKey('academic-schedule-horizontal-scroll'),
                 scrollDirection: Axis.horizontal,
                 child: SizedBox(
                   width: gridWidth,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _ScheduleGrid(
-                        sessions: sessions,
-                        weekdays: weekdays,
-                        weekState: weekState,
-                        displayedWeek: displayedWeek,
-                        displaySettings: displaySettings,
-                        courseColorValues: courseColorValues,
-                        selectedManualSlot: selectedManualSlot,
-                        canAddCourse: canAddCourse,
-                        onEmptySlotTap: onEmptySlotTap,
-                        onCourseTap: onCourseTap,
-                        onDayHeaderTap: onDayHeaderTap,
-                        freeSlots: freeSlots,
-                        sectionCount:
-                            sectionCount ?? _gridSectionCount(schedule),
-                      ),
-                      if (untimed.isNotEmpty)
-                        _UntimedCourseList(courses: untimed),
-                      const SizedBox(height: 24),
-                    ],
+                    children: [dayHeaders, grid, ...footer],
                   ),
                 ),
               ),
@@ -2982,6 +3124,49 @@ class _ScheduleBody extends StatelessWidget {
   }
 }
 
+class _ScheduleDayHeaders extends StatelessWidget {
+  const _ScheduleDayHeaders({
+    required this.weekdays,
+    required this.dayWidth,
+    required this.height,
+    required this.fitLabels,
+    required this.monday,
+    required this.onDayHeaderTap,
+  });
+
+  final List<int> weekdays;
+  final double dayWidth;
+  final double height;
+  final bool fitLabels;
+  final DateTime monday;
+  final ValueChanged<int>? onDayHeaderTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: height,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(width: _scheduleTimeColumnWidth),
+          for (final weekday in weekdays)
+            SizedBox(
+              width: dayWidth,
+              child: _DayHeader(
+                weekday: weekday,
+                date: monday.add(Duration(days: weekday - DateTime.monday)),
+                fitLabels: fitLabels,
+                onTap: onDayHeaderTap == null
+                    ? null
+                    : () => onDayHeaderTap!(weekday),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _WeekSwitcher extends StatefulWidget {
   const _WeekSwitcher({
     required this.week,
@@ -2989,6 +3174,7 @@ class _WeekSwitcher extends StatefulWidget {
     required this.onPrevious,
     required this.onNext,
     required this.onQuickWeekSelected,
+    required this.pinnedHeaderHeight,
   });
 
   final int week;
@@ -2996,6 +3182,7 @@ class _WeekSwitcher extends StatefulWidget {
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
   final ValueChanged<int> onQuickWeekSelected;
+  final double pinnedHeaderHeight;
 
   @override
   State<_WeekSwitcher> createState() => _WeekSwitcherState();
@@ -3007,7 +3194,6 @@ class _WeekSwitcherState extends State<_WeekSwitcher> {
   double _dragStartDx = 0;
   int _dragStartWeek = 1;
   double _dragWidth = 1;
-  double _scheduleAreaTop = 0;
   OverlayEntry? _previewOverlay;
 
   @override
@@ -3141,18 +3327,28 @@ class _WeekSwitcherState extends State<_WeekSwitcher> {
 
   void _showPreviewOverlay() {
     _removePreviewOverlay();
-    final renderObject = context.findRenderObject();
-    if (renderObject is RenderBox) {
-      _scheduleAreaTop =
-          renderObject.localToGlobal(Offset(0, renderObject.size.height)).dy;
+    final overlay = Overlay.of(context);
+    final switcher = context.findRenderObject();
+    final overlayBox = overlay.context.findRenderObject();
+    var top = 0.0;
+    var left = 0.0;
+    var right = 0.0;
+    if (switcher is RenderBox && overlayBox is RenderBox) {
+      final origin = switcher.localToGlobal(Offset.zero, ancestor: overlayBox);
+      top = origin.dy + switcher.size.height;
+      if (widget.pinnedHeaderHeight > 0) {
+        top += widget.pinnedHeaderHeight;
+        left = origin.dx;
+        right = overlayBox.size.width - origin.dx - switcher.size.width;
+      }
     }
     _previewOverlay = OverlayEntry(
       builder: (context) {
         final colors = context.shuyoColors;
         return Positioned(
-          top: _scheduleAreaTop,
-          left: 0,
-          right: 0,
+          top: top,
+          left: left,
+          right: right,
           bottom: 0,
           child: IgnorePointer(
             child: Center(
@@ -3180,7 +3376,7 @@ class _WeekSwitcherState extends State<_WeekSwitcher> {
         );
       },
     );
-    Overlay.of(context).insert(_previewOverlay!);
+    overlay.insert(_previewOverlay!);
   }
 
   void _removePreviewOverlay() {
@@ -3247,7 +3443,8 @@ class _ScheduleGrid extends StatelessWidget {
   const _ScheduleGrid({
     required this.sessions,
     required this.weekdays,
-    required this.weekState,
+    required this.dayWidth,
+    required this.rowHeight,
     required this.displayedWeek,
     required this.displaySettings,
     required this.courseColorValues,
@@ -3255,18 +3452,14 @@ class _ScheduleGrid extends StatelessWidget {
     required this.canAddCourse,
     required this.onEmptySlotTap,
     required this.onCourseTap,
-    required this.onDayHeaderTap,
     this.freeSlots,
     required this.sectionCount,
   });
 
-  static const leftWidth = 68.0;
-  static const _headerHeight = 54.0;
-  static const _rowHeight = 68.0;
-
   final List<CourseSession> sessions;
   final List<int> weekdays;
-  final ScheduleWeekState weekState;
+  final double dayWidth;
+  final double rowHeight;
   final int displayedWeek;
   final AcademicScheduleDisplaySettings displaySettings;
   final Map<String, int> courseColorValues;
@@ -3274,62 +3467,49 @@ class _ScheduleGrid extends StatelessWidget {
   final bool canAddCourse;
   final ValueChanged<_ScheduleSlot> onEmptySlotTap;
   final ValueChanged<CourseSession> onCourseTap;
-  final ValueChanged<int>? onDayHeaderTap;
   final Set<_ScheduleSlot>? freeSlots;
   final int sectionCount;
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final dayWidth = (constraints.maxWidth - leftWidth) / weekdays.length;
-        final height = _headerHeight + sectionCount * _rowHeight;
-        return SizedBox(
-          height: height,
-          child: Stack(
-            children: [
-              _GridBackground(
-                sessions: sessions,
-                weekdays: weekdays,
-                dayWidth: dayWidth,
-                leftWidth: leftWidth,
-                headerHeight: _headerHeight,
-                rowHeight: _rowHeight,
-                sectionCount: sectionCount,
-                weekState: weekState,
-                displayedWeek: displayedWeek,
-                selectedManualSlot: selectedManualSlot,
-                canAddCourse: canAddCourse,
-                onEmptySlotTap: onEmptySlotTap,
-                onDayHeaderTap: onDayHeaderTap,
-                freeSlots: freeSlots,
-              ),
-              for (final session in sessions)
-                if (weekdays.contains(session.weekday))
-                  Positioned(
-                    left: leftWidth +
-                        weekdays.indexOf(session.weekday) * dayWidth +
-                        _scheduleCourseInset,
-                    top: _headerHeight +
-                        (session.startSection - 1) * _rowHeight +
-                        _scheduleCourseInset,
-                    width: dayWidth - _scheduleCourseInset * 2,
-                    height: (session.endSection - session.startSection + 1) *
-                            _rowHeight -
-                        _scheduleCourseInset * 2,
-                    child: _CourseBlock(
-                      key: ValueKey('schedule-course-${session.id}'),
-                      session: session,
-                      isCurrentWeek: session.occursInWeek(displayedWeek),
-                      displaySettings: displaySettings,
-                      courseColorValues: courseColorValues,
-                      onTap: () => onCourseTap(session),
-                    ),
-                  ),
-            ],
+    return SizedBox(
+      height: sectionCount * rowHeight,
+      child: Stack(
+        children: [
+          _GridBackground(
+            sessions: sessions,
+            weekdays: weekdays,
+            dayWidth: dayWidth,
+            rowHeight: rowHeight,
+            sectionCount: sectionCount,
+            selectedManualSlot: selectedManualSlot,
+            canAddCourse: canAddCourse,
+            onEmptySlotTap: onEmptySlotTap,
+            freeSlots: freeSlots,
           ),
-        );
-      },
+          for (final session in sessions)
+            if (weekdays.contains(session.weekday))
+              Positioned(
+                left: _scheduleTimeColumnWidth +
+                    weekdays.indexOf(session.weekday) * dayWidth +
+                    _scheduleCourseInset,
+                top: (session.startSection - 1) * rowHeight +
+                    _scheduleCourseInset,
+                width: dayWidth - _scheduleCourseInset * 2,
+                height: (session.endSection - session.startSection + 1) *
+                        rowHeight -
+                    _scheduleCourseInset * 2,
+                child: _CourseBlock(
+                  key: ValueKey('schedule-course-${session.id}'),
+                  session: session,
+                  isCurrentWeek: session.occursInWeek(displayedWeek),
+                  displaySettings: displaySettings,
+                  courseColorValues: courseColorValues,
+                  onTap: () => onCourseTap(session),
+                ),
+              ),
+        ],
+      ),
     );
   }
 }
@@ -3339,68 +3519,38 @@ class _GridBackground extends StatelessWidget {
     required this.sessions,
     required this.weekdays,
     required this.dayWidth,
-    required this.leftWidth,
-    required this.headerHeight,
     required this.rowHeight,
     required this.sectionCount,
-    required this.weekState,
-    required this.displayedWeek,
     required this.selectedManualSlot,
     required this.canAddCourse,
     required this.onEmptySlotTap,
-    required this.onDayHeaderTap,
     this.freeSlots,
   });
 
   final List<CourseSession> sessions;
   final List<int> weekdays;
   final double dayWidth;
-  final double leftWidth;
-  final double headerHeight;
   final double rowHeight;
   final int sectionCount;
-  final ScheduleWeekState weekState;
-  final int displayedWeek;
   final _ScheduleSlot? selectedManualSlot;
   final bool canAddCourse;
   final ValueChanged<_ScheduleSlot> onEmptySlotTap;
-  final ValueChanged<int>? onDayHeaderTap;
   final Set<_ScheduleSlot>? freeSlots;
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        for (var index = 0; index < weekdays.length; index++)
-          Positioned(
-            left: leftWidth + index * dayWidth,
-            top: 0,
-            width: dayWidth,
-            height: headerHeight,
-            child: _DayHeader(
-              weekday: weekdays[index],
-              date: weekState.anchorMonday.add(
-                Duration(
-                  days: (displayedWeek - weekState.currentWeek) * 7 +
-                      weekdays[index] -
-                      1,
-                ),
-              ),
-              onTap: onDayHeaderTap == null
-                  ? null
-                  : () => onDayHeaderTap!(weekdays[index]),
-            ),
-          ),
         for (var section = 1; section <= sectionCount; section++)
           Positioned(
             left: 0,
             right: 0,
-            top: headerHeight + (section - 1) * rowHeight,
+            top: (section - 1) * rowHeight,
             height: rowHeight,
             child: Row(
               children: [
                 SizedBox(
-                  width: leftWidth,
+                  width: _scheduleTimeColumnWidth,
                   child: _SectionLabel(section: section),
                 ),
                 for (var index = 0; index < weekdays.length; index++)
@@ -3492,36 +3642,46 @@ class _DayHeader extends StatelessWidget {
   const _DayHeader({
     required this.weekday,
     required this.date,
+    required this.fitLabels,
     this.onTap,
   });
 
   final int weekday;
   final DateTime date;
+  final bool fitLabels;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.shuyoColors;
+    Widget fitLabel(Text label) => fitLabels
+        ? Expanded(child: FittedBox(fit: BoxFit.scaleDown, child: label))
+        : label;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            _weekdayName(weekday),
-            style: TextStyle(
-              color: colors.textPrimary,
-              fontWeight: FontWeight.w600,
-              fontSize: 12.5,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            '${date.month}/${date.day}',
-            style: TextStyle(color: colors.textMuted, fontSize: 11.5),
-          ),
-        ],
+      child: Padding(
+        padding: fitLabels
+            ? const EdgeInsets.symmetric(vertical: 8)
+            : EdgeInsets.zero,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            fitLabel(Text(
+              _weekdayName(weekday),
+              style: TextStyle(
+                color: colors.textPrimary,
+                fontWeight: FontWeight.w600,
+                fontSize: 12.5,
+              ),
+            )),
+            const SizedBox(height: 3),
+            fitLabel(Text(
+              '${date.month}/${date.day}',
+              style: TextStyle(color: colors.textMuted, fontSize: 11.5),
+            )),
+          ],
+        ),
       ),
     );
   }

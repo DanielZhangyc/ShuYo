@@ -67,6 +67,13 @@ class _CampusMapPageState extends State<CampusMapPage>
       WidgetsBinding.instance.lifecycleState == null ||
       WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
 
+  bool get _notBackgrounded {
+    final state = WidgetsBinding.instance.lifecycleState;
+    return state == null ||
+        state == AppLifecycleState.resumed ||
+        state == AppLifecycleState.inactive;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -195,7 +202,7 @@ class _CampusMapPageState extends State<CampusMapPage>
     setState(() => _locating = true);
     try {
       final position = await widget.locationService.locate();
-      if (!mounted || request != _locationRequest || !_foreground) return;
+      if (!mounted || request != _locationRequest || !_notBackgrounded) return;
       final campus = _data!.campusAt(position.coordinate);
       setState(() {
         _location = position;
@@ -219,11 +226,11 @@ class _CampusMapPageState extends State<CampusMapPage>
         _showMessage('当前定位精度较低，位置仅供参考');
       }
     } on CampusMapLocationException catch (error) {
-      if (mounted && request == _locationRequest && _foreground) {
+      if (mounted && request == _locationRequest && _notBackgrounded) {
         _showLocationError(error);
       }
     } catch (_) {
-      if (mounted && request == _locationRequest && _foreground) {
+      if (mounted && request == _locationRequest && _notBackgrounded) {
         _showMessage('定位失败，请检查定位权限后重试');
       }
     } finally {
@@ -327,6 +334,12 @@ class _CampusMapPageState extends State<CampusMapPage>
     _stopWatching();
     _searchFocus.unfocus();
     try {
+      final providers = await _navigation.availableProviders();
+      if (!mounted) return;
+      if (providers.isEmpty) {
+        _showMessage('未检测到已安装的地图应用');
+        return;
+      }
       final provider = await showModalBottomSheet<CampusMapNavigationProvider>(
         context: context,
         showDragHandle: true,
@@ -336,9 +349,7 @@ class _CampusMapPageState extends State<CampusMapPage>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('导航至 ${place.name}',
-                  style: Theme.of(context).textTheme.titleMedium),
-              for (final provider in CampusMapNavigationProvider.values)
+              for (final provider in providers)
                 ListTile(
                   leading: const Icon(Icons.directions_walk),
                   title: Text(provider.label),

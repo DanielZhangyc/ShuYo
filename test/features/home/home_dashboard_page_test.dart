@@ -6,6 +6,8 @@ import 'package:shuyo/shared/theme/custom_background.dart';
 import 'package:shuyo/shared/theme/shuyo_theme.dart';
 
 void main() {
+  final loginEntry = find.byKey(const ValueKey('home-login-entry'));
+
   TextStyle renderedTextStyle(WidgetTester tester, String text) {
     final finder = find.text(text);
     return DefaultTextStyle.of(tester.element(finder))
@@ -54,6 +56,8 @@ void main() {
     expect(todayTheme.splashFactory, NoSplash.splashFactory);
     expect(todayTheme.splashColor, Colors.transparent);
     expect(todayTheme.highlightColor, Colors.transparent);
+    final campusCardTheme = Theme.of(tester.element(find.text('校园卡')));
+    expect(campusCardTheme.splashFactory, todayTheme.splashFactory);
     expect(
         tester
             .widget<ColoredBox>(find.byKey(const ValueKey('home-background')))
@@ -120,6 +124,10 @@ void main() {
           String? displayName,
           ShuYoThemeSpec? theme,
           HomeLayout? layout,
+          VoidCallback? onLogin,
+          VoidCallback? onOpenCampusCard,
+          VoidCallback? onRefreshCampusCard,
+          bool isCampusCardRefreshing = false,
           TextScaler textScaler = TextScaler.noScaling,
           String todayCourseContent = '今日无课',
           String announcementContent = '查看公告'}) =>
@@ -136,16 +144,60 @@ void main() {
             academicSessionExpired: expired,
             academicDisplayName: loggedIn ? displayName ?? '25120000' : null,
             isAcademicLoginCompleting: syncing,
-            onLogin: () {},
+            onLogin: onLogin ?? () {},
             onOpenAcademicSystem: () {},
             onOpenAnnouncements: () {},
             onOpenEmptyClassroom: () {},
             onOpenOtp: () {},
+            onOpenCampusCard: onOpenCampusCard,
+            onRefreshCampusCard: onRefreshCampusCard,
+            isCampusCardRefreshing: isCampusCardRefreshing,
             todayCourseContent: todayCourseContent,
             announcementContent: announcementContent,
           ),
         ),
       );
+
+  testWidgets('campus card shares the row ripple but refresh stays separate',
+      (tester) async {
+    var opened = 0;
+    var refreshed = 0;
+    final title = find.text('校园卡');
+    final rowInk = find.ancestor(of: title, matching: find.byType(InkWell));
+
+    for (final refreshing in [false, true]) {
+      await tester.pumpWidget(page(
+        loggedIn: true,
+        theme: ShuYoThemes.byId(ShuYoThemes.defaultId),
+        onOpenCampusCard: () => opened++,
+        onRefreshCampusCard: () => refreshed++,
+        isCampusCardRefreshing: refreshing,
+      ));
+      final rowTheme = Theme.of(tester.element(rowInk));
+      final todayTheme = Theme.of(tester.element(find.text('今日课程')));
+      expect(rowTheme.splashFactory, todayTheme.splashFactory);
+      expect(rowTheme.splashFactory, isNot(NoSplash.splashFactory));
+
+      final refresh = find.byTooltip(refreshing ? '正在刷新校园卡余额' : '刷新校园卡余额');
+      final button = tester.widget<IconButton>(
+        find.ancestor(of: refresh, matching: find.byType(IconButton)),
+      );
+      expect(button.style?.splashFactory, NoSplash.splashFactory);
+      expect(button.style?.overlayColor?.resolve({WidgetState.pressed}),
+          Colors.transparent);
+      final hits = tester.hitTestOnBinding(tester.getCenter(refresh)).path;
+      expect(hits.map((hit) => hit.target),
+          isNot(contains(tester.renderObject(rowInk))));
+
+      await tester.tap(refresh);
+      expect(refreshed, 1);
+      expect(opened, 0);
+    }
+
+    await tester.tap(title);
+    expect(opened, 1);
+    expect(refreshed, 1);
+  });
 
   testWidgets('campus login shows student greeting and campus services',
       (tester) async {
@@ -193,10 +245,14 @@ void main() {
     expect(greetingSubtitleStyle.fontWeight, moduleSubtitleStyle.fontWeight);
   });
 
-  testWidgets('logged out home invites campus login', (tester) async {
-    await tester.pumpWidget(page(loggedIn: false));
-    expect(find.text('立即登录'), findsOneWidget);
-    expect(find.text('登录后同步个人数据'), findsOneWidget);
+  testWidgets('tapping the logged-out account starts campus login',
+      (tester) async {
+    var loginCalls = 0;
+    await tester.pumpWidget(page(loggedIn: false, onLogin: () => loginCalls++));
+
+    expect(loginCalls, 0);
+    await tester.tap(loginEntry);
+    expect(loginCalls, 1);
   });
 
   for (final themeId in [
@@ -274,7 +330,13 @@ void main() {
         ),
       ),
     ));
-    expect(find.text('立即登录'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('home-account')),
+        matching: loginEntry,
+      ),
+      findsOneWidget,
+    );
     expect(find.text('今日课程'), findsNothing);
     expect(find.text('今日概览'), findsNothing);
     expect(find.byType(Card), findsOneWidget);
@@ -343,11 +405,26 @@ void main() {
   });
 
   testWidgets(
-      'expired account invites reauthentication while retaining local data',
+      'expired account can reauthenticate without hiding the course preview',
       (tester) async {
-    await tester.pumpWidget(page(loggedIn: false, expired: true));
-    expect(find.text('重新登录'), findsOneWidget);
-    expect(find.text('登录已失效，请重新登录'), findsOneWidget);
-    expect(find.text('今日无课'), findsOneWidget);
+    const coursePreview = '高等数学 · A101';
+    var loginCalls = 0;
+    await tester.pumpWidget(page(
+      loggedIn: false,
+      expired: true,
+      onLogin: () => loginCalls++,
+      todayCourseContent: coursePreview,
+    ));
+    expect(
+      find.descendant(
+        of: loginEntry,
+        matching: find.textContaining(RegExp(r'失效|过期')),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text(coursePreview), findsOneWidget);
+
+    await tester.tap(loginEntry);
+    expect(loginCalls, 1);
   });
 }

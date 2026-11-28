@@ -5,6 +5,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/campus_system.dart';
 import '../../data/models/client_backend.dart';
 import '../../data/models/classroom.dart';
 import '../../data/services/client_settings_service.dart';
@@ -19,6 +20,7 @@ class StartupOnboardingController extends ChangeNotifier {
   bool _academicSessionExpired = false;
   VoidCallback? _onDismissAccountManager;
   Future<bool> Function()? _onAcademicLogout;
+  CampusAccountChange? _onCampusAccountChange;
   Future<bool> Function(bool enabled)? _onWebVpnChanged;
   Future<bool> Function(String? nickname)? _onNicknameChanged;
   Future<bool> Function(String campus)? _onCampusChanged;
@@ -151,9 +153,13 @@ class StartupOnboardingController extends ChangeNotifier {
 
   void setAccountLogoutHandlers({
     Future<bool> Function()? onAcademicLogout,
+    CampusAccountChange? onCampusAccountChange,
   }) {
     _onAcademicLogout = onAcademicLogout;
+    _onCampusAccountChange = onCampusAccountChange;
   }
+
+  CampusAccountChange? get onCampusAccountChange => _onCampusAccountChange;
 
   Future<bool> logoutAcademic() async =>
       await _onAcademicLogout?.call() ?? false;
@@ -179,6 +185,7 @@ class StartupOnboardingController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _onAcademicLogout = null;
+    _onCampusAccountChange = null;
     _onWebVpnChanged = null;
     _onNicknameChanged = null;
     _onCampusChanged = null;
@@ -193,6 +200,7 @@ class StartupOnboarding extends StatefulWidget {
     required this.initiallyCompleted,
     required this.initialAcademicLoggedIn,
     this.initialAcademicSessionExpired = false,
+    this.campusSystem = CampusSystem.undergraduate,
     required this.onAcademicLoginCompleted,
     this.onDemoLogin,
     this.onAcademicLogout,
@@ -206,7 +214,8 @@ class StartupOnboarding extends StatefulWidget {
   final bool initiallyCompleted;
   final bool initialAcademicLoggedIn;
   final bool initialAcademicSessionExpired;
-  final VoidCallback onAcademicLoginCompleted;
+  final CampusSystem campusSystem;
+  final ValueChanged<CampusSystem> onAcademicLoginCompleted;
   final Future<void> Function()? onDemoLogin;
   final Future<bool> Function()? onAcademicLogout;
   final StartupOnboardingController controller;
@@ -229,9 +238,12 @@ class _StartupOnboardingState extends State<StartupOnboarding>
   int _page = 0;
   late bool _visible = !widget.initiallyCompleted;
   bool _accountManagerMode = false;
+  bool _selectingCampusSystem = false;
+  bool _openingCampusLogin = false;
   bool _webVpnExpanded = false;
   bool _changingWebVpn = false;
   bool _choosingIdentity = false;
+  bool _enteringDemo = false;
   late bool _academicLoggedIn = widget.initialAcademicLoggedIn;
   late bool _academicSessionExpired = widget.initialAcademicSessionExpired;
   late bool _webVpnEnabled = widget.controller.webVpnEnabled;
@@ -241,9 +253,10 @@ class _StartupOnboardingState extends State<StartupOnboarding>
   late int _handledOpenRequest;
   Timer? _panelNoticeTimer;
   String? _panelNotice;
-  int get _loginPageIndex => widget.studentIdentityService == null ? 2 : 3;
-  bool get _onIdentityPage =>
-      widget.studentIdentityService != null && _page == 2;
+  static const _loginPageIndex = 2;
+  static const _identityPageIndex = 3;
+  bool get _onIdentityPage => _page == _identityPageIndex;
+  bool get _showSystemChoices => !_accountManagerMode || _selectingCampusSystem;
 
   @override
   void initState() {
@@ -311,6 +324,7 @@ class _StartupOnboardingState extends State<StartupOnboarding>
     setState(() {
       _visible = true;
       _accountManagerMode = true;
+      _selectingCampusSystem = false;
       _page = _loginPageIndex;
       _academicLoggedIn = widget.controller.academicLoggedIn;
       _academicSessionExpired = widget.controller.academicSessionExpired;
@@ -336,6 +350,8 @@ class _StartupOnboardingState extends State<StartupOnboarding>
       if (!mounted ||
           !_accountManagerMode ||
           !_visible ||
+          !_academicLoggedIn ||
+          _selectingCampusSystem ||
           answered ||
           service.isVerified) {
         return;
@@ -348,10 +364,10 @@ class _StartupOnboardingState extends State<StartupOnboarding>
 
   Future<void> _showIdentityChoicePage() async {
     if (!mounted || widget.studentIdentityService == null) return;
-    await _pageController.animateToPage(2,
+    await _pageController.animateToPage(_identityPageIndex,
         duration: const Duration(milliseconds: 320),
         curve: Curves.easeOutCubic);
-    if (mounted) setState(() => _page = 2);
+    if (mounted) setState(() => _page = _identityPageIndex);
   }
 
   Future<void> _chooseIdentity(bool confirmed) async {
@@ -365,14 +381,18 @@ class _StartupOnboardingState extends State<StartupOnboarding>
         await service.declineConsent();
       }
       if (!mounted) return;
+      if (confirmed && _academicLoggedIn) {
+        unawaited(service.ensureAfterCampusLogin());
+      }
+      if (!_accountManagerMode) {
+        await _complete();
+        return;
+      }
       await _pageController.animateToPage(_loginPageIndex,
           duration: const Duration(milliseconds: 320),
           curve: Curves.easeOutCubic);
       if (!mounted) return;
       setState(() => _page = _loginPageIndex);
-      if (confirmed && _accountManagerMode && _academicLoggedIn) {
-        unawaited(service.ensureAfterCampusLogin());
-      }
     } on Object {
       if (mounted) _showPanelNotice('暂时无法保存选择，请重试');
     } finally {
@@ -453,24 +473,52 @@ class _StartupOnboardingState extends State<StartupOnboarding>
     }
   }
 
-  Future<void> _openAcademicLogin() async {
-    final result = await Navigator.of(context).push<NativeLoginResult>(
-      MaterialPageRoute(
-        builder: (_) => const ShuYoRouteSurface(child: NativeLoginPage()),
-      ),
-    );
-    if (result == NativeLoginResult.demo) {
-      await _enterDemoMode();
-      return;
-    }
-    if (result != NativeLoginResult.authenticated || !mounted) return;
-    setState(() {
-      _academicLoggedIn = true;
-      _academicSessionExpired = false;
-    });
-    widget.onAcademicLoginCompleted();
-    if (!_accountManagerMode && mounted) {
-      await _complete();
+  Future<void> _openAcademicLogin(CampusSystem system) async {
+    if (_openingCampusLogin) return;
+    final signedOut = !_academicLoggedIn && !_academicSessionExpired;
+    final allowGraduateDemo =
+        widget.onDemoLogin != null && (_showSystemChoices || signedOut);
+    setState(() => _openingCampusLogin = true);
+    try {
+      final result = await Navigator.of(context).push<NativeLoginResult>(
+        MaterialPageRoute(
+          builder: (_) => ShuYoRouteSurface(
+            child: NativeLoginPage(
+              destination: system == CampusSystem.graduate
+                  ? NativeLoginDestination.graduate
+                  : NativeLoginDestination.academic,
+              onCampusAccountChange: widget.controller.onCampusAccountChange,
+              allowGraduateDemo: allowGraduateDemo,
+            ),
+          ),
+        ),
+      );
+      if (!mounted) return;
+      if (result == NativeLoginResult.demo) {
+        await _enterDemoMode();
+        return;
+      }
+      if (result != NativeLoginResult.authenticated) return;
+      setState(() {
+        _academicLoggedIn = true;
+        _academicSessionExpired = false;
+        _selectingCampusSystem = false;
+      });
+      widget.onAcademicLoginCompleted(system);
+      final service = widget.studentIdentityService;
+      if (service != null) {
+        try {
+          if (!await service.hasAnsweredConsent() && mounted) {
+            await _showIdentityChoicePage();
+            return;
+          }
+        } on Object {
+          // Campus login and first-run completion do not depend on consent.
+        }
+      }
+      if (mounted && !_accountManagerMode) await _complete();
+    } finally {
+      if (mounted) setState(() => _openingCampusLogin = false);
     }
   }
 
@@ -479,23 +527,30 @@ class _StartupOnboardingState extends State<StartupOnboarding>
         widget.onAcademicLogout ?? widget.controller.logoutAcademic;
     final confirmed = await _confirmLogout(
       title: '确认退出',
-      message: '退出后将需要重新登录，仍可查看已保存的课表和学业信息',
+      message: widget.campusSystem == CampusSystem.graduate
+          ? '退出后将需要重新登录研究生系统'
+          : '退出后将需要重新登录，仍可查看已保存的课表和学业信息',
     );
     if (!confirmed || !mounted) return;
     final loggedOut = await callback();
     if (loggedOut && mounted) {
-      _showPanelNotice('已退出上大校园账户');
+      _showPanelNotice('已退出${widget.campusSystem.label}');
     }
   }
 
   Future<void> _enterDemoMode() async {
-    if (!mounted) return;
-    setState(() {
-      _academicLoggedIn = true;
-    });
-    await widget.onDemoLogin?.call();
-    if (!mounted) return;
-    await _complete();
+    if (!mounted || _enteringDemo) return;
+    setState(() => _enteringDemo = true);
+    try {
+      await widget.onDemoLogin?.call();
+      if (_accountManagerMode && mounted) {
+        widget.controller.markAccountManagerClosed();
+      }
+    } on Object {
+      if (mounted) _showPanelNotice('无法打开演示，请重试');
+    } finally {
+      if (mounted) setState(() => _enteringDemo = false);
+    }
   }
 
   Future<bool> _confirmLogout({
@@ -540,6 +595,10 @@ class _StartupOnboardingState extends State<StartupOnboarding>
   }
 
   Future<void> _goBack() async {
+    if (_selectingCampusSystem) {
+      setState(() => _selectingCampusSystem = false);
+      return;
+    }
     if (_page <= 0) return;
     await _pageController.previousPage(
       duration: const Duration(milliseconds: 280),
@@ -678,7 +737,12 @@ class _StartupOnboardingState extends State<StartupOnboarding>
 
   Widget _panel(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final showFooter = _accountManagerMode || _page < _loginPageIndex;
+    final managingAccount = _accountManagerMode &&
+        !_selectingCampusSystem &&
+        _page == _loginPageIndex;
+    final showFooter = _onIdentityPage ||
+        _page < _loginPageIndex ||
+        (_accountManagerMode ? !_selectingCampusSystem : _academicLoggedIn);
     return Material(
       key: const ValueKey('startup-onboarding-panel'),
       color: colors.surface,
@@ -744,9 +808,9 @@ class _StartupOnboardingState extends State<StartupOnboarding>
                   children: [
                     _welcome(context),
                     _notifications(context),
+                    _login(context),
                     if (widget.studentIdentityService != null)
                       _identityChoice(context),
-                    _login(context),
                   ],
                 ),
               ),
@@ -756,28 +820,42 @@ class _StartupOnboardingState extends State<StartupOnboarding>
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(24, 8, 24, 18),
                   child: showFooter
-                      ? FilledButton(
-                          onPressed: _onIdentityPage
-                              ? (_choosingIdentity
-                                  ? null
-                                  : () => _chooseIdentity(true))
-                              : _continue,
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size.fromHeight(52),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                      ? Row(
+                          children: [
+                            if (managingAccount) ...[
+                              TextButton(
+                                onPressed: () => setState(
+                                  () => _selectingCampusSystem = true,
+                                ),
+                                child: const Text('切换登录系统'),
+                              ),
+                              const SizedBox(width: 12),
+                            ],
+                            Expanded(
+                              child: FilledButton(
+                                onPressed: _onIdentityPage
+                                    ? (_choosingIdentity
+                                        ? null
+                                        : () => _chooseIdentity(true))
+                                    : _continue,
+                                style: FilledButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(52),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                child: Text(
+                                  _onIdentityPage
+                                      ? '确认'
+                                      : managingAccount
+                                          ? '完成'
+                                          : _page == _loginPageIndex
+                                              ? '开始使用'
+                                              : '继续',
+                                ),
+                              ),
                             ),
-                          ),
-                          child: Text(
-                            _onIdentityPage
-                                ? '确认'
-                                : _accountManagerMode &&
-                                        _page == _loginPageIndex
-                                    ? '完成'
-                                    : _page == _loginPageIndex
-                                        ? '开始使用'
-                                        : '继续',
-                          ),
+                          ],
                         )
                       : const SizedBox.shrink(),
                 ),
@@ -824,13 +902,13 @@ class _StartupOnboardingState extends State<StartupOnboarding>
 
   Widget _identityChoice(BuildContext context) => _content(
         context,
-        '身份验证',
+        'ShuYo 认证',
         null,
         [
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
             child: Text(
-              '为避免身份冒用，ShuYo将验证你的校园身份，认证后可使用分享课程表、课程评价等功能。',
+              'ShuYo 服务器会临时使用你当前校园系统的会话向学校核实学号。认证后可使用问题反馈等功能。',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Theme.of(context).colorScheme.onSurface,
@@ -856,10 +934,10 @@ class _StartupOnboardingState extends State<StartupOnboarding>
             _pageHeader(
               context,
               title: '账号管理',
-              subtitle: _accountManagerMode ? null : '登录教务系统后，ShuYo将为你同步课表',
+              subtitle: _showSystemChoices ? '请选择你的身份' : null,
               subtitlePadding: const EdgeInsets.symmetric(horizontal: 18),
             ),
-            if (_accountManagerMode) ...[
+            if (!_showSystemChoices) ...[
               const SizedBox(height: 8),
               if (widget.studentIdentityService != null) ...[
                 _identityStatusUnderTitle(context),
@@ -871,31 +949,48 @@ class _StartupOnboardingState extends State<StartupOnboarding>
         ),
         headerSpacing: 22,
         bottomChildren: [
-          _accountTile(
-            context,
-            icon: Icons.school_outlined,
-            title: '上大校园账户',
-            description: '用于访问课程表等校园服务',
-            statusLabel: _academicLoggedIn
-                ? '已登录'
-                : _academicSessionExpired
-                    ? '登录已失效'
-                    : null,
-            statusColor: _academicSessionExpired
-                ? Theme.of(context).colorScheme.error
-                : null,
-            onTap: _academicLoggedIn
-                ? (widget.onAcademicLogout == null &&
-                        !widget.controller.canLogoutAcademic
+          if (_showSystemChoices)
+            for (final system in CampusSystem.values)
+              _accountTile(
+                context,
+                icon: Icons.school_outlined,
+                title: system.label,
+                description: '登录上海大学${system.label}',
+                statusLabel: _isCurrentLogin(system) ? '当前' : null,
+                onTap: _openingCampusLogin || _isCurrentLogin(system)
                     ? null
-                    : _logoutAcademic)
-                : _openAcademicLogin,
-          ),
-          if (_accountManagerMode) ...[
+                    : () => _openAcademicLogin(system),
+              )
+          else ...[
+            _accountTile(
+              context,
+              icon: Icons.school_outlined,
+              title: widget.campusSystem.label,
+              description: '登入上海大学研究生系统',
+              statusLabel: _academicLoggedIn
+                  ? '已登录'
+                  : _academicSessionExpired
+                      ? '登录已失效'
+                      : '未登录',
+              statusColor: _academicSessionExpired
+                  ? Theme.of(context).colorScheme.error
+                  : null,
+              onTap: _openingCampusLogin
+                  ? null
+                  : _academicLoggedIn
+                      ? (widget.onAcademicLogout == null &&
+                              !widget.controller.canLogoutAcademic
+                          ? null
+                          : _logoutAcademic)
+                      : () => _openAcademicLogin(widget.campusSystem),
+            ),
             _webVpnSection(context),
           ],
         ],
       );
+
+  bool _isCurrentLogin(CampusSystem system) =>
+      _accountManagerMode && _academicLoggedIn && system == widget.campusSystem;
 
   Widget _identityStatusUnderTitle(BuildContext context) {
     final service = widget.studentIdentityService!;

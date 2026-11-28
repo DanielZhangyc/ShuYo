@@ -4,10 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuyo/core/wecom_constants.dart';
+import 'package:shuyo/data/demo/demo_session.dart';
 import 'package:shuyo/data/services/academic_native_auth_service.dart';
 import 'package:shuyo/data/services/student_identity_service.dart';
 import 'package:shuyo/data/services/wecom_auth_service.dart';
 import 'package:shuyo/features/auth/native_login_page.dart';
+import 'package:shuyo/shared/widgets/wecom_icon.dart';
 
 /// 企微扫码登录 WebVPN 的产物：握手已在扫码页内完成，回调地址是落地页。
 final _webVpnLandingResult = WeComRedeemResult(
@@ -51,6 +53,37 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('使用企业微信登录'), findsOneWidget);
+    expect(find.byType(WeComIcon), findsOneWidget);
+  });
+
+  testWidgets('campus login handles the reserved demo account locally',
+      (tester) async {
+    NativeLoginResult? result;
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(builder: (context) {
+        return TextButton(
+          onPressed: () async {
+            result = await Navigator.of(context).push<NativeLoginResult>(
+              MaterialPageRoute(builder: (_) => const NativeLoginPage()),
+            );
+          },
+          child: const Text('上大校园账户'),
+        );
+      }),
+    ));
+    await tester.tap(find.text('上大校园账户'));
+    await tester.pumpAndSettle();
+    final fields = find.byType(TextFormField);
+    final submit = find.widgetWithText(FilledButton, '继续');
+    await tester.enterText(fields.first, DemoSession.username);
+    await tester.enterText(fields.last, 'wrong');
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+    expect(find.text('演示账号密码不正确'), findsOneWidget);
+    await tester.enterText(fields.last, DemoSession.password);
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+    expect(result, NativeLoginResult.demo);
   });
 
   testWidgets('WebVPN login shows the WeCom login entry button',
@@ -62,6 +95,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('使用企业微信登录'), findsOneWidget);
+    expect(find.byType(WeComIcon), findsOneWidget);
   });
 
   testWidgets('booking login names the feature being authorized',
@@ -72,6 +106,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('登录图书馆预约'), findsOneWidget);
     expect(find.text('使用企业微信登录'), findsOneWidget);
+    expect(find.byType(WeComIcon), findsOneWidget);
   });
 
   testWidgets('data deletion uses a separate school login without QR reuse',
@@ -175,7 +210,7 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: NativeLoginPage()));
     await tester.pumpAndSettle();
 
-    final title = tester.getRect(find.text('上大校园账户'));
+    final title = tester.getRect(find.text('本科生系统'));
     final body = tester.getRect(find.byType(SingleChildScrollView));
     expect(title.top, lessThan(body.center.dy - 160));
     expect(find.text('学/工号'), findsOneWidget);
@@ -198,7 +233,7 @@ void main() {
     expect(tester.widget<AnimatedOpacity>(passwordAction).opacity, 0);
 
     expect(tester.testTextInput.isVisible, isTrue);
-    await tester.tap(find.text('上大校园账户'));
+    await tester.tap(find.text('本科生系统'));
     await tester.pumpAndSettle();
     expect(tester.testTextInput.isVisible, isFalse);
     expect(tester.takeException(), isNull);
@@ -206,13 +241,9 @@ void main() {
 
   testWidgets('WeCom login shows loading on its own button and recovers',
       (tester) async {
-    final session = Completer<WeComQrSession>();
-    var starts = 0;
+    final service = _StartingWeComAuth();
     await tester.pumpWidget(MaterialApp(
-      home: NativeLoginPage(startWeComSession: () {
-        starts++;
-        return session.future;
-      }),
+      home: NativeLoginPage(weComAuthServiceFactory: () => service),
     ));
     await tester.pumpAndSettle();
 
@@ -243,13 +274,14 @@ void main() {
     await tester.tap(weComButton, warnIfMissed: false);
     await tester.tap(continueButton, warnIfMissed: false);
     await tester.pump();
-    expect(starts, 1);
+    expect(service.starts, 1);
 
-    session.completeError(const WeComAuthException('test', '登录失败'));
+    service.session.completeError(const WeComAuthException('test', '登录失败'));
     await tester.pumpAndSettle();
 
     expect(find.text('登录失败'), findsOneWidget);
     expect(find.text('使用企业微信登录'), findsOneWidget);
+    expect(find.byType(WeComIcon), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(tester.widget<FilledButton>(continueButton).onPressed, isNotNull);
     expect(tester.widget<OutlinedButton>(weComButton).onPressed, isNotNull);
@@ -384,4 +416,16 @@ void main() {
     expect(tester.widget<TextButton>(sendButton).onPressed, isNotNull);
     expect(tester.widget<FilledButton>(verifyButton).onPressed, isNotNull);
   });
+}
+
+class _StartingWeComAuth extends WeComAuthService {
+  final session = Completer<WeComQrSession>();
+  int starts = 0;
+
+  @override
+  Future<WeComQrSession> startQrSession({String? state}) {
+    starts++;
+    expect(state, isNull);
+    return session.future;
+  }
 }

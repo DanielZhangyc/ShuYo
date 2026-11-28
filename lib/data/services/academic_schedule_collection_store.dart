@@ -11,14 +11,19 @@ import '../models/academic_schedule_collection.dart';
 class AcademicScheduleCollectionStore {
   AcademicScheduleCollectionStore({
     Future<SharedPreferences> Function()? preferencesLoader,
+    this.scope,
   }) : _preferencesLoader = preferencesLoader ?? SharedPreferences.getInstance;
 
+  final String? scope;
   final Future<SharedPreferences> Function() _preferencesLoader;
   final changes = ValueNotifier<int>(0);
   Future<void>? _writes;
 
-  String _prefix(String studentId) =>
-      'academic.schedule.collection.${Uri.encodeComponent(studentId)}.';
+  String _prefix(String studentId) {
+    final namespace = scope == null ? '' : '$scope.';
+    return 'academic.schedule.${namespace}collection.${Uri.encodeComponent(studentId)}.';
+  }
+
   String _recordKey(String studentId, String termKey) =>
       '${_prefix(studentId)}term.$termKey';
 
@@ -95,9 +100,12 @@ class AcademicScheduleCollectionStore {
   Future<String?> primaryKey(String studentId) async =>
       (await _preferencesLoader()).getString('${_prefix(studentId)}primary');
 
-  Future<void> setPrimaryKey(String studentId, String key) async {
-    await (await _preferencesLoader())
-        .setString('${_prefix(studentId)}primary', key);
+  Future<void> setPrimaryKey(String studentId, String key,
+      {bool onlyIfAbsent = false}) async {
+    final prefs = await _preferencesLoader();
+    final storageKey = '${_prefix(studentId)}primary';
+    if (onlyIfAbsent && prefs.getString(storageKey) != null) return;
+    await prefs.setString(storageKey, key);
     changes.value++;
   }
 

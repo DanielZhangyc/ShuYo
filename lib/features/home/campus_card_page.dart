@@ -27,11 +27,25 @@ class CampusCardPage extends StatefulWidget {
     this.onCardUpdated,
     this.onAuthRequired,
     this.cache,
-  });
+  }) : isDemo = false;
 
+  CampusCardPage.demo({
+    super.key,
+    required CampusCardDataSource dataSource,
+    this.initialCard,
+  })  : isDemo = true,
+        serviceFactory = (() => dataSource),
+        cache = null,
+        initialQueriedAt = null,
+        fetchCardInfo = null,
+        onCardUpdated = null,
+        onAuthRequired = null,
+        onLogin = null;
+
+  final bool isDemo;
   final CampusCardCache? cache;
-  final Future<bool> Function() onLogin;
-  final CampusCardService Function()? serviceFactory;
+  final Future<bool> Function()? onLogin;
+  final CampusCardDataSource Function()? serviceFactory;
   final Future<CampusCardInfo> Function()? fetchCardInfo;
   final CampusCardInfo? initialCard;
   final DateTime? initialQueriedAt;
@@ -44,7 +58,7 @@ class CampusCardPage extends StatefulWidget {
 
 class _CampusCardPageState extends State<CampusCardPage> {
   CampusCardService? _ownedService;
-  CampusCardService get _service =>
+  CampusCardDataSource get _service =>
       widget.serviceFactory?.call() ?? (_ownedService ??= CampusCardService());
   static const _recentBillLimit = CampusCardRecentSnapshot.limit;
   bool _historyOpen = false;
@@ -57,7 +71,6 @@ class _CampusCardPageState extends State<CampusCardPage> {
   List<CampusCardBill>? _chartBills;
   List<double?>? _billBalances;
   DateTime? _billsQueriedAt;
-  DateTime? _chartQueriedAt;
   bool _receivedCardData = false;
   bool _receivedBillsData = false;
   bool _receivedChartData = false;
@@ -111,7 +124,6 @@ class _CampusCardPageState extends State<CampusCardPage> {
     if (!_receivedChartData && chart != null) {
       _chartBills = chart.bills;
       _chartEndDate = chart.endDate;
-      _chartQueriedAt = chart.queriedAt;
     }
   }
 
@@ -398,14 +410,13 @@ class _CampusCardPageState extends State<CampusCardPage> {
           _chartBills = List.unmodifiable(bills);
         }
         _chartEndDate = today;
-        _chartQueriedAt = DateTime.now();
         _receivedChartData = true;
       });
       final cache = widget.cache;
       if (cache != null) {
         unawaited(cache.rememberChart(
           CampusCardChartSnapshot(
-              bills: _chartBills!, endDate: today, queriedAt: _chartQueriedAt!),
+              bills: _chartBills!, endDate: today, queriedAt: DateTime.now()),
           revision: cacheRevision!,
         ));
       }
@@ -453,7 +464,6 @@ class _CampusCardPageState extends State<CampusCardPage> {
     _chartBills = null;
     _billBalances = null;
     _billsQueriedAt = null;
-    _chartQueriedAt = null;
     _pendingBalanceSnapshot = null;
     _loadingCard = false;
     _loadingBills = false;
@@ -465,7 +475,8 @@ class _CampusCardPageState extends State<CampusCardPage> {
   }
 
   Future<bool> _login({bool refreshAfterLogin = true}) async {
-    if (_loggingIn) return false;
+    final onLogin = widget.onLogin;
+    if (_loggingIn || onLogin == null) return false;
     if (refreshAfterLogin) {
       ++_refreshRevision;
       _supersedeRefresh();
@@ -491,7 +502,7 @@ class _CampusCardPageState extends State<CampusCardPage> {
       // Finish any expiry bookkeeping before the host starts a fresh login.
       await Future.wait(_authNotifications.values.toList());
       if (!mounted) return false;
-      loggedIn = await widget.onLogin();
+      loggedIn = await onLogin();
       if (loggedIn && mounted) {
         final studentId = await AcademicAccountStore().loadStudentId();
         if (!mounted) return false;
@@ -508,7 +519,6 @@ class _CampusCardPageState extends State<CampusCardPage> {
             _loadingChart = false;
             _billBalances = null;
             _billsQueriedAt = null;
-            _chartQueriedAt = null;
             _receivedCardData = false;
             _receivedBillsData = false;
             _receivedChartData = false;
@@ -611,7 +621,8 @@ class _CampusCardPageState extends State<CampusCardPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('校园卡信息说明'),
-        content: const Text('数据由学校信息门户提供，可能存在同步延迟。'),
+        content:
+            Text(widget.isDemo ? '余额和消费记录均为演示数据。' : '数据由学校信息门户提供，可能存在同步延迟。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
@@ -714,11 +725,6 @@ class _CampusCardPageState extends State<CampusCardPage> {
                             ? () => _login()
                             : _loadChart,
                   ),
-                  if (_chartQueriedAt != null) ...[
-                    const SizedBox(height: 4),
-                    _updatedAt(
-                        _chartQueriedAt!, 'campus-card-chart-updated-at'),
-                  ],
                   const SizedBox(height: 28),
                   Semantics(
                     header: true,
@@ -728,11 +734,6 @@ class _CampusCardPageState extends State<CampusCardPage> {
                           color: colors.textPrimary),
                     ),
                   ),
-                  if (_billsQueriedAt != null) ...[
-                    const SizedBox(height: 4),
-                    _updatedAt(
-                        _billsQueriedAt!, 'campus-card-bills-updated-at'),
-                  ],
                   if (!_loadingBills && _billsError != null) ...[
                     const SizedBox(height: 16),
                     _errorSection(_billsError!,
@@ -800,24 +801,26 @@ class _CampusCardPageState extends State<CampusCardPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(child: _balanceContent()),
-          const SizedBox(width: 16),
-          Padding(
-            padding: const EdgeInsets.only(top: 1),
-            child: FilledButton.icon(
-              key: const ValueKey('campus-card-recharge'),
-              onPressed: _openingRecharge ? null : _openRecharge,
-              style: FilledButton.styleFrom(
-                backgroundColor: colors.accent,
-                foregroundColor: colors.onAccent,
-                minimumSize: const Size(0, 40),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                textStyle: ShuYoTextStyles.label(),
+          if (!widget.isDemo) ...[
+            const SizedBox(width: 16),
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: FilledButton.icon(
+                key: const ValueKey('campus-card-recharge'),
+                onPressed: _openingRecharge ? null : _openRecharge,
+                style: FilledButton.styleFrom(
+                  backgroundColor: colors.accent,
+                  foregroundColor: colors.onAccent,
+                  minimumSize: const Size(0, 40),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  textStyle: ShuYoTextStyles.label(),
+                ),
+                icon: const Icon(Icons.open_in_new, size: 16),
+                label: const Text('充值'),
               ),
-              icon: const Icon(Icons.open_in_new, size: 16),
-              label: const Text('充值'),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -863,12 +866,6 @@ class _CampusCardPageState extends State<CampusCardPage> {
       ],
     );
   }
-
-  Widget _updatedAt(DateTime time, String key) => Text(
-        '更新时间：${_formatUpdateTime(time)}',
-        key: ValueKey(key),
-        style: ShuYoTextStyles.meta(color: context.shuyoColors.textTertiary),
-      );
 
   String _formatUpdateTime(DateTime? time) {
     if (time == null) return '—';
